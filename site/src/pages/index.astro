@@ -1,6 +1,7 @@
 ---
 import { getCollection } from 'astro:content';
 import BaseHead from '../components/BaseHead.astro';
+import Subscribe from '../components/Subscribe.astro';
 
 const posts = (await getCollection('posts')).sort(
   (a, b) => b.data.date.valueOf() - a.data.date.valueOf(),
@@ -17,6 +18,7 @@ const posts = (await getCollection('posts')).sort(
   <body>
     <h1>FourShades</h1>
     <p>Building a Game Boy emulator in C++ with AI agents, in public.</p>
+    <Subscribe />
     <ul>
       {
         posts.map((post) => (
