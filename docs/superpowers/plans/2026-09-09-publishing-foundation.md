@@ -4,7 +4,7 @@
 
 **Goal:** Stand up an owned, fast, SEO-correct content site with RSS and email capture, deployed live, ready to publish the first piece.
 
-**Architecture:** A static Astro site in `site/` inside the public `GameMode` monorepo, alongside the emulator source and the published specs/plans that serve as the project's receipts. Content lives as Markdown in a typed content collection. The build output in `dist/` is asserted against by Vitest, so "the site is correct" is a test run, not an opinion. Hosting is Cloudflare Pages; the newsletter is Kit, which owns the subscriber list independently of the site and is free to 10,000 subscribers.
+**Architecture:** A static Astro site in `site/` inside the public `FourShades` monorepo, alongside the emulator source and the published specs/plans that serve as the project's receipts. Content lives as Markdown in a typed content collection. The build output in `dist/` is asserted against by Vitest, so "the site is correct" is a test run, not an opinion. Hosting is Cloudflare Pages; the newsletter is Kit, which owns the subscriber list independently of the site and is free to 10,000 subscribers.
 
 **Tech Stack:** Astro 7, Vitest, cheerio, `@astrojs/rss`, `@astrojs/sitemap`, Cloudflare Pages, Kit. npm (not pnpm). Node 24.15.0, npm 11.12.1, git 2.54.0.
 
@@ -27,11 +27,11 @@ These need a human, but no money — every account below is free, and the domain
 
 **Tasks 1-4 need none of them.** Kit is required at **Task 5**, and Cloudflare plus the GitHub repository at **Task 6**.
 
-**Warning:** Task 5's test asserts the form's shape, not that the form ID is real. Leaving the literal `KIT_FORM_ID` in place yields a passing test and a form that silently subscribes nobody. Do not run Task 5 without the real ID.
+**Note:** The Kit form ID is `9900055`. Task 5's test asserts that exact ID appears in the form action, so a leftover placeholder fails the build rather than passing silently.
 
 - [ ] Create a free **Cloudflare** account (hosting).
-- [ ] Create a free **Kit** account (newsletter; free to 10,000 subscribers). Then create a form: **Grow → Landing Pages & Forms → New → Form → Inline**. Save it, open **Embed → HTML**, and note the numeric **form ID** in the action URL — Task 5 needs it.
-- [x] GitHub account: **DoozleB**. Create a new **public** repository named `GameMode`.
+- [x] Kit account created; inline form ID is **9900055**.
+- [x] GitHub account: **DoozleB**. Create a new **public** repository named `FourShades`.
 - [x] Domain: **doozleb.com**, already owned. Attached in Task 7; Tasks 1-6 run on a `*.pages.dev` subdomain first, so nothing is blocked.
 
 ---
@@ -76,7 +76,7 @@ Create `C:\GameMode\site\package.json`:
 
 ```json
 {
-  "name": "gamemode-site",
+  "name": "fourshades-site",
   "type": "module",
   "version": "0.1.0",
   "private": true,
@@ -107,7 +107,7 @@ The `site` value is required for RSS and sitemap absolute URLs. It is replaced w
 import { defineConfig } from 'astro/config';
 
 export default defineConfig({
-  site: 'https://gamemode.pages.dev',
+  site: 'https://fourshades.pages.dev',
 });
 ```
 
@@ -137,7 +137,7 @@ describe('homepage', () => {
   it('builds and renders the site name in an h1', () => {
     const html = readFileSync('dist/index.html', 'utf8');
     const $ = load(html);
-    expect($('h1').text()).toContain('GameMode');
+    expect($('h1').text()).toContain('FourShades');
   });
 });
 ```
@@ -159,7 +159,7 @@ Create `C:\GameMode\site\src\pages\index.astro`:
 
 ```astro
 ---
-const title = 'GameMode';
+const title = 'FourShades';
 ---
 
 <html lang="en">
@@ -380,7 +380,7 @@ export async function GET(context: APIContext) {
   );
 
   return rss({
-    title: 'GameMode',
+    title: 'FourShades',
     description:
       'Building a Game Boy emulator in C++ with AI agents, in public.',
     site: context.site!,
@@ -488,7 +488,7 @@ const canonical = new URL(canonicalPath ?? Astro.url.pathname, Astro.site);
 <meta property="og:title" content={title} />
 <meta property="og:description" content={description} />
 <meta property="og:url" content={canonical.href} />
-<link rel="alternate" type="application/rss+xml" title="GameMode" href="/rss.xml" />
+<link rel="alternate" type="application/rss+xml" title="FourShades" href="/rss.xml" />
 ```
 
 - [ ] **Step 4: Register the sitemap integration**
@@ -500,7 +500,7 @@ import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 
 export default defineConfig({
-  site: 'https://gamemode.pages.dev',
+  site: 'https://fourshades.pages.dev',
   integrations: [sitemap()],
 });
 ```
@@ -557,12 +557,12 @@ const posts = (await getCollection('posts')).sort(
 <html lang="en">
   <head>
     <BaseHead
-      title="GameMode"
+      title="FourShades"
       description="Building a Game Boy emulator in C++ with AI agents, in public."
     />
   </head>
   <body>
-    <h1>GameMode</h1>
+    <h1>FourShades</h1>
     <p>Building a Game Boy emulator in C++ with AI agents, in public.</p>
     <ul>
       {
@@ -605,7 +605,7 @@ git commit -m "feat: add SEO head component and sitemap"
 
 **Interfaces:**
 - Consumes: `BaseHead` conventions from Task 4.
-- Produces: `Subscribe.astro`, which takes no props and posts to Kit. Replace `KIT_FORM_ID` with the numeric form ID from Prerequisites before running the test. Note that Kit's email field must be named `email_address`, not `email` — a form using `email` silently fails to subscribe anyone.
+- Produces: `Subscribe.astro`, which takes no props and posts to Kit inline form `9900055`. Note that Kit's email field must be named `email_address`, not `email` — a form using `email` silently fails to subscribe anyone.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -622,6 +622,7 @@ describe('subscribe form', () => {
     const $ = load(html);
     const form = $('form[data-testid="subscribe"]');
     expect(form.attr('action')).toContain('kit.com');
+    expect(form.attr('action')).toContain('9900055');
     expect(form.attr('method')?.toLowerCase()).toBe('post');
     expect(form.find('input[type="email"]').attr('name')).toBe('email_address');
   });
@@ -644,14 +645,14 @@ Expected: FAIL — `form.attr('action')` is undefined.
 
 - [ ] **Step 3: Write `Subscribe.astro`**
 
-Create `C:\GameMode\site\src\components\Subscribe.astro`. Substitute the numeric Kit form ID for `KIT_FORM_ID`:
+Create `C:\GameMode\site\src\components\Subscribe.astro`. Use the real Kit form ID `9900055` exactly as written below:
 
 ```astro
 ---
-const action = 'https://app.kit.com/forms/KIT_FORM_ID/subscriptions';
+const action = 'https://app.kit.com/forms/9900055/subscriptions';
 ---
 
-<form data-testid="subscribe" action={action} method="post" target="_blank">
+<form data-testid="subscribe" action={action} method="post" target="_blank" rel="noopener noreferrer">
   <label for="kit-email">Get each post by email</label>
   <input id="kit-email" type="email" name="email_address" required placeholder="you@example.com" />
   <button type="submit">Subscribe</button>
@@ -712,14 +713,14 @@ git commit -m "feat: add newsletter subscribe form"
 
 **Interfaces:**
 - Consumes: the built `site/dist/` from Tasks 1-5.
-- Produces: a live URL of the form `https://gamemode.pages.dev`, used by Task 7.
+- Produces: a live URL of the form `https://fourshades.pages.dev`, used by Task 7.
 
 - [ ] **Step 1: Write the README**
 
 Create `C:\GameMode\README.md`:
 
 ```markdown
-# GameMode
+# FourShades
 
 A Game Boy emulator written in C++, built in public with AI coding agents.
 
@@ -741,13 +742,13 @@ The GitHub username is `DoozleB`:
 cd /c/GameMode
 git add README.md
 git commit -m "docs: add README"
-git remote add origin https://github.com/DoozleB/GameMode.git
+git remote add origin https://github.com/DoozleB/FourShades.git
 git push -u origin main
 ```
 
 - [ ] **Step 3: Connect Cloudflare Pages**
 
-In the Cloudflare dashboard: **Workers & Pages** → **Create** → **Pages** → **Connect to Git** → select the `GameMode` repository, then set:
+In the Cloudflare dashboard: **Workers & Pages** → **Create** → **Pages** → **Connect to Git** → select the `FourShades` repository, then set:
 
 - Framework preset: **Astro**
 - Build command: `npm run build`
@@ -761,15 +762,15 @@ Save and deploy.
 Substitute the assigned subdomain:
 
 ```bash
-curl -s https://gamemode.pages.dev/ | grep -c "GameMode"
-curl -s -o /dev/null -w "%{http_code}\n" https://gamemode.pages.dev/rss.xml
+curl -s https://fourshades.pages.dev/ | grep -c "FourShades"
+curl -s -o /dev/null -w "%{http_code}\n" https://fourshades.pages.dev/rss.xml
 ```
 
 Expected: a non-zero count on the first command, and `200` on the second.
 
 - [ ] **Step 5: Commit**
 
-No code changed in this step. If Cloudflare's assigned subdomain differs from `gamemode.pages.dev`, update `site` in `site/astro.config.mjs` to match, then:
+No code changed in this step. If Cloudflare's assigned subdomain differs from `fourshades.pages.dev`, update `site` in `site/astro.config.mjs` to match, then:
 
 ```bash
 cd /c/GameMode
