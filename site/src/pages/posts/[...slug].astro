@@ -1,6 +1,7 @@
 ---
 import { getCollection, render } from 'astro:content';
 import BaseHead from '../../components/BaseHead.astro';
+import Subscribe from '../../components/Subscribe.astro';
 
 export async function getStaticPaths() {
   const posts = await getCollection('posts');
@@ -24,5 +25,6 @@ const { Content } = await render(post);
       {post.data.date.toISOString().slice(0, 10)}
     </time>
     <Content />
+    <Subscribe />
   </body>
 </html>
