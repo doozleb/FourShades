@@ -9,7 +9,7 @@ export async function GET(context: APIContext) {
   );
 
   return rss({
-    title: 'GameMode',
+    title: 'FourShades',
     description:
       'Building a Game Boy emulator in C++ with AI agents, in public.',
     site: context.site!,
