@@ -12,7 +12,7 @@
   "dependencies": {
     "@astrojs/rss": "^4.0.19",
     "@astrojs/sitemap": "^3.7.4",
-    "astro": "^5.18.2"
+    "astro": "^7.3.2"
   },
   "devDependencies": {
     "cheerio": "^1.2.0",
