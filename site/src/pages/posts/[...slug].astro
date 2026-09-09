@@ -1,5 +1,6 @@
 ---
 import { getCollection, render } from 'astro:content';
+import BaseHead from '../../components/BaseHead.astro';
 
 export async function getStaticPaths() {
   const posts = await getCollection('posts');
@@ -15,9 +16,7 @@ const { Content } = await render(post);
 
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{post.data.title}</title>
+    <BaseHead title={post.data.title} description={post.data.description} />
   </head>
   <body>
     <h1>{post.data.title}</h1>

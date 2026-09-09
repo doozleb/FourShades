@@ -1,15 +1,30 @@
 ---
-const title = 'GameMode';
+import { getCollection } from 'astro:content';
+import BaseHead from '../components/BaseHead.astro';
+
+const posts = (await getCollection('posts')).sort(
+  (a, b) => b.data.date.valueOf() - a.data.date.valueOf(),
+);
 ---
 
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title}</title>
+    <BaseHead
+      title="GameMode"
+      description="Building a Game Boy emulator in C++ with AI agents, in public."
+    />
   </head>
   <body>
-    <h1>{title}</h1>
+    <h1>GameMode</h1>
     <p>Building a Game Boy emulator in C++ with AI agents, in public.</p>
+    <ul>
+      {
+        posts.map((post) => (
+          <li>
+            <a href={`/posts/${post.id}/`}>{post.data.title}</a>
+          </li>
+        ))
+      }
+    </ul>
   </body>
 </html>
