@@ -29,10 +29,10 @@ These need a human, but no money — every account below is free, and the domain
 
 **Note:** The Kit form ID is `9900055`. Task 5's test asserts that exact ID appears in the form action, so a leftover placeholder fails the build rather than passing silently.
 
-- [ ] Create a free **Cloudflare** account (hosting).
+- [x] Cloudflare account created; Pages project live at **https://fourshades.pages.dev**
 - [x] Kit account created; inline form ID is **9900055**.
 - [x] GitHub account: **DoozleB**. Create a new **public** repository named `FourShades`.
-- [x] Domain: **doozleb.com**, already owned. Attached in Task 7; Tasks 1-6 run on a `*.pages.dev` subdomain first, so nothing is blocked.
+- [ ] Domain: **doozleb.com** — user does NOT have access yet. Task 7 is DEFERRED and is explicitly the LAST step. Everything runs on `fourshades.pages.dev` until then.
 
 ---
 
@@ -781,7 +781,7 @@ git push
 
 ---
 
-### Task 7: Custom domain
+### Task 7: Custom domain — DEFERRED (user has no domain access yet; run this LAST)
 
 **Files:**
 - Modify: `C:\GameMode\site\astro.config.mjs` (the `site` value)
