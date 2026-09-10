@@ -2,9 +2,10 @@
 import { getCollection, render } from 'astro:content';
 import BaseHead from '../../components/BaseHead.astro';
 import Subscribe from '../../components/Subscribe.astro';
+import { publishedPosts } from '../../lib/posts';
 
 export async function getStaticPaths() {
-  const posts = await getCollection('posts');
+  const posts = publishedPosts(await getCollection('posts'));
   return posts.map((post) => ({
     params: { slug: post.id },
     props: { post },
@@ -17,9 +18,14 @@ const { Content } = await render(post);
 
 <html lang="en">
   <head>
-    <BaseHead title={post.data.title} description={post.data.description} />
+    <BaseHead
+      title={post.data.title}
+      description={post.data.description}
+      ogType="article"
+    />
   </head>
   <body>
+    <a href="/">FourShades</a>
     <h1>{post.data.title}</h1>
     <time datetime={post.data.date.toISOString()}>
       {post.data.date.toISOString().slice(0, 10)}

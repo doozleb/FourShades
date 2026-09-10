@@ -20,4 +20,16 @@ describe('seo', () => {
   it('emits a sitemap', () => {
     expect(existsSync('dist/sitemap-index.xml')).toBe(true);
   });
+
+  it('marks post pages as og:type article', () => {
+    const html = readFileSync('dist/posts/hello-scoreboard/index.html', 'utf8');
+    const $ = load(html);
+    expect($('meta[property="og:type"]').attr('content')).toBe('article');
+  });
+
+  it('links from a post back to the homepage', () => {
+    const html = readFileSync('dist/posts/hello-scoreboard/index.html', 'utf8');
+    const $ = load(html);
+    expect($('a[href="/"]').length).toBeGreaterThan(0);
+  });
 });

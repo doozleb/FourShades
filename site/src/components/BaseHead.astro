@@ -3,9 +3,10 @@ interface Props {
   title: string;
   description: string;
   canonicalPath?: string;
+  ogType?: string;
 }
 
-const { title, description, canonicalPath } = Astro.props;
+const { title, description, canonicalPath, ogType = 'website' } = Astro.props;
 const canonical = new URL(canonicalPath ?? Astro.url.pathname, Astro.site);
 ---
 
@@ -14,7 +15,7 @@ const canonical = new URL(canonicalPath ?? Astro.url.pathname, Astro.site);
 <title>{title}</title>
 <meta name="description" content={description} />
 <link rel="canonical" href={canonical.href} />
-<meta property="og:type" content="website" />
+<meta property="og:type" content={ogType} />
 <meta property="og:title" content={title} />
 <meta property="og:description" content={description} />
 <meta property="og:url" content={canonical.href} />
