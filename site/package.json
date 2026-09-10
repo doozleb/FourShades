@@ -3,11 +3,14 @@
   "type": "module",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "test": "astro build && vitest run"
+    "test": "astro check && astro build && vitest run"
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.19",
@@ -15,7 +18,9 @@
     "astro": "^7.3.2"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.10",
     "cheerio": "^1.2.0",
+    "typescript": "^6.0.3",
     "vitest": "^5.0.0"
   }
 }
