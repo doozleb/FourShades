@@ -1,6 +1,7 @@
 ---
 import { getCollection, render } from 'astro:content';
 import BaseHead from '../../components/BaseHead.astro';
+import Colophon from '../../components/Colophon.astro';
 import Subscribe from '../../components/Subscribe.astro';
 import { publishedPosts } from '../../lib/posts';
 
@@ -32,5 +33,6 @@ const { Content } = await render(post);
     </time>
     <Content />
     <Subscribe />
+    <Colophon />
   </body>
 </html>

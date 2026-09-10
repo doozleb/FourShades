@@ -21,3 +21,11 @@ npm install
 npm test    # astro build && vitest run
 npm run dev
 ```
+
+## How this is written
+
+Posts are drafted by the same AI coding agents that write the emulator, then
+edited and verified before publishing. Commits carry `Co-Authored-By` trailers,
+and the specs and plans that drove the work are in `docs/superpowers/`.
+
+See [PUBLISHING.md](PUBLISHING.md) for how posts get published.
