@@ -11,7 +11,7 @@ The test-ROM pass rate is the scoreboard. It starts at zero.
 
 - Specs: `docs/superpowers/specs/`
 - Plans: `docs/superpowers/plans/`
-- Site: `site/` — the writing lives at https://doozleb.com
+- Site: `site/` — the writing lives at https://fourshades.pages.dev
 
 ## Site
 
