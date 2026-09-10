@@ -2,10 +2,9 @@
 import { getCollection } from 'astro:content';
 import BaseHead from '../components/BaseHead.astro';
 import Subscribe from '../components/Subscribe.astro';
+import { publishedPosts } from '../lib/posts';
 
-const posts = (await getCollection('posts')).sort(
-  (a, b) => b.data.date.valueOf() - a.data.date.valueOf(),
-);
+const posts = publishedPosts(await getCollection('posts'));
 ---
 
 <html lang="en">

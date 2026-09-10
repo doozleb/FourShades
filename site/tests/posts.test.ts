@@ -10,3 +10,11 @@ describe('post page', () => {
     expect($('body').text()).toContain('test ROMs');
   });
 });
+
+describe('homepage post list', () => {
+  it('links to the post', () => {
+    const html = readFileSync('dist/index.html', 'utf8');
+    const $ = load(html);
+    expect($('ul a[href="/posts/hello-scoreboard/"]').length).toBe(1);
+  });
+});

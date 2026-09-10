@@ -1,12 +1,10 @@
 import rss from '@astrojs/rss';
 import { getCollection } from 'astro:content';
 import type { APIContext } from 'astro';
+import { publishedPosts } from '../lib/posts';
 
 export async function GET(context: APIContext) {
-  const posts = await getCollection('posts');
-  const sorted = posts.sort(
-    (a, b) => b.data.date.valueOf() - a.data.date.valueOf(),
-  );
+  const sorted = publishedPosts(await getCollection('posts'));
 
   return rss({
     title: 'FourShades',
