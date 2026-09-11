@@ -1,6 +1,6 @@
 {
   "cpu_instructions": {
-    "passing": 244,
+    "passing": 500,
     "total": 500
   },
   "test_roms": {

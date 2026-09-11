@@ -58,14 +58,3 @@ TEST_CASE("an expected pending EI is checked") {
     REQUIRE(outcome.status == sst::Status::Fail);
     CHECK(outcome.mismatch->field == "ei");
 }
-
-TEST_CASE("an unimplemented opcode is reported, not failed") {
-    // Uses the CB stub from Task 3. Once Task 13 implements every CB opcode,
-    // nothing can reach the unimplemented path, and Task 13 deletes this case.
-    const std::string cb =
-        R"([{"name":"cb 00 0000",)"
-        R"("initial":{"pc":256,"sp":65534,"a":1,"b":2,"c":3,"d":4,"e":5,"f":176,"h":6,"l":7,"ime":1,"ie":0,"ram":[[256,203],[257,0]]},)"
-        R"("final":{"pc":258,"sp":65534,"a":1,"b":4,"c":3,"d":4,"e":5,"f":0,"h":6,"l":7,"ime":1,"ram":[[256,203],[257,0]]},)"
-        R"("cycles":[[256,203,"r-m"],[257,0,"r-m"]]}])";
-    CHECK(run(cb).status == sst::Status::Unimplemented);
-}
