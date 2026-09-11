@@ -17,13 +17,13 @@ register, every byte of memory and every bus cycle. 499 of the 500 pass. The
 one that doesn't is STOP: the tests and the hardware documentation disagree
 about it, and FourShades follows the documentation. The test-ROM line counts
 the 165 original-Game-Boy tests that gbdev's Emulator Shootout runs with a
-pass condition; a test passes only on its author's own pass signal. Piece 2 turned the CPU into a
-Game Boy that runs real test ROMs headless: the memory map, MBC1, the timer,
-interrupts, serial, joypad and OAM DMA, plus a placeholder LCD-line timer. The
-groups that depend only on that machine are complete or nearly so — cpu
-instructions (11/11), cpu timing (8/8), cpu & interrupts (31/31), timer
-(13/13), serial (1/1), oam dma (5/6) and mbc1 (12/13) — and all 11 Blargg
-`cpu_instrs` pass, the independent CPU cross-check. The remaining groups wait
+pass condition; a test passes only on its author's own pass signal. Piece 2
+turned the CPU into a Game Boy that runs real test ROMs headless: the memory
+map, MBC1, the timer, interrupts, serial, joypad and OAM DMA, plus a
+placeholder LCD-line timer. The
+groups that depend only on that machine are complete or nearly so (the
+generated table below has each group's score), including Blargg's
+`cpu_instrs`, the independent CPU cross-check. The remaining groups wait
 on hardware piece 2 doesn't implement: pixel-accurate PPU timing (oam bug, ppu
 timing, screen — piece 3), the other cartridge chips (mbc2/mbc5, mbc3/rtc, the
 rest of mbc1 and oam dma — piece 4) and sound registers (boot state, sound —
@@ -139,10 +139,10 @@ project page is **[doozleb.com/projects/fourshades](https://doozleb.com/projects
 ## Repository layout
 
 ```
-src/core/                 the emulator core: CPU and bus (no window, no files)
+src/core/                 the emulator core: CPU, memory map, timer, serial, cartridge (no window, no files)
 tests/                    unit tests (doctest)
 tools/sst/                the SingleStepTests harness and pinned-data manifest
-tools/roms/                the test-ROM harness, its pinned test list and manifest
+tools/roms/               the test-ROM harness, its pinned test list and manifest
 tools/scoreboard.py       turns a test run into the scoreboard above
 third_party/              vendored doctest and nlohmann/json, hash-pinned
 docs/superpowers/specs/   the reasoning behind each piece

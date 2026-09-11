@@ -94,6 +94,22 @@ M-cycle. `RecordingBus` answers "nothing pending", which keeps every one of the
 500,000 SingleStepTests and their cycle counts unchanged. **The SST score must
 stay 499/500 through the whole of piece 2; CI already enforces that.**
 
+Implementation added a third, which is one M-cycle like the other bus calls:
+
+```cpp
+virtual std::optional<u8> haltedCycle(u16 address) = 0; // one M-cycle of a halted CPU
+```
+
+It lets a halted CPU wake and fetch its next opcode in the same M-cycle an
+interrupt becomes pending, which is what the hardware-verified HALT timing
+tests require (see `docs/known-divergences.md`, "Timing model"). If an
+interrupt is pending once the cycle's hardware has advanced, the fetch from
+`address` happens in that cycle and the opcode is returned; otherwise it's an
+idle cycle. The interrupt check inside it is still cycle-free (it goes
+through `pendingInterrupts()`, not a bus read of IE and IF), and
+`RecordingBus`, with nothing pending, logs an idle cycle — the `---` that
+SingleStepTests' HALT cycles expect.
+
 **Timing model within an M-cycle.** Each `GameBoy::read`/`write`/`idle` first
 advances the timer, serial, DMA and LCD skeleton by one M-cycle (4 T-cycles),
 then performs the access. The Mooneye timer tests arbitrate this. If they show

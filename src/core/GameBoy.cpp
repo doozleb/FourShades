@@ -39,8 +39,11 @@ void GameBoy::tickDma() {
     dmaCopying_ = dmaActive_;
     if (dmaActive_) {
         u16 from = static_cast<u16>(dmaFrom_ + dmaIndex_);
+        // Pan Docs lists DMA sources $00-$DF only. Mapping E000 and above
+        // onto C000 and above (as the echo area does) is inferred, to be
+        // confirmed by the MBC5-dependent sources-GS test in piece 4.
         if (from >= 0xE000) {
-            from = static_cast<u16>(from - 0x2000); // Pan Docs: sources above DFFF
+            from = static_cast<u16>(from - 0x2000);
         }
         dmaCurrentSource_ = from;
         oam_[static_cast<std::size_t>(dmaIndex_)] = peek(from);
