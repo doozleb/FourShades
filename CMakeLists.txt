@@ -12,6 +12,20 @@ if(MSVC)
     add_compile_options(/W4 /permissive- /Zc:__cplusplus /utf-8 /FS)
 endif()
 
+# ---------------------------------------------------------------------------
+# Emulator core. No window, no files, no test code: tools/check_core_isolation.py
+# enforces that in CI.
+# ---------------------------------------------------------------------------
+add_library(fourshades_core STATIC
+    src/core/Cpu.cpp
+    src/core/CpuLoads8.cpp
+    src/core/CpuAlu8.cpp
+    src/core/CpuWide.cpp
+    src/core/CpuControl.cpp
+    src/core/CpuCb.cpp
+)
+target_include_directories(fourshades_core PUBLIC src)
+
 enable_testing()
 
 # ---------------------------------------------------------------------------
@@ -24,3 +38,4 @@ target_include_directories(fourshades_tests PRIVATE src tools)
 # (doctest's C5285) don't bury ours.
 target_include_directories(fourshades_tests SYSTEM PRIVATE third_party)
 add_test(NAME unit COMMAND fourshades_tests)
+target_link_libraries(fourshades_tests PRIVATE fourshades_core)
