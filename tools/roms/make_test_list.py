@@ -6,10 +6,15 @@ at a pinned commit, so anyone can regenerate the list and diff it.
     python tools/roms/make_test_list.py --check  # exit 1 if tests.json differs
 
 Only the Shootout's active original-Game-Boy (DMG) tests are kept: no
-model=CGB or model=SGB. The count must come out at exactly 167.
+model=CGB or model=SGB. The count must come out at exactly 167, of which
+exactly 165 have a pass condition. The other two are screenshot tests with no
+reference image at the pin, which the Shootout's own test.py reports as
+informational (getDefaultResult() returns INFO when there is no pass image);
+they are marked "informational": true and the scoreboard doesn't count them.
 """
 
 import ast
+import http.client
 import json
 import sys
 import time
@@ -24,7 +29,11 @@ TREE = f"https://api.github.com/repos/{REPO}/git/trees/{COMMIT}?recursive=1"
 # tree is parsed too, after these, so a new DMG test anywhere is counted or
 # fails loudly.
 SUITE_ORDER = ["blargg", "mooneye", "mealybug", "acid", "ashiepaws", "cpp", "daid"]
-EXPECTED = 167
+EXPECTED = 167  # the Shootout's DMG list
+EXPECTED_SCORED = 165  # those with a pass condition
+# The screenshot tests with no reference image at the pin. Any other would be a
+# change of denominator, so it fails loudly instead of being quietly dropped.
+INFORMATIONAL = ("acid/which.gb (DMG)", "daid/rom_and_ram.gb")
 OUT = Path(__file__).resolve().parent / "tests.json"
 
 # First match wins, so the specific mooneye groups come before the catch-all.
@@ -52,10 +61,29 @@ def get(url: str) -> bytes:
         try:
             with urllib.request.urlopen(url, timeout=60) as response:
                 return response.read()
-        except OSError as error:
+        except (OSError, http.client.HTTPException) as error:
             last_error = error
             time.sleep(2 * attempt)
     raise SystemExit(f"error: {url}: {last_error}")
+
+
+def informational_for(method: str, references: list[str]) -> bool:
+    """The Shootout's test.py has no pass condition for a screenshot test with no reference image."""
+    return method == "screenshot" and not references
+
+
+def check_counts(entries: list[dict]) -> None:
+    if len(entries) != EXPECTED:
+        raise SystemExit(f"error: expected {EXPECTED} DMG tests, found {len(entries)}")
+    found = [e["name"] for e in entries if e["informational"]]
+    unexpected = [n for n in found if n not in INFORMATIONAL]
+    if unexpected:
+        raise SystemExit(f"error: screenshot test(s) with no reference image at the pin: {unexpected}")
+    if len(found) != len(INFORMATIONAL):
+        raise SystemExit(f"error: expected {len(INFORMATIONAL)} informational tests, found {len(found)}: {found}")
+    scored = len(entries) - len(found)
+    if scored != EXPECTED_SCORED:
+        raise SystemExit(f"error: expected {EXPECTED_SCORED} scored DMG tests, found {scored}")
 
 
 def group_for(rom: str) -> str:
@@ -137,17 +165,19 @@ def build(*, announce: bool = False) -> str:
         for t in parse_suite(suite, get(f"{RAW}testroms/{suite}.py").decode("utf-8")):
             if t["rom"] not in exists:
                 raise SystemExit(f"error: {t['rom']} is not in the Shootout at {COMMIT}")
+            method = method_for(suite, t["rom"])
+            references = [r for r in t["refs"] if r in exists]
             entries.append({
                 "name": t["name"],
                 "rom": t["rom"],
                 "group": group_for(t["rom"]),
-                "method": method_for(suite, t["rom"]),
+                "method": method,
+                "informational": informational_for(method, references),
                 "runtime": t["runtime"],
                 "limit_seconds": max(2 * t["runtime"], t["runtime"] + 5),
-                "references": [r for r in t["refs"] if r in exists],
+                "references": references,
             })
-    if len(entries) != EXPECTED:
-        raise SystemExit(f"error: expected {EXPECTED} DMG tests, found {len(entries)}")
+    check_counts(entries)
     return json.dumps({"shootout_commit": COMMIT, "tests": entries}, indent=1) + "\n"
 
 

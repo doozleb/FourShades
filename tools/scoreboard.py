@@ -19,7 +19,10 @@ START, END = "<!-- scoreboard:start -->", "<!-- scoreboard:end -->"
 GROUPS_START, GROUPS_END = "<!-- groups:start -->", "<!-- groups:end -->"
 BAR = 16
 CPU_FILES = 500
-ROM_TESTS = 167  # the Shootout's DMG tests; see docs/superpowers/specs/2026-09-11-machine-test-roms-design.md
+# The Shootout's 167 DMG tests, less the 2 it treats as informational (no pass
+# condition); see docs/superpowers/specs/2026-09-11-machine-test-roms-design.md
+ROM_TESTS = 165
+INFORMATIONAL_TESTS = 2
 
 
 def load_sst(path):
@@ -39,16 +42,26 @@ def load_roms(path):
     if results.get("partial"):
         raise SystemExit("error: partial test-ROM results (--only was used); run all tests")
     tests = results.get("tests", [])
-    if results.get("total") != ROM_TESTS or len(tests) != ROM_TESTS:
-        raise SystemExit(f"error: expected test-ROM results for {ROM_TESTS} tests")
-    if sum(1 for t in tests if t["status"] == "pass") != results.get("passing"):
+    scored = [t for t in tests if t["status"] != "informational"]
+    informational = [t for t in tests if t["status"] == "informational"]
+    if results.get("total") != ROM_TESTS or len(scored) != ROM_TESTS:
+        raise SystemExit(f"error: expected test-ROM results for {ROM_TESTS} scored tests")
+    if len(informational) != INFORMATIONAL_TESTS:
+        raise SystemExit(f"error: expected {INFORMATIONAL_TESTS} informational tests, found {len(informational)}")
+    if sum(1 for t in scored if t["status"] == "pass") != results.get("passing"):
         raise SystemExit("error: test-ROM results are inconsistent")
     return results
+
+
+def informational_of(rom):
+    return [t["name"] for t in rom["tests"] if t["status"] == "informational"]
 
 
 def groups_of(rom):
     order, groups = [], {}
     for t in rom["tests"]:
+        if t["status"] == "informational":
+            continue
         g = groups.get(t["group"])
         if g is None:
             g = groups[t["group"]] = {"group": t["group"], "passing": 0, "total": 0, "first_failure": None}
@@ -64,7 +77,8 @@ def groups_of(rom):
 def scoreboard(sst, rom):
     return {
         "cpu_instructions": {"passing": sst["passing_files"], "total": CPU_FILES},
-        "test_roms": {"passing": rom["passing"], "total": ROM_TESTS, "groups": groups_of(rom)},
+        "test_roms": {"passing": rom["passing"], "total": ROM_TESTS, "groups": groups_of(rom),
+                      "informational": informational_of(rom)},
         "source": {"sst_suite": sst["suite"], "sst_commit": sst["commit"],
                    "rom_suite": rom["suite"], "shootout_commit": rom["shootout_commit"]},
     }
@@ -87,7 +101,9 @@ def groups_block(board):
         failure = g["first_failure"]
         cell = "" if failure is None else f"`{failure['test']}`: {failure['reason']}".replace("|", "/")
         rows.append(f"| {g['group']} | {g['passing']} / {g['total']} | {cell} |")
-    rows.append(GROUPS_END)
+    names = ", ".join(f"`{name}`" for name in board["test_roms"]["informational"])
+    # The blank line ends the table; without it GitHub renders the note as a row.
+    rows += ["", f"Not counted (informational in the Shootout, no pass condition): {names}.", GROUPS_END]
     return "\n".join(rows)
 
 

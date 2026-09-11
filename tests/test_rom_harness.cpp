@@ -42,18 +42,38 @@ std::vector<u8> fibonacciProgram(u8 last) {
 }
 } // namespace
 
+namespace {
+const std::string kOneTest =
+    R"({"shootout_commit":"abc","tests":[{"name":"t","rom":"mooneye/t.gb","group":"timer",)"
+    R"("method":"mooneye","informational":false,"runtime":1.5,"limit_seconds":6.5,"references":["a/t.png"]}]})";
+
+std::string replaced(std::string text, const std::string& from, const std::string& to) {
+    const auto at = text.find(from);
+    REQUIRE(at != std::string::npos);
+    return text.replace(at, from.size(), to);
+}
+} // namespace
+
 TEST_CASE("parseTestList reads entries and rejects unknown methods") {
-    const std::string ok = R"({"shootout_commit":"abc","tests":[{"name":"t","rom":"a/t.gb","group":"timer",)"
-                           R"("method":"mooneye","runtime":1.5,"limit_seconds":6.5,"references":["a/t.png"]}]})";
-    const roms::TestList list = roms::parseTestList(ok);
+    const roms::TestList list = roms::parseTestList(kOneTest);
     CHECK(list.shootoutCommit == "abc");
     REQUIRE(list.tests.size() == 1);
     CHECK(list.tests[0].method == roms::Method::Mooneye);
     CHECK(list.tests[0].limitSeconds == 6.5);
     CHECK(list.tests[0].references.size() == 1);
-    std::string bad = ok;
-    bad.replace(bad.find("mooneye"), 7, "guess");
-    CHECK_THROWS_AS(roms::parseTestList(bad), std::runtime_error);
+    CHECK_FALSE(list.tests[0].informational);
+    CHECK_THROWS_AS(roms::parseTestList(replaced(kOneTest, "\"mooneye\",", "\"guess\",")), std::runtime_error);
+}
+
+TEST_CASE("parseTestList requires a boolean 'informational' on every entry") {
+    const std::string informational = replaced(
+        replaced(replaced(kOneTest, "\"informational\":false", "\"informational\":true"),
+                 "\"method\":\"mooneye\"", "\"method\":\"screenshot\""),
+        "mooneye/t.gb", "daid/t.gb");
+    CHECK(roms::parseTestList(informational).tests[0].informational);
+    CHECK_THROWS_AS(roms::parseTestList(replaced(kOneTest, "\"informational\":false,", "")), std::runtime_error);
+    CHECK_THROWS_AS(roms::parseTestList(replaced(kOneTest, "\"informational\":false", "\"informational\":0")),
+                    std::runtime_error);
 }
 
 TEST_CASE("serial text: Failed beats Passed, and neither means still running") {
