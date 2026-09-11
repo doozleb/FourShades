@@ -190,9 +190,12 @@ bool Cpu::executeMisc(u8 opcode) {
         // held, no speed switch requested (always the case on a DMG) and no
         // interrupt pending, "STOP is a 2-byte opcode, STOP mode is entered".
         // Pan Docs is silent on whether the second byte is read with a bus
-        // cycle, so the test's observed no-read bus pattern is kept. The
-        // button, interrupt and DIV-reset cases need the joypad, interrupts
-        // and timer (piece 2). See docs/known-divergences.md.
+        // cycle, so the test's observed no-read bus pattern is kept. Still
+        // missing: STOP never wakes (there is no joypad input yet, and a
+        // button press is the way out); STOP doesn't reset DIV (to come with
+        // the planned centralisation of the system counter's edge handling,
+        // before piece 5); and the interrupt-pending branch, where STOP is a
+        // 1-byte opcode, isn't implemented. See docs/known-divergences.md.
         regs.pc = static_cast<u16>(regs.pc + 1);
         state_ = State::Stopped;
         return true;
