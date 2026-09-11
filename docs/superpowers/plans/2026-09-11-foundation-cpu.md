@@ -1820,7 +1820,7 @@ git commit -m "feat: pin SingleStepTests by commit and SHA-256 manifest" -m "Co-
 **Files:**
 - Create: `tools/sst/SstLoader.h`, `tools/sst/SstLoader.cpp`, `tools/sst/SstCompare.h`, `tools/sst/SstCompare.cpp`, `tools/sst/SstRun.h`, `tools/sst/SstRun.cpp`
 - Modify: `tools/sst/CMakeLists.txt`
-- Test: `tests/test_sst_loader.cpp`, `tests/test_sst_run.cpp`
+- Test: `tests/sst_fixtures.h`, `tests/test_sst_loader.cpp`, `tests/test_sst_run.cpp`
 
 **Interfaces:**
 - Consumes: `Cpu` (Task 3), `RecordingBus`/`Cycle` (Task 2).
@@ -1830,31 +1830,49 @@ git commit -m "feat: pin SingleStepTests by commit and SHA-256 manifest" -m "Co-
 
 - [ ] **Step 1: Write the failing tests**
 
+`tests/sst_fixtures.h` (shared by both test files below; a header, so the `tests/*.cpp` glob doesn't compile it on its own):
+
+```cpp
+#pragma once
+
+#include <doctest/doctest.h>
+
+#include <string>
+#include <string_view>
+
+namespace sst_fixtures {
+
+// One real-format test: NOP at 0x0100.
+inline const std::string kNop =
+    R"([{"name":"00 0000",)"
+    R"("initial":{"pc":256,"sp":65534,"a":1,"b":2,"c":3,"d":4,"e":5,"f":176,"h":6,"l":7,"ime":1,"ie":0,"ram":[[256,0]]},)"
+    R"("final":{"pc":257,"sp":65534,"a":1,"b":2,"c":3,"d":4,"e":5,"f":176,"h":6,"l":7,"ime":1,"ram":[[256,0]]},)"
+    R"("cycles":[[256,0,"r-m"]]}])";
+
+// `text` with the first occurrence of `from` replaced by `to`. Each test
+// breaks the expected result in exactly one place this way.
+inline std::string with(std::string text, std::string_view from, std::string_view to) {
+    const std::size_t at = text.find(from);
+    REQUIRE(at != std::string::npos);
+    return text.replace(at, from.size(), to);
+}
+
+} // namespace sst_fixtures
+```
+
 `tests/test_sst_loader.cpp`:
 
 ```cpp
 #include <doctest/doctest.h>
 
 #include "sst/SstLoader.h"
+#include "sst_fixtures.h"
 
 #include <stdexcept>
 #include <string>
-#include <string_view>
 
-namespace {
-// One real-format test: NOP at 0x0100.
-const std::string kNop =
-    R"([{"name":"00 0000",)"
-    R"("initial":{"pc":256,"sp":65534,"a":1,"b":2,"c":3,"d":4,"e":5,"f":176,"h":6,"l":7,"ime":1,"ie":0,"ram":[[256,0]]},)"
-    R"("final":{"pc":257,"sp":65534,"a":1,"b":2,"c":3,"d":4,"e":5,"f":176,"h":6,"l":7,"ime":1,"ram":[[256,0]]},)"
-    R"("cycles":[[256,0,"r-m"]]}])";
-
-std::string with(std::string text, std::string_view from, std::string_view to) {
-    const std::size_t at = text.find(from);
-    REQUIRE(at != std::string::npos);
-    return text.replace(at, from.size(), to);
-}
-} // namespace
+using sst_fixtures::kNop;
+using sst_fixtures::with;
 
 TEST_CASE("parseTests reads every field of a test") {
     const auto tests = sst::parseTests(kNop);
@@ -1898,23 +1916,14 @@ TEST_CASE("parseTests rejects anything it doesn't understand") {
 #include "sst/RecordingBus.h"
 #include "sst/SstLoader.h"
 #include "sst/SstRun.h"
+#include "sst_fixtures.h"
 
 #include <string>
-#include <string_view>
+
+using sst_fixtures::kNop;
+using sst_fixtures::with;
 
 namespace {
-const std::string kNop =
-    R"([{"name":"00 0000",)"
-    R"("initial":{"pc":256,"sp":65534,"a":1,"b":2,"c":3,"d":4,"e":5,"f":176,"h":6,"l":7,"ime":1,"ie":0,"ram":[[256,0]]},)"
-    R"("final":{"pc":257,"sp":65534,"a":1,"b":2,"c":3,"d":4,"e":5,"f":176,"h":6,"l":7,"ime":1,"ram":[[256,0]]},)"
-    R"("cycles":[[256,0,"r-m"]]}])";
-
-std::string with(std::string text, std::string_view from, std::string_view to) {
-    const std::size_t at = text.find(from);
-    REQUIRE(at != std::string::npos);
-    return text.replace(at, from.size(), to);
-}
-
 sst::TestOutcome run(const std::string& json) {
     sst::RecordingBus bus;
     return sst::runTest(sst::parseTests(json).at(0), bus);
@@ -2379,7 +2388,7 @@ Expected: `100% tests passed`.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add tools/sst/CMakeLists.txt tools/sst/SstLoader.h tools/sst/SstLoader.cpp tools/sst/SstCompare.h tools/sst/SstCompare.cpp tools/sst/SstRun.h tools/sst/SstRun.cpp tests/test_sst_loader.cpp tests/test_sst_run.cpp
+git add tools/sst/CMakeLists.txt tools/sst/SstLoader.h tools/sst/SstLoader.cpp tools/sst/SstCompare.h tools/sst/SstCompare.cpp tools/sst/SstRun.h tools/sst/SstRun.cpp tests/sst_fixtures.h tests/test_sst_loader.cpp tests/test_sst_run.cpp
 git commit -m "feat: strict test loader, comparator and single-test runner, with tests of the tester" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
