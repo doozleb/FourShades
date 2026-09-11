@@ -20,6 +20,12 @@ std::string lastLine(const std::string& text) {
 
 } // namespace
 
+std::string blarggFailureReason(const std::string& text) {
+    const std::string line = lastLine(text).substr(0, 200);
+    if (line.rfind("Failed", 0) == 0) return line;
+    return "Failed: " + line;
+}
+
 RomOutcome runRomTest(const RomTest& test, std::vector<u8> romImage) {
     RomOutcome out;
     if (test.method == Method::Screenshot) {
@@ -83,7 +89,7 @@ RomOutcome runRomTest(const RomTest& test, std::vector<u8> romImage) {
             }
             if (v != Verdict::Running) {
                 out.status = v;
-                out.reason = v == Verdict::Pass ? "Passed" : "Failed: " + lastLine(text).substr(0, 200);
+                out.reason = v == Verdict::Pass ? "Passed" : blarggFailureReason(text);
                 if (fromMemory) {
                     memoryEvidence = true;
                     memoryText = text;

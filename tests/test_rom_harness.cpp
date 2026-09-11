@@ -201,6 +201,16 @@ TEST_CASE("screenshot tests fail with the reason, without running") {
     CHECK(outcome.emulatedSeconds == 0.0);
 }
 
+TEST_CASE("blarggFailureReason doesn't repeat 'Failed' when Blargg's own last line already starts with it") {
+    CHECK(roms::blarggFailureReason("cpu_instrs\n\n01:ok\n\nFailed #3\n") == "Failed #3");
+    CHECK(roms::blarggFailureReason("02-interrupts\n\nFailed\n") == "Failed");
+}
+
+TEST_CASE("blarggFailureReason still prefixes 'Failed: ' when the last line doesn't say so itself") {
+    CHECK(roms::blarggFailureReason("some test\n\nsee above\n") == "Failed: see above");
+    CHECK(roms::blarggFailureReason("") == "Failed: ");
+}
+
 TEST_CASE("an unsupported cartridge fails with the loader's message") {
     auto rom = romWith({0x00});
     rom[0x0147] = 0x19; // MBC5
