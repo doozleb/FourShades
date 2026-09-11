@@ -1681,36 +1681,72 @@ Expected: `100% tests passed`.
 Download the SingleStepTests SM83 suite at the pinned commit and check every
 file against the committed manifest.
 
-    python tools/sst/fetch_sst.py                    # fetch, or re-verify what's there
+    python tools/sst/fetch_sst.py                    # fetch what's missing or wrong, then verify
     python tools/sst/fetch_sst.py --write-manifest   # one-off: record the hashes
 
-The data is gitignored. 167 MB of JSON doesn't belong in the repo, and pinning
+The data is gitignored: 167 MB of JSON doesn't belong in the repo, and pinning
 the commit plus hashing every file gives everyone byte-identical tests.
+
+Files come one at a time from raw.githubusercontent.com at the pinned commit,
+each retried on its own, because one 32 MB archive download keeps failing
+part-way on flaky connections. Reruns only fetch what is missing or wrong.
+--write-manifest also checks every file against the git blob hash GitHub lists
+for the commit, so the manifest is provably the commit's content.
 """
 
 import hashlib
 import http.client
-import io
-import shutil
+import json
 import sys
-import tarfile
 import time
+import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+REPO = "SingleStepTests/sm83"
 COMMIT = "f9c30210245dd691661db39f5ace022c465ecc2f"
-URL = f"https://codeload.github.com/SingleStepTests/sm83/tar.gz/{COMMIT}"
+RAW = f"https://raw.githubusercontent.com/{REPO}/{COMMIT}/"
+TREE = f"https://api.github.com/repos/{REPO}/git/trees/{COMMIT}?recursive=1"
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
 MANIFEST = HERE / "manifest.sha256"
 EXPECTED_FILES = 500
+ATTEMPTS = 6
+WORKERS = 8
 
 
-def local_hashes() -> dict[str, str]:
-    folder = DATA / "v1"
-    if not folder.exists():
-        return {}
-    return {f"v1/{p.name}": hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.glob("*.json"))}
+def get(url: str) -> bytes:
+    last_error = None
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                return response.read()
+        except (OSError, http.client.HTTPException) as error:
+            last_error = error
+            time.sleep(2 * attempt)
+    raise SystemExit(f"error: {url}: failed after {ATTEMPTS} attempts: {last_error}")
+
+
+def git_blob_sha1(content: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(content) + content).hexdigest()
+
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def download(names: list[str]) -> None:
+    """Fetch each "v1/<name>.json" into DATA, several at a time."""
+    def one(name: str) -> None:
+        target = DATA / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(get(RAW + urllib.parse.quote(name)))
+
+    with ThreadPoolExecutor(WORKERS) as pool:
+        for done, _ in enumerate(pool.map(one, names), 1):
+            if done % 50 == 0 or done == len(names):
+                print(f"  downloaded {done}/{len(names)}")
 
 
 def read_manifest() -> dict[str, str]:
@@ -1724,67 +1760,67 @@ def read_manifest() -> dict[str, str]:
     return entries
 
 
-def download() -> bytes:
-    last_error = None
-    for attempt in range(1, 6):
-        try:
-            print(f"downloading {URL} (attempt {attempt}/5)")
-            with urllib.request.urlopen(URL, timeout=300) as response:
-                return response.read()
-        except (OSError, http.client.HTTPException) as error:
-            last_error = error
-            time.sleep(5 * attempt)
-    raise SystemExit(f"error: download failed after 5 attempts: {last_error}")
+def write_manifest() -> int:
+    tree = json.loads(get(TREE))
+    if tree.get("truncated"):
+        raise SystemExit("error: GitHub truncated the file listing")
+    blobs = {e["path"]: e["sha"] for e in tree["tree"]
+             if e["type"] == "blob" and e["path"].startswith("v1/") and e["path"].endswith(".json")}
+    if len(blobs) != EXPECTED_FILES:
+        raise SystemExit(f"error: expected {EXPECTED_FILES} test files at {COMMIT}, GitHub lists {len(blobs)}")
 
+    def matches(name: str) -> bool:
+        path = DATA / name
+        return path.exists() and git_blob_sha1(path.read_bytes()) == blobs[name]
 
-def extract(archive: bytes) -> int:
-    target = DATA / "v1"
-    if target.exists():
-        shutil.rmtree(target)
-    target.mkdir(parents=True)
-    count = 0
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
-        for member in tar.getmembers():
-            parts = member.name.split("/")
-            if member.isfile() and len(parts) == 3 and parts[1] == "v1" and parts[2].endswith(".json"):
-                (target / parts[2]).write_bytes(tar.extractfile(member).read())
-                count += 1
-    return count
-
-
-def main() -> int:
-    if "--write-manifest" in sys.argv[1:]:
-        if len(local_hashes()) != EXPECTED_FILES:
-            extract(download())
-        hashes = local_hashes()
-        if len(hashes) != EXPECTED_FILES:
-            raise SystemExit(f"error: expected {EXPECTED_FILES} files, found {len(hashes)}")
-        text = "".join(f"{digest}  {name}\n" for name, digest in sorted(hashes.items()))
-        MANIFEST.write_text(text, encoding="utf-8", newline="\n")
-        print(f"wrote {MANIFEST} ({len(hashes)} files)")
-        return 0
-
-    expected = read_manifest()
-    if local_hashes() == expected:
-        print(f"test data present and verified ({len(expected)} files)")
-        return 0
-    count = extract(download())
-    actual = local_hashes()
-    if actual != expected:
-        missing = sorted(set(expected) - set(actual))
-        extra = sorted(set(actual) - set(expected))
-        changed = sorted(n for n in set(expected) & set(actual) if expected[n] != actual[n])
-        print(f"error: downloaded data does not match the manifest "
-              f"(missing {len(missing)}, extra {len(extra)}, changed {len(changed)})")
-        for name in (missing + extra + changed)[:20]:
+    missing = [name for name in sorted(blobs) if not matches(name)]
+    if missing:
+        print(f"downloading {len(missing)} files from {RAW}")
+        download(missing)
+    wrong = [name for name in sorted(blobs) if not matches(name)]
+    if wrong:
+        print(f"error: {len(wrong)} files don't match GitHub's git blob hash for {COMMIT}")
+        for name in wrong[:20]:
             print(f"  {name}")
         return 1
-    print(f"downloaded and verified {count} files")
+    text = "".join(f"{sha256_file(DATA / name)}  {name}\n" for name in sorted(blobs))
+    MANIFEST.write_text(text, encoding="utf-8", newline="\n")
+    print(f"wrote {MANIFEST} ({len(blobs)} files, each matching GitHub's git blob hash)")
+    return 0
+
+
+def fetch() -> int:
+    expected = read_manifest()
+    if len(expected) != EXPECTED_FILES:
+        raise SystemExit(f"error: manifest lists {len(expected)} files, expected {EXPECTED_FILES}")
+    folder = DATA / "v1"
+    if folder.exists():
+        for path in folder.glob("*.json"):
+            if f"v1/{path.name}" not in expected:
+                path.unlink()  # not part of the pinned suite
+
+    def stale(name: str) -> bool:
+        path = DATA / name
+        return not path.exists() or sha256_file(path) != expected[name]
+
+    todo = [name for name in sorted(expected) if stale(name)]
+    if not todo:
+        print(f"test data present and verified ({len(expected)} files)")
+        return 0
+    print(f"downloading {len(todo)} files from {RAW}")
+    download(todo)
+    bad = [name for name in todo if stale(name)]
+    if bad:
+        print(f"error: {len(bad)} downloaded files don't match the manifest")
+        for name in bad[:20]:
+            print(f"  {name}")
+        return 1
+    print(f"downloaded {len(todo)} files; all {len(expected)} verified")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(write_manifest() if "--write-manifest" in sys.argv[1:] else fetch())
 ```
 
 Keep the manifest LF on every checkout. Append this line to `.gitattributes`:
@@ -1803,12 +1839,12 @@ Select-String -Path tools/sst/manifest.sha256 -Pattern "  v1/cb 00.json$" | Sele
 ```
 
 Expected:
-- `wrote ...manifest.sha256 (500 files)`
+- `wrote ...manifest.sha256 (500 files, each matching GitHub's git blob hash)`
 - then `test data present and verified (500 files)`
 - then `500`
 - then one line ending in `  v1/cb 00.json`
 
-If the download fails five times, rerun it. The network here drops connections.
+If a file still fails after its six attempts, just rerun the same command: files that already arrived and match are kept, so each rerun only fetches what's left.
 
 - [ ] **Step 7: Commit**
 
@@ -2612,7 +2648,7 @@ Add-Content -Path "tools/sst/data/v1/00.json" -Value " "
 python tools/sst/fetch_sst.py
 ```
 
-Expected: `data check: v1/00.json: hash does not match the manifest`, then `refusing to run…`, then `exit code: 2`. The fetch then re-downloads and prints `downloaded and verified 500 files`.
+Expected: `data check: v1/00.json: hash does not match the manifest`, then `refusing to run…`, then `exit code: 2`. The fetch then re-downloads just that file and prints `downloaded 1 files; all 500 verified`.
 
 - [ ] **Step 4: Commit**
 
