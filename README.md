@@ -10,15 +10,26 @@ test roms         ████████░░░░░░░░    85 / 167
 ```
 <!-- scoreboard:end -->
 
-**Status: the CPU is done (piece 1 of 6).** The CPU line counts SM83
+**Status: the machine is done (piece 2 of 6).** The CPU line counts SM83
 instructions passing every one of their 1,000
 [SingleStepTests](https://github.com/SingleStepTests/sm83), which check every
 register, every byte of memory and every bus cycle. 499 of the 500 pass. The
 one that doesn't is STOP: the tests and the hardware documentation disagree
-about it, and FourShades follows the documentation. The details are in
-[docs/known-divergences.md](docs/known-divergences.md). The test-ROM line
-counts the 167 original-Game-Boy tests that gbdev's Emulator Shootout runs; a
-test passes only on its author's own pass signal.
+about it, and FourShades follows the documentation. The test-ROM line counts
+the 167 original-Game-Boy tests that gbdev's Emulator Shootout runs; a test
+passes only on its author's own pass signal. Piece 2 turned the CPU into a
+Game Boy that runs real test ROMs headless: the memory map, MBC1, the timer,
+interrupts, serial, joypad and OAM DMA, plus a placeholder LCD-line timer. The
+groups that depend only on that machine are complete or nearly so — cpu
+instructions (11/11), cpu timing (8/8), cpu & interrupts (31/31), timer
+(13/13), serial (1/1), oam dma (5/6) and mbc1 (12/13) — and all 11 Blargg
+`cpu_instrs` pass, the independent CPU cross-check. The remaining groups wait
+on hardware piece 2 doesn't implement: pixel-accurate PPU timing (oam bug, ppu
+timing, screen — piece 3), the other cartridge chips (mbc2/mbc5, mbc3/rtc, the
+rest of mbc1 and oam dma — piece 4) and sound registers (boot state, sound —
+piece 5). Every divergence between a test and the hardware documentation,
+including the rule for resolving them, is in
+[docs/known-divergences.md](docs/known-divergences.md).
 
 The test-ROM line, group by group, with the first test each group fails:
 
