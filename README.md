@@ -6,7 +6,7 @@ and measured, honestly, against the public test ROMs.
 <!-- scoreboard:start -->
 ```
 cpu instructions  ███████████████░   499 / 500
-test roms         ░░░░░░░░░░░░░░░░     0 / 1300
+test roms         ░░░░░░░░░░░░░░░░     0 / 167
 ```
 <!-- scoreboard:end -->
 
@@ -17,7 +17,12 @@ register, every byte of memory and every bus cycle. 499 of the 500 pass. The
 one that doesn't is STOP: the tests and the hardware documentation disagree
 about it, and FourShades follows the documentation. The details are in
 [docs/known-divergences.md](docs/known-divergences.md). The test-ROM line
-starts moving in piece 2. Both lines are generated from a real test run, and
+starts moving in piece 2.
+
+**Correction (11 September 2026):** the test-ROM line used to read 0 / 1300.
+That total was an estimate from early planning that I never checked. The real
+list is the 167 original-Game-Boy tests that gbdev's Emulator Shootout runs
+(143 from its suites plus 24 Mealybug, at Shootout commit `38b926b`). Both lines are generated from a real test run, and
 CI fails any commit whose scoreboard doesn't match what the code actually
 scores.
 
@@ -50,8 +55,10 @@ Because it is a **solved problem**, and that is the point.
 There are hundreds of Game Boy emulators and several are far better than this
 one will be. Nobody needs another. What the Game Boy provides is a *yardstick*:
 
-- **The answers already exist.** Roughly 1,300 public test ROMs define exactly
-  what correct behaviour is. There is no arguing with a failing test.
+- **The answers already exist.** The 167 original-Game-Boy test ROMs in gbdev's
+  [Emulator Shootout](https://gbdev.io/GBEmulatorShootout/) define exactly what
+  correct behaviour is, and other emulators' results against them are public.
+  There is no arguing with a failing test.
 - **The difficulty is respected.** Cycle-accurate timing, PPU behaviour and
   interrupt edge cases are genuinely hard, and C++ developers know it.
 - **The result is a number.** The pass count is not an opinion, a vibe, or a

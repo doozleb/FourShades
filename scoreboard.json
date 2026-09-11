@@ -5,7 +5,7 @@
   },
   "test_roms": {
     "passing": 0,
-    "total": 1300
+    "total": 167
   },
   "source": {
     "suite": "SingleStepTests/sm83",
