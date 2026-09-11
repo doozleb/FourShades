@@ -59,6 +59,9 @@ int main(int argc, char** argv) {
         if (list.tests.size() != kExpectedTests) {
             throw std::runtime_error("tests.json lists " + std::to_string(list.tests.size()) + " tests, expected 167");
         }
+        if (list.shootoutCommit != "38b926bdbc26993d1b4c43e97979ecc66287bf02") {
+            throw std::runtime_error("tests.json is not pinned to the Shootout commit the scoreboard claims");
+        }
 
         // Every file the list names must match the committed manifest exactly.
         std::set<std::string> named;
@@ -128,6 +131,7 @@ int main(int argc, char** argv) {
         if (options.out.has_parent_path()) std::filesystem::create_directories(options.out.parent_path());
         std::ofstream out(options.out);
         out << doc.dump(1) << '\n';
+        out.close();
         if (!out.good()) {
             std::cerr << "error: could not write " << options.out.string() << '\n';
             return 2;

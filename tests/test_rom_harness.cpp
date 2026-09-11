@@ -63,27 +63,68 @@ TEST_CASE("serial text: Failed beats Passed, and neither means still running") {
     CHECK(roms::serialVerdict("still running") == roms::Verdict::Running);
 }
 
-TEST_CASE("Blargg's memory protocol needs the signature, then reads the status") {
+TEST_CASE("Blargg's memory protocol needs the signature AND a prior 'running' status before trusting a final read") {
     std::map<u16, u8> mem;
     const auto peek = [&](u16 a) { return mem.count(a) ? mem[a] : static_cast<u8>(0xFF); };
     std::string text;
-    CHECK(roms::blarggMemoryVerdict(peek, &text) == roms::Verdict::Running); // no signature
+    bool sawRunning = false;
+    CHECK(roms::blarggMemoryVerdict(peek, sawRunning, &text) == roms::Verdict::Running); // no signature
+    CHECK_FALSE(sawRunning);
+
     mem[0xA001] = 0xDE;
     mem[0xA002] = 0xB0;
     mem[0xA003] = 0x61;
-    mem[0xA000] = 0x80;
-    CHECK(roms::blarggMemoryVerdict(peek, &text) == roms::Verdict::Running); // still running
+    // Cartridge RAM starts zeroed: signature just landed and A000 already
+    // reads 0x00, which looks exactly like a pass. Must not be trusted yet.
+    mem[0xA000] = 0x00;
+    CHECK(roms::blarggMemoryVerdict(peek, sawRunning, &text) == roms::Verdict::Running);
+    CHECK_FALSE(sawRunning);
+
+    mem[0xA000] = 0x80; // now genuinely running
+    CHECK(roms::blarggMemoryVerdict(peek, sawRunning, &text) == roms::Verdict::Running);
+    CHECK(sawRunning);
+
     mem[0xA000] = 0x00;
     mem[0xA004] = 'o';
     mem[0xA005] = 'k';
     mem[0xA006] = 0x00;
-    CHECK(roms::blarggMemoryVerdict(peek, &text) == roms::Verdict::Pass);
+    CHECK(roms::blarggMemoryVerdict(peek, sawRunning, &text) == roms::Verdict::Pass);
     CHECK(text == "ok");
-    mem[0xA000] = 0x01;
-    CHECK(roms::blarggMemoryVerdict(peek, &text) == roms::Verdict::Fail);
 }
 
-TEST_CASE("Mooneye verdict fires only on LD B,B with all six registers") {
+TEST_CASE("Blargg's memory protocol reports Fail once running has genuinely been seen") {
+    std::map<u16, u8> mem;
+    const auto peek = [&](u16 a) { return mem.count(a) ? mem[a] : static_cast<u8>(0xFF); };
+    std::string text;
+    bool sawRunning = false;
+    mem[0xA001] = 0xDE;
+    mem[0xA002] = 0xB0;
+    mem[0xA003] = 0x61;
+    mem[0xA000] = 0x80;
+    CHECK(roms::blarggMemoryVerdict(peek, sawRunning, &text) == roms::Verdict::Running);
+    CHECK(sawRunning);
+    mem[0xA000] = 0x01;
+    CHECK(roms::blarggMemoryVerdict(peek, sawRunning, &text) == roms::Verdict::Fail);
+}
+
+TEST_CASE("Blargg's memory protocol text is NUL-bounded, capped at 0xBFFF, and sanitized") {
+    std::map<u16, u8> mem;
+    const auto peek = [&](u16 a) { return mem.count(a) ? mem[a] : static_cast<u8>(0xFF); };
+    std::string text;
+    bool sawRunning = true; // already past "running" for this check
+    mem[0xA001] = 0xDE;
+    mem[0xA002] = 0xB0;
+    mem[0xA003] = 0x61;
+    mem[0xA000] = 0x00;
+    mem[0xA004] = 0x01; // non-printable control byte: must come through as '?'
+    mem[0xA005] = 'k';
+    mem[0xA006] = 0x00; // NUL terminates the scan
+    mem[0xA007] = 'X';  // must never appear: scan stopped at the NUL above
+    CHECK(roms::blarggMemoryVerdict(peek, sawRunning, &text) == roms::Verdict::Pass);
+    CHECK(text == "?k");
+}
+
+TEST_CASE("Mooneye register verdict fires only on LD B,B with all six registers") {
     Registers r;
     r.b = 3; r.c = 5; r.d = 8; r.e = 13; r.h = 21; r.l = 34;
     CHECK(roms::mooneyeVerdict(r, 0x40) == roms::Verdict::Pass);
@@ -92,6 +133,13 @@ TEST_CASE("Mooneye verdict fires only on LD B,B with all six registers") {
     CHECK(roms::mooneyeVerdict(r, 0x40) == roms::Verdict::Running);
     r.b = r.c = r.d = r.e = r.h = r.l = 0x42;
     CHECK(roms::mooneyeVerdict(r, 0x40) == roms::Verdict::Fail);
+}
+
+TEST_CASE("mooneyeSerialVerdict reads the Fibonacci pass/fail byte sequences over serial") {
+    CHECK(roms::mooneyeSerialVerdict({}) == roms::Verdict::Running);
+    CHECK(roms::mooneyeSerialVerdict({1, 2, 3, 5, 8}) == roms::Verdict::Running); // partial sequence
+    CHECK(roms::mooneyeSerialVerdict({0x01, 0x02, 3, 5, 8, 13, 21, 34}) == roms::Verdict::Pass);
+    CHECK(roms::mooneyeSerialVerdict({0x42, 0x42, 0x42, 0x42, 0x42, 0x42}) == roms::Verdict::Fail);
 }
 
 TEST_CASE("runRomTest passes a program that signals Mooneye success") {
@@ -105,6 +153,45 @@ TEST_CASE("runRomTest turns a near-miss into a timeout failure") {
     CHECK(outcome.status == roms::Verdict::Fail);
     CHECK(outcome.reason.rfind("timeout", 0) == 0);
     CHECK(outcome.emulatedSeconds >= 0.05);
+}
+
+namespace {
+// LD A,b; LDH (SB),A; LD A,0x81; LDH (SC),A -- one internal-clock serial send.
+std::vector<u8> serialSend(u8 b) {
+    return {0x3E, b, 0xE0, 0x01, 0x3E, 0x81, 0xE0, 0x02};
+}
+
+// Sends `bytes` over serial one at a time, then executes LD B,B with every
+// register left at 0 (neither the pass nor the fail register pattern), then
+// loops forever. Models a Mooneye build that only signals over serial.
+std::vector<u8> serialOnlyProgram(std::initializer_list<u8> bytes) {
+    std::vector<u8> program;
+    for (const u8 b : bytes) {
+        const auto send = serialSend(b);
+        program.insert(program.end(), send.begin(), send.end());
+    }
+    const std::vector<u8> zeroRegsAndHalt = {
+        0x06, 0, 0x0E, 0, 0x16, 0, 0x1E, 0, 0x26, 0, 0x2E, 0, // LD B/C/D/E/H/L, 0
+        0x40,                                                  // LD B,B
+        0x18, 0xFE,                                            // JR -2
+    };
+    program.insert(program.end(), zeroRegsAndHalt.begin(), zeroRegsAndHalt.end());
+    return program;
+}
+} // namespace
+
+TEST_CASE("runRomTest catches a Mooneye pass signaled only over serial, registers never set") {
+    const auto outcome = roms::runRomTest(testOf(roms::Method::Mooneye),
+                                           romWith(serialOnlyProgram({3, 5, 8, 13, 21, 34})));
+    CHECK(outcome.status == roms::Verdict::Pass);
+    CHECK(outcome.reason == "Fibonacci bytes over serial");
+}
+
+TEST_CASE("runRomTest catches a Mooneye failure signaled only over serial, registers never set to 0x42") {
+    const auto outcome = roms::runRomTest(
+        testOf(roms::Method::Mooneye), romWith(serialOnlyProgram({0x42, 0x42, 0x42, 0x42, 0x42, 0x42})));
+    CHECK(outcome.status == roms::Verdict::Fail);
+    CHECK(outcome.reason == "failure bytes (0x42) over serial");
 }
 
 TEST_CASE("screenshot tests fail with the reason, without running") {
