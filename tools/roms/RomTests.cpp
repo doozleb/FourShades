@@ -34,6 +34,11 @@ TestList parseTestList(std::string_view jsonText) {
         t.rom = need(item, "rom").get<std::string>();
         t.group = need(item, "group").get<std::string>();
         t.method = methodFrom(need(item, "method").get<std::string>());
+        const json& informational = need(item, "informational");
+        if (!informational.is_boolean()) {
+            throw std::runtime_error("tests.json: 'informational' must be true or false for " + t.name);
+        }
+        t.informational = informational.get<bool>();
         t.runtime = need(item, "runtime").get<double>();
         t.limitSeconds = need(item, "limit_seconds").get<double>();
         t.references = need(item, "references").get<std::vector<std::string>>();

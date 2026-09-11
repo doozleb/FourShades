@@ -1,7 +1,9 @@
 // Runs the Emulator Shootout's 167 DMG test ROMs against FourShades and writes
 // build/rom-results.json for tools/scoreboard.py. Run from the repository root.
+// The 2 the Shootout treats as informational (no pass condition) are listed in
+// the results but never run or counted, so a full run scores N / 165.
 //
-//   rom_runner                all 167 tests
+//   rom_runner                all tests
 //   rom_runner --only timer   tests whose name contains "timer" (marked partial)
 
 #include "roms/RomRun.h"
@@ -24,7 +26,9 @@
 
 namespace {
 
-constexpr std::size_t kExpectedTests = 167;
+constexpr std::size_t kExpectedTests = 167;  // the Shootout's DMG list
+constexpr std::size_t kExpectedScored = 165; // those with a pass condition
+constexpr const char* kInformationalReason = "informational in the Shootout: no pass condition";
 
 struct Options {
     std::filesystem::path data = "tools/roms/data";
@@ -58,6 +62,11 @@ int main(int argc, char** argv) {
         const roms::TestList list = roms::parseTestList(sst::readBinaryFile(options.tests));
         if (list.tests.size() != kExpectedTests) {
             throw std::runtime_error("tests.json lists " + std::to_string(list.tests.size()) + " tests, expected 167");
+        }
+        std::size_t scored = 0;
+        for (const auto& t : list.tests) scored += t.informational ? 0 : 1;
+        if (scored != kExpectedScored) {
+            throw std::runtime_error("tests.json scores " + std::to_string(scored) + " tests, expected 165");
         }
         if (list.shootoutCommit != "38b926bdbc26993d1b4c43e97979ecc66287bf02") {
             throw std::runtime_error("tests.json is not pinned to the Shootout commit the scoreboard claims");
@@ -101,6 +110,16 @@ int main(int argc, char** argv) {
 
         for (const roms::RomTest& test : list.tests) {
             if (partial && test.name.find(options.only) == std::string::npos) continue;
+            const char* method = test.method == roms::Method::Blargg ? "blargg"
+                               : test.method == roms::Method::Mooneye ? "mooneye" : "screenshot";
+            if (test.informational) {
+                // Listed so the results cover the Shootout's whole list, but not
+                // run and not counted: the Shootout has no pass condition for it.
+                results.push_back({{"name", test.name}, {"group", test.group}, {"method", method},
+                                   {"status", "informational"}, {"reason", kInformationalReason},
+                                   {"emulated_seconds", 0.0}, {"serial", ""}});
+                continue;
+            }
             ++total;
             const std::string bytes = sst::readBinaryFile(options.data / std::filesystem::path(test.rom));
             const auto outcome = roms::runRomTest(test, std::vector<fourshades::u8>(bytes.begin(), bytes.end()));
@@ -114,8 +133,6 @@ int main(int argc, char** argv) {
             } else if (!firstFailure.count(test.group)) {
                 firstFailure[test.group] = test.name + ": " + outcome.reason;
             }
-            const char* method = test.method == roms::Method::Blargg ? "blargg"
-                               : test.method == roms::Method::Mooneye ? "mooneye" : "screenshot";
             results.push_back({{"name", test.name}, {"group", test.group}, {"method", method},
                                {"status", pass ? "pass" : "fail"}, {"reason", outcome.reason},
                                {"emulated_seconds", outcome.emulatedSeconds}, {"serial", outcome.serial}});

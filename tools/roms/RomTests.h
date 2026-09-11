@@ -13,6 +13,9 @@ struct RomTest {
     std::string rom;   // path relative to the Shootout's testroms/
     std::string group;
     Method method = Method::Screenshot;
+    // The Shootout has no pass condition for it (a screenshot test with no
+    // reference image), so it is listed but never run or counted.
+    bool informational = false;
     double runtime = 0.0;
     double limitSeconds = 0.0;
     std::vector<std::string> references;

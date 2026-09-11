@@ -5,7 +5,7 @@
   },
   "test_roms": {
     "passing": 85,
-    "total": 167,
+    "total": 165,
     "groups": [
       {
         "group": "cpu instructions",
@@ -103,7 +103,7 @@
       {
         "group": "screen",
         "passing": 0,
-        "total": 32,
+        "total": 30,
         "first_failure": {
           "test": "mooneye/manual-only/sprite_priority.gb",
           "reason": "needs the PPU (piece 3)"
@@ -118,6 +118,10 @@
           "reason": "needs the PPU (piece 3)"
         }
       }
+    ],
+    "informational": [
+      "acid/which.gb (DMG)",
+      "daid/rom_and_ram.gb"
     ]
   },
   "source": {

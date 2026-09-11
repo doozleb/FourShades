@@ -1,6 +1,6 @@
 # FourShades piece 2: the machine and the test-ROM scoreboard
 
-**Status:** implemented 2026-09-11 (test roms 85 / 167; see README)
+**Status:** implemented 2026-09-11 (test roms 85 / 165; see README)
 **Date:** 2026-09-11
 **Piece:** 2 of 6 (foundation + CPU ✓ → **machine + test-ROM scoreboard** →
 graphics + window → cartridge chips → sound → browser build)
@@ -8,9 +8,12 @@ graphics + window → cartridge chips → sound → browser build)
 ## Goal
 
 Turn the CPU into a Game Boy that can run real test ROMs without a screen, and
-make the second scoreboard line real. **"test roms N / 167"** counts the
-original-Game-Boy (DMG) tests that gbdev's Emulator Shootout runs, at Shootout
-commit `38b926bdbc26993d1b4c43e97979ecc66287bf02` (2026-07-13).
+make the second scoreboard line real. **"test roms N / 165"** counts the
+original-Game-Boy (DMG) tests that gbdev's Emulator Shootout runs and that
+have a pass condition, at Shootout commit
+`38b926bdbc26993d1b4c43e97979ecc66287bf02` (2026-07-13). The Shootout runs 167
+DMG tests; 2 of them have no pass condition (see the Decision note under
+"Keeping it honest"), which leaves 165 scored.
 
 All 167 are in the runner from the first day. A test that needs hardware
 FourShades doesn't have yet simply fails, with the reason recorded. The number
@@ -112,6 +115,8 @@ the access must come first, the order changes and the change is recorded in
   - `rom`: its path;
   - `group` (see below);
   - `method`: `blargg`, `mooneye` or `screenshot`;
+  - `informational`: true for the 2 tests the Shootout has no pass condition
+    for (never run or counted; see the Decision note below);
   - `limit_seconds`: emulated seconds, max(2 × Shootout runtime, runtime + 5).
 - **How pass/fail is decided** — only by the harness, only from each author's
   own signal:
@@ -196,6 +201,19 @@ actually blocked; per-bus blocking passed all nine with no regression (76 →
 85 of 167). See `docs/known-divergences.md` ("OAM DMA bus conflicts") for the
 evidence and every such decision going forward.
 
+**Decision (2026-09-11, the owner's): the denominator is 165, not 167.** The
+Shootout's DMG list is 167 tests, and all 167 stay in `tests.json` and in the
+results. But two of them, `acid/which.gb (DMG)` and `daid/rom_and_ram.gb`,
+have no pass reference image at the pinned commit, and the Shootout's own
+`test.py` reports such a test as informational (`getDefaultResult()` returns
+INFO when there is no pass image): no emulator can pass them. So each entry
+in `tests.json` carries `informational` (true exactly for a screenshot test
+with no reference image; `make_test_list.py` fails if any other test turns up
+without one, or if the count isn't 2), `rom_runner` lists those two as
+`informational` without running them, and the scoreboard counts only the 165
+with a pass condition, naming the two under the group table. Both were
+failing, so the pass set is unchanged: 85 of 167 became 85 of 165.
+
 ## Testing
 
 Unit tests (doctest), each written to fail first:
@@ -228,11 +246,13 @@ The SST suite keeps running unchanged, as the CPU regression guard.
 ## Success criteria
 
 1. The SST score is still 499/500, and CI still enforces it.
-2. All 167 tests run in CI, each with a recorded status and reason.
+2. All 167 tests are in every CI run, each with a recorded status and reason;
+   the 165 with a pass condition are run and scored, and the 2 informational
+   ones are listed as such.
 3. All 11 Blargg `cpu_instrs` pass. That is the independent CPU cross-check.
 4. The Mooneye timer group and the Blargg `instr_timing` test pass, or each
    remaining failure has a documented reason.
-5. The README shows "test roms N / 167" plus the per-group table, generated
+5. The README shows "test roms N / 165" plus the per-group table, generated
    and CI-checked. N is whatever the code honestly scores. The design
    estimates 60–80, but the target is honesty, not a number.
 6. A full ROM run takes under 5 minutes in CI.
