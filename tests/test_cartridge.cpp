@@ -120,3 +120,23 @@ TEST_CASE("an MBC1+RAM header claiming no RAM still gets 8 KiB") {
     cart.write(0xBFFF, 0x77);
     CHECK(cart.read(0xBFFF) == 0x77);
 }
+
+TEST_CASE("a ROM shorter than its header declares is padded with 0xFF") {
+    Cartridge cart = loadOk(makeRom(2, 0x01, 0x01, 0x00)); // 32 KiB image, header says 64 KiB
+    cart.write(0x2000, 0x03);
+    CHECK(cart.read(0x4000) == 0xFF); // bank 3 exists now, filled with 0xFF
+    cart.write(0x2000, 0x01);
+    CHECK(cart.read(0x4000) == 1);    // the real data is untouched
+}
+
+TEST_CASE("a ROM longer than its header declares is truncated") {
+    Cartridge cart = loadOk(makeRom(4, 0x01, 0x00, 0x00)); // 64 KiB image, header says 32 KiB
+    cart.write(0x2000, 0x03);
+    CHECK(cart.read(0x4000) == 1); // bank 3 & 1 = bank 1: banks 2-3 were dropped
+}
+
+TEST_CASE("an out-of-range ROM size code is rejected") {
+    std::string error;
+    CHECK_FALSE(Cartridge::load(makeRom(2, 0x00, 0x09, 0x00), &error).has_value());
+    CHECK(error.find("0x09") != std::string::npos);
+}
