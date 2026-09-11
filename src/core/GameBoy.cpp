@@ -42,6 +42,7 @@ void GameBoy::tickDma() {
         if (from >= 0xE000) {
             from = static_cast<u16>(from - 0x2000); // Pan Docs: sources above DFFF
         }
+        dmaCurrentSource_ = from;
         oam_[static_cast<std::size_t>(dmaIndex_)] = peek(from);
         if (++dmaIndex_ == 0xA0) {
             dmaActive_ = false;
@@ -60,9 +61,32 @@ void GameBoy::tickDma() {
 // that M-cycle and see 0xFF, and see the data one M-cycle later); blocked
 // reads return 0xFF; on a restart the old transfer keeps copying, so keeps
 // blocking, through the new one's start-up cycle.
+//
+// Which bus is blocked: Pan Docs says "On DMG, during OAM DMA, the CPU can
+// access only HRAM (memory at $FF80-$FFFE)" (OAM DMA Transfer: OAM DMA bus
+// conflicts). Nine hardware-verified test ROMs run an OAM DMA from VRAM and,
+// while it copies, execute an instruction from ROM or from WRAM's echo whose
+// operand or stack bytes fall in OAM; they expect the ROM/WRAM accesses to
+// succeed and only the OAM ones to read 0xFF, which per-bus blocking
+// explains and the Pan Docs sentence above does not (see
+// docs/known-divergences.md, "OAM DMA bus conflicts", resolved 2026-09-11).
+// So FourShades blocks only OAM (FE00-FEFF), always, and whichever bus the
+// DMA is currently reading from: the video bus (VRAM, 8000-9FFF) if the
+// source lies there, otherwise the external bus (ROM 0000-7FFF, cartridge
+// RAM A000-BFFF, WRAM C000-DFFF and its echo E000-FDFF). I/O, HRAM and IE
+// stay reachable throughout.
 bool GameBoy::dmaBlocks(u16 address) const {
-    // On DMG the CPU sees only FF00-FFFF while bytes are being copied.
-    return dmaCopying_ && address < 0xFF00;
+    if (!dmaCopying_) {
+        return false;
+    }
+    if (address >= 0xFE00 && address < 0xFF00) {
+        return true; // OAM (and the unusable FEA0-FEFF stretch on the same bus)
+    }
+    const bool sourceIsVideo = dmaCurrentSource_ >= 0x8000 && dmaCurrentSource_ < 0xA000;
+    if (sourceIsVideo) {
+        return address >= 0x8000 && address < 0xA000; // video bus: VRAM
+    }
+    return address < 0x8000 || (address >= 0xA000 && address < 0xFE00); // external bus
 }
 
 u8 GameBoy::read(u16 address) {

@@ -132,24 +132,43 @@ TEST_CASE("the serial port records bytes and interrupts when done") {
     CHECK((gb->peek(0xFF0F) & 0x08) != 0);
 }
 
-TEST_CASE("OAM DMA copies 160 bytes and blocks the CPU outside FF00-FFFF meanwhile") {
+TEST_CASE("OAM DMA from WRAM copies 160 bytes and blocks WRAM, ROM and OAM, but VRAM and HRAM stay readable") {
     auto gb = makeGameBoy({0x00});
     for (int i = 0; i < 0xA0; ++i) {
         gb->write(static_cast<u16>(0xC000 + i), static_cast<u8>(i + 1));
     }
     gb->write(0xFF80, 0x5A);
-    gb->write(0xFF46, 0xC0);
+    gb->write(0xFF46, 0xC0); // source 0xC000: the external bus
     CHECK(gb->peek(0xFF46) == 0xC0);
     gb->idle(); // start-up cycle
     gb->idle(); // first byte copied
-    CHECK(gb->read(0xC000) == 0xFF); // blocked
-    CHECK(gb->read(0xFF80) == 0x5A); // HRAM still works
+    CHECK(gb->read(0xC000) == 0xFF); // WRAM: blocked (external bus)
+    CHECK(gb->read(0x0000) == 0xFF); // ROM: blocked (external bus)
+    CHECK(gb->read(0xFE00) == 0xFF); // OAM: always blocked
+    CHECK(gb->read(0x8000) == 0x00); // VRAM: readable (video bus, not in use)
+    CHECK(gb->read(0xFF80) == 0x5A); // HRAM: readable
     for (int i = 0; i < 170; ++i) {
         gb->idle();
     }
     CHECK(gb->read(0xC000) == 0x01); // no longer blocked
     CHECK(gb->peek(0xFE00) == 0x01);
     CHECK(gb->peek(0xFE9F) == 0xA0);
+}
+
+TEST_CASE("OAM DMA from VRAM blocks VRAM and OAM, but ROM and WRAM stay readable") {
+    auto gb = makeGameBoy({0x00});
+    gb->write(0xC000, 0x01);
+    gb->write(0xFF46, 0x80); // source 0x8000: the video bus
+    gb->idle(); // start-up cycle
+    gb->idle(); // first byte copied
+    CHECK(gb->read(0x8000) == 0xFF); // VRAM: blocked (video bus)
+    CHECK(gb->read(0xFE00) == 0xFF); // OAM: always blocked
+    CHECK(gb->read(0x0000) == 0x00); // ROM: readable (external bus, not in use)
+    CHECK(gb->read(0xC000) == 0x01); // WRAM: readable (external bus, not in use)
+    for (int i = 0; i < 170; ++i) {
+        gb->idle();
+    }
+    CHECK(gb->read(0x8000) == 0x00); // no longer blocked
 }
 
 // Pan Docs: the transfer takes 160 M-cycles and starts after the M-cycle that

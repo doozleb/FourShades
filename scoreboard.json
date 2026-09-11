@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 76,
+    "passing": 85,
     "total": 167,
     "groups": [
       {
@@ -39,12 +39,9 @@
       },
       {
         "group": "cpu & interrupts",
-        "passing": 22,
+        "passing": 31,
         "total": 31,
-        "first_failure": {
-          "test": "mooneye/acceptance/add_sp_e_timing.gb",
-          "reason": "timeout after 6.5 s"
-        }
+        "first_failure": null
       },
       {
         "group": "boot state",

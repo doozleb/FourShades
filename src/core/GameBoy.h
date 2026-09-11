@@ -70,6 +70,7 @@ private:
     bool dmaCopying_ = false; // a byte was copied in the current M-cycle
     int dmaIndex_ = 0;      // next byte to copy, 0-159
     u16 dmaFrom_ = 0;
+    u16 dmaCurrentSource_ = 0; // address the current M-cycle's byte came from; valid while dmaCopying_
     std::uint64_t cycles_ = 0;
     Cpu cpu_; // last: it holds a reference to this Bus
 };
