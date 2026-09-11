@@ -125,7 +125,15 @@ bool Cpu::executeMisc(u8 opcode) {
     switch (opcode) {
     case 0x00: // NOP
         return true;
-    case 0x10: // STOP. Task 14 checks this against Pan Docs.
+    case 0x10: // STOP
+        // Pan Docs' STOP flowchart (Reducing Power Consumption): with no button
+        // held, no speed switch requested (always the case on a DMG) and no
+        // interrupt pending, "STOP is a 2-byte opcode, STOP mode is entered".
+        // Pan Docs doesn't say whether the second byte is read, so it is
+        // skipped without a bus cycle. The button, interrupt and DIV-reset
+        // cases need the joypad, interrupts and timer (piece 2).
+        // See docs/known-divergences.md.
+        regs.pc = static_cast<u16>(regs.pc + 1);
         state_ = State::Stopped;
         return true;
     case 0x76: // HALT
