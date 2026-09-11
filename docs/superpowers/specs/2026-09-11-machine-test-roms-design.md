@@ -185,6 +185,17 @@ at each post, as today.
 - A test that hangs, or that passes only because its time limit was raised,
   doesn't count. Limits come from the formula above, never per test by hand.
 
+**Decision (2026-09-11):** the rule above was Pan Docs over every test. It's
+now refined: Pan Docs still outranks a test that only another emulator
+generated (SingleStepTests), but a hardware-verified test — one run and
+checked against real DMG, MGB, SGB, SGB2, CGB, AGB or AGS hardware — outranks
+a Pan Docs sentence that turns out to be a simplification. The first case was
+OAM DMA: Pan Docs says DMG's CPU "can access only HRAM" during OAM DMA, but
+nine hardware-verified tests show only OAM and the bus the DMA reads from are
+actually blocked; per-bus blocking passed all nine with no regression (76 →
+85 of 167). See `docs/known-divergences.md` ("OAM DMA bus conflicts") for the
+evidence and every such decision going forward.
+
 ## Testing
 
 Unit tests (doctest), each written to fail first:
