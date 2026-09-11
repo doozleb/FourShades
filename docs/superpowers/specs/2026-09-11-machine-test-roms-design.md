@@ -1,6 +1,6 @@
 # FourShades piece 2: the machine and the test-ROM scoreboard
 
-**Status:** design, approved by the owner 2026-09-11
+**Status:** implemented 2026-09-11 (test roms 85 / 167; see README)
 **Date:** 2026-09-11
 **Piece:** 2 of 6 (foundation + CPU ✓ → **machine + test-ROM scoreboard** →
 graphics + window → cartridge chips → sound → browser build)
