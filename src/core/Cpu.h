@@ -46,6 +46,7 @@ private:
     void setFlags(bool z, bool n, bool h, bool c);
     void execute(u8 opcode);
     bool executeMisc(u8 opcode);
+    void dispatchInterrupt();
 
     // CpuLoads8.cpp
     bool executeLoads8(u8 opcode);
@@ -74,6 +75,7 @@ private:
     State state_ = State::Running;
     int imeDelay_ = 0;
     bool unimplemented_ = false;
+    bool haltBug_ = false; // the next opcode fetch doesn't advance PC
 };
 
 } // namespace fourshades
