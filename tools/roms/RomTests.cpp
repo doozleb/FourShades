@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace roms {
@@ -21,6 +23,28 @@ Method methodFrom(const std::string& text) {
     if (text == "mooneye") return Method::Mooneye;
     if (text == "screenshot") return Method::Screenshot;
     throw std::runtime_error("tests.json: unknown method '" + text + "'");
+}
+
+bool startsWith(const std::string& text, std::string_view prefix) {
+    return text.compare(0, prefix.size(), prefix) == 0;
+}
+
+// The method is fixed by where the ROM lives, as make_test_list.py assigns it.
+Method methodForPath(const std::string& rom) {
+    if (startsWith(rom, "blargg/")) return Method::Blargg;
+    if (startsWith(rom, "mooneye/") && !startsWith(rom, "mooneye/manual-only/")) return Method::Mooneye;
+    return Method::Screenshot;
+}
+
+// A limit that doesn't come from the formula is a hand-raised limit.
+void checkEntry(const RomTest& t) {
+    const double expected = std::max(2.0 * t.runtime, t.runtime + 5.0);
+    if (std::abs(t.limitSeconds - expected) > 1e-9) {
+        throw std::runtime_error("tests.json: " + t.name + ": limit_seconds is not max(2 x runtime, runtime + 5)");
+    }
+    if (t.method != methodForPath(t.rom)) {
+        throw std::runtime_error("tests.json: " + t.name + ": method doesn't follow from the ROM's path");
+    }
 }
 } // namespace
 
@@ -42,6 +66,7 @@ TestList parseTestList(std::string_view jsonText) {
         t.runtime = need(item, "runtime").get<double>();
         t.limitSeconds = need(item, "limit_seconds").get<double>();
         t.references = need(item, "references").get<std::vector<std::string>>();
+        checkEntry(t);
         list.tests.push_back(std::move(t));
     }
     return list;

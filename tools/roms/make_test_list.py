@@ -16,6 +16,7 @@ they are marked "informational": true and the scoreboard doesn't count them.
 import ast
 import http.client
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -55,11 +56,21 @@ GROUPS = [
 ]
 
 
+def request_for(url: str) -> urllib.request.Request:
+    """A request for url. Only the tree API call carries GITHUB_TOKEN (in CI, to
+    lift the API's rate limit); raw.githubusercontent.com never sees it."""
+    request = urllib.request.Request(url)
+    token = os.environ.get("GITHUB_TOKEN")
+    if token and url == TREE:
+        request.add_header("Authorization", f"Bearer {token}")
+    return request
+
+
 def get(url: str) -> bytes:
     last_error = None
     for attempt in range(1, 7):
         try:
-            with urllib.request.urlopen(url, timeout=60) as response:
+            with urllib.request.urlopen(request_for(url), timeout=60) as response:
                 return response.read()
         except (OSError, http.client.HTTPException) as error:
             last_error = error
