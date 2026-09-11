@@ -10,3 +10,6 @@ add_library(sst_harness STATIC
 target_include_directories(sst_harness PUBLIC ${CMAKE_SOURCE_DIR}/tools)
 target_include_directories(sst_harness SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/third_party)
 target_link_libraries(sst_harness PUBLIC fourshades_core)
+
+add_executable(sst_runner sst_runner.cpp)
+target_link_libraries(sst_runner PRIVATE sst_harness)
