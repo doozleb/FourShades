@@ -29,16 +29,26 @@ decision and its date.
   byte is fetched with a bus read. Pan Docs says only that it is "ignored", so
   FourShades skips it without a bus cycle and keeps the test's `r-m`, `---`,
   `---` pattern. Pan Docs also doesn't say at which cycle the PC increment
-  becomes visible while the CPU sits in STOP mode. DIV reset, and the
-  button-held and interrupt-pending branches (which Pan Docs says make STOP a
-  1-byte opcode or turn it into HALT), need the timer, joypad and interrupts,
-  which arrive in piece 2.
+  becomes visible while the CPU sits in STOP mode.
+- **Still missing after piece 2** (the timer, joypad and interrupts now exist,
+  but STOP doesn't use them yet):
+  - STOP never wakes. Pan Docs' way out of STOP mode is a button press, and
+    there is no joypad input yet (P1 always reads "no buttons pressed").
+  - STOP doesn't reset DIV. That is to be done with the planned
+    centralisation of the system counter's edge handling (so a reset's
+    falling edges reach the timer, and later the sound chip, from one place),
+    before piece 5.
+  - The interrupt-pending branch, where Pan Docs makes STOP a 1-byte opcode,
+    isn't implemented: STOP is always 2 bytes. (The button-held branches need
+    joypad input, above.)
+- **Scored test affected:** `daid/stop_instr.gb (DMG)` is one of the 165
+  scored test ROMs (screen group). It is a screenshot test, so it fails for
+  now on "needs the PPU (piece 3)" before STOP's behaviour is ever checked.
 - **Also noted by Pan Docs itself:** "stop is often considered a two-byte
   instruction, though the second byte is not always ignored.",
   [CPU Instruction Set](https://gbdev.io/pandocs/CPU_Instruction_Set.html#stop).
   "Not always" refers to the button-held and interrupt-pending branches, where
-  STOP behaves differently — the branches this entry already covers, and which
-  need piece 2's joypad and interrupts to implement.
+  STOP behaves differently — the branches listed as still missing above.
 - **Checked:** 2026-09-11.
 
 ## HALT (0x76): matches Pan Docs
