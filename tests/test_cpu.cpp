@@ -44,6 +44,19 @@ TEST_CASE("EI enables interrupts only after the next instruction") {
     CHECK_FALSE(cpu.imePending());
 }
 
+TEST_CASE("a second EI does not restart the delay from the first") {
+    RecordingBus bus;
+    load(bus, {0xFB, 0xFB, 0x00});
+    Cpu cpu(bus);
+    cpu.regs.pc = 0x0100;
+    cpu.step();
+    CHECK_FALSE(cpu.ime);
+    CHECK(cpu.imePending());
+    cpu.step();
+    CHECK(cpu.ime);
+    CHECK_FALSE(cpu.imePending());
+}
+
 TEST_CASE("DI straight after EI leaves interrupts disabled") {
     RecordingBus bus;
     load(bus, {0xFB, 0xF3, 0x00});

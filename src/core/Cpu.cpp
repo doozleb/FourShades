@@ -144,7 +144,11 @@ bool Cpu::executeMisc(u8 opcode) {
         imeDelay_ = 0;
         return true;
     case 0xFB: // EI
-        imeDelay_ = 2;
+        // A second EI while one is already pending must not restart the
+        // delay: IME turns on after the instruction following the FIRST EI.
+        if (imeDelay_ == 0) {
+            imeDelay_ = 2;
+        }
         return true;
     case 0xCB:
         executeCb();
