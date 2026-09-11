@@ -148,7 +148,12 @@ int main(int argc, char** argv) {
         if (options.out.has_parent_path()) {
             std::filesystem::create_directories(options.out.parent_path());
         }
-        std::ofstream(options.out) << results.dump(1) << '\n';
+        std::ofstream out(options.out);
+        out << results.dump(1) << '\n';
+        if (!out.good()) {
+            std::cerr << "error: could not write " << options.out.string() << '\n';
+            return 2;
+        }
 
         std::printf("%s%zu / %zu passing  (%zu unimplemented, %.1f s)\nresults: %s\n",
                     partial ? "selected: " : "CPU instructions: ", passingFiles, selected.size(),
