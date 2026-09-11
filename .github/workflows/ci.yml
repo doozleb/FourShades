@@ -44,13 +44,26 @@ jobs:
       - name: Run SingleStepTests
         run: .\build\release\tools\sst\sst_runner.exe
 
-      - name: Scoreboard matches the run
-        run: python tools/scoreboard.py check build/sst-results.json
+      - uses: actions/cache@v4
+        with:
+          path: tools/roms/data
+          key: roms-38b926bdbc26993d1b4c43e97979ecc66287bf02
+
+      - name: Fetch test ROMs (pinned, hash-checked)
+        run: python tools/roms/fetch_roms.py
+
+      - name: Run test ROMs
+        run: .\build\release\tools\roms\rom_runner.exe
+
+      - name: Scoreboard matches the runs
+        run: python tools/scoreboard.py check build/sst-results.json build/rom-results.json
 
       - name: Keep the results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sst-results
-          path: build/sst-results.json
+          name: results
+          path: |
+            build/sst-results.json
+            build/rom-results.json
           if-no-files-found: error

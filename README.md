@@ -6,7 +6,7 @@ and measured, honestly, against the public test ROMs.
 <!-- scoreboard:start -->
 ```
 cpu instructions  ███████████████░   499 / 500
-test roms         ░░░░░░░░░░░░░░░░     0 / 167
+test roms         ██████░░░░░░░░░░    68 / 167
 ```
 <!-- scoreboard:end -->
 
@@ -17,7 +17,29 @@ register, every byte of memory and every bus cycle. 499 of the 500 pass. The
 one that doesn't is STOP: the tests and the hardware documentation disagree
 about it, and FourShades follows the documentation. The details are in
 [docs/known-divergences.md](docs/known-divergences.md). The test-ROM line
-starts moving in piece 2.
+counts the 167 original-Game-Boy tests that gbdev's Emulator Shootout runs; a
+test passes only on its author's own pass signal.
+
+The test-ROM line, group by group, with the first test each group fails:
+
+<!-- groups:start -->
+| group | passing | first failing test |
+|---|---|---|
+| cpu instructions | 11 / 11 |  |
+| cpu timing | 8 / 8 |  |
+| oam bug | 2 / 7 | `blargg/oam_bug/1-lcd_sync.gb`: Failed: Failed #3 |
+| sound | 0 / 12 | `blargg/dmg_sound/01-registers.gb`: Failed: Failed #2 |
+| cpu & interrupts | 18 / 31 | `mooneye/acceptance/add_sp_e_timing.gb`: timeout after 6.5 s |
+| boot state | 1 / 3 | `mooneye/acceptance/boot_div-dmgABCmgb.gb`: failure bytes (0x42) over serial |
+| oam dma | 3 / 6 | `mooneye/acceptance/oam_dma/sources-GS.gb`: cartridge: unsupported cartridge type 0x1B |
+| ppu timing | 0 / 12 | `mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.gb`: timeout after 6.5 s |
+| serial | 1 / 1 |  |
+| timer | 12 / 13 | `mooneye/acceptance/timer/rapid_toggle.gb`: failure bytes (0x42) over serial |
+| mbc1 | 12 / 13 | `mooneye/emulator-only/mbc1/multicart_rom_8Mb.gb`: failure bytes (0x42) over serial |
+| mbc2 / mbc5 | 0 / 15 | `mooneye/emulator-only/mbc2/bits_ramg.gb`: cartridge: unsupported cartridge type 0x06 |
+| screen | 0 / 32 | `mooneye/manual-only/sprite_priority.gb`: needs the PPU (piece 3) |
+| mbc3 / rtc | 0 / 3 | `cpp/rtc-invalid-banks-test.gb`: needs the PPU (piece 3) |
+<!-- groups:end -->
 
 **Correction (11 September 2026):** the test-ROM line used to read 0 / 1300.
 That total was an estimate from early planning that I never checked. The real
@@ -102,6 +124,7 @@ project page is **[doozleb.com/projects/fourshades](https://doozleb.com/projects
 src/core/                 the emulator core: CPU and bus (no window, no files)
 tests/                    unit tests (doctest)
 tools/sst/                the SingleStepTests harness and pinned-data manifest
+tools/roms/                the test-ROM harness, its pinned test list and manifest
 tools/scoreboard.py       turns a test run into the scoreboard above
 third_party/              vendored doctest and nlohmann/json, hash-pinned
 docs/superpowers/specs/   the reasoning behind each piece
@@ -123,6 +146,8 @@ Visual Studio, or from PowerShell:
 .\tools\dev.cmd ctest --preset release
 python tools/sst/fetch_sst.py              # the test data, pinned and hash-checked
 .\build\release\tools\sst\sst_runner.exe   # score the CPU
+python tools/roms/fetch_roms.py            # the test ROMs, pinned and hash-checked
+.\build\release\tools\roms\rom_runner.exe  # score the machine against the test ROMs
 ```
 
 ## Planned scope

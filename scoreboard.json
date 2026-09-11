@@ -4,11 +4,132 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 0,
-    "total": 167
+    "passing": 68,
+    "total": 167,
+    "groups": [
+      {
+        "group": "cpu instructions",
+        "passing": 11,
+        "total": 11,
+        "first_failure": null
+      },
+      {
+        "group": "cpu timing",
+        "passing": 8,
+        "total": 8,
+        "first_failure": null
+      },
+      {
+        "group": "oam bug",
+        "passing": 2,
+        "total": 7,
+        "first_failure": {
+          "test": "blargg/oam_bug/1-lcd_sync.gb",
+          "reason": "Failed: Failed #3"
+        }
+      },
+      {
+        "group": "sound",
+        "passing": 0,
+        "total": 12,
+        "first_failure": {
+          "test": "blargg/dmg_sound/01-registers.gb",
+          "reason": "Failed: Failed #2"
+        }
+      },
+      {
+        "group": "cpu & interrupts",
+        "passing": 18,
+        "total": 31,
+        "first_failure": {
+          "test": "mooneye/acceptance/add_sp_e_timing.gb",
+          "reason": "timeout after 6.5 s"
+        }
+      },
+      {
+        "group": "boot state",
+        "passing": 1,
+        "total": 3,
+        "first_failure": {
+          "test": "mooneye/acceptance/boot_div-dmgABCmgb.gb",
+          "reason": "failure bytes (0x42) over serial"
+        }
+      },
+      {
+        "group": "oam dma",
+        "passing": 3,
+        "total": 6,
+        "first_failure": {
+          "test": "mooneye/acceptance/oam_dma/sources-GS.gb",
+          "reason": "cartridge: unsupported cartridge type 0x1B"
+        }
+      },
+      {
+        "group": "ppu timing",
+        "passing": 0,
+        "total": 12,
+        "first_failure": {
+          "test": "mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.gb",
+          "reason": "timeout after 6.5 s"
+        }
+      },
+      {
+        "group": "serial",
+        "passing": 1,
+        "total": 1,
+        "first_failure": null
+      },
+      {
+        "group": "timer",
+        "passing": 12,
+        "total": 13,
+        "first_failure": {
+          "test": "mooneye/acceptance/timer/rapid_toggle.gb",
+          "reason": "failure bytes (0x42) over serial"
+        }
+      },
+      {
+        "group": "mbc1",
+        "passing": 12,
+        "total": 13,
+        "first_failure": {
+          "test": "mooneye/emulator-only/mbc1/multicart_rom_8Mb.gb",
+          "reason": "failure bytes (0x42) over serial"
+        }
+      },
+      {
+        "group": "mbc2 / mbc5",
+        "passing": 0,
+        "total": 15,
+        "first_failure": {
+          "test": "mooneye/emulator-only/mbc2/bits_ramg.gb",
+          "reason": "cartridge: unsupported cartridge type 0x06"
+        }
+      },
+      {
+        "group": "screen",
+        "passing": 0,
+        "total": 32,
+        "first_failure": {
+          "test": "mooneye/manual-only/sprite_priority.gb",
+          "reason": "needs the PPU (piece 3)"
+        }
+      },
+      {
+        "group": "mbc3 / rtc",
+        "passing": 0,
+        "total": 3,
+        "first_failure": {
+          "test": "cpp/rtc-invalid-banks-test.gb",
+          "reason": "needs the PPU (piece 3)"
+        }
+      }
+    ]
   },
   "source": {
-    "suite": "SingleStepTests/sm83",
-    "commit": "f9c30210245dd691661db39f5ace022c465ecc2f"
+    "sst_suite": "SingleStepTests/sm83",
+    "sst_commit": "f9c30210245dd691661db39f5ace022c465ecc2f",
+    "rom_suite": "GBEmulatorShootout (DMG)",
+    "shootout_commit": "38b926bdbc26993d1b4c43e97979ecc66287bf02"
   }
 }
