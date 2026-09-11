@@ -15,7 +15,11 @@ GameBoy::GameBoy(Cartridge cartridge) : cart_(std::move(cartridge)), cpu_(*this)
     r.setHl(0x014D);
     r.sp = 0xFFFE;
     r.pc = 0x0100;
-    timer_.setCounter(0xABCC); // DIV reads 0xAB
+    // DIV reads 0xAB (Pan Docs). Pan Docs doesn't give the phase below it;
+    // hardware sees DIV turn 0xAC in the 14th M-cycle from the fetch at
+    // 0x0100, which puts the counter at 0xABC8 before that fetch (0xABCC,
+    // the value often quoted, is the counter just after it).
+    timer_.setCounter(0xABC8);
 }
 
 void GameBoy::tick() {
@@ -75,6 +79,14 @@ void GameBoy::write(u16 address, u8 value) {
 
 void GameBoy::idle() {
     tick();
+}
+
+std::optional<u8> GameBoy::haltedCycle(u16 address) {
+    tick();
+    if (pendingInterrupts() == 0) {
+        return std::nullopt;
+    }
+    return dmaBlocks(address) ? u8{0xFF} : peek(address);
 }
 
 u8 GameBoy::peek(u16 address) const {

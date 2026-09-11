@@ -40,6 +40,7 @@ public:
     u8 read(u16 address) override;
     void write(u16 address, u8 value) override;
     void idle() override;
+    std::optional<u8> haltedCycle(u16 address) override;
     u8 pendingInterrupts() override { return static_cast<u8>(ie_ & if_ & 0x1F); }
     void acknowledgeInterrupt(int bit) override { if_ = static_cast<u8>(if_ & ~(1 << bit)); }
 

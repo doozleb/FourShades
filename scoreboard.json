@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 74,
+    "passing": 76,
     "total": 167,
     "groups": [
       {
@@ -48,10 +48,10 @@
       },
       {
         "group": "boot state",
-        "passing": 1,
+        "passing": 2,
         "total": 3,
         "first_failure": {
-          "test": "mooneye/acceptance/boot_div-dmgABCmgb.gb",
+          "test": "mooneye/acceptance/boot_hwio-dmgABCmgb.gb",
           "reason": "failure bytes (0x42) over serial"
         }
       },
@@ -81,12 +81,9 @@
       },
       {
         "group": "timer",
-        "passing": 12,
+        "passing": 13,
         "total": 13,
-        "first_failure": {
-          "test": "mooneye/acceptance/timer/rapid_toggle.gb",
-          "reason": "failure bytes (0x42) over serial"
-        }
+        "first_failure": null
       },
       {
         "group": "mbc1",

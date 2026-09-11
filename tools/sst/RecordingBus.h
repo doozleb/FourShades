@@ -54,6 +54,15 @@ public:
     // only their kind (see the design spec, "Match the test model").
     void idle() override { log_.push_back({0, 0, CycleKind::Idle}); }
 
+    // Nothing pending: an idle cycle. Pending: the waking fetch, a read.
+    std::optional<u8> haltedCycle(u16 address) override {
+        if (pending_ == 0) {
+            idle();
+            return std::nullopt;
+        }
+        return read(address);
+    }
+
 private:
     std::vector<u8> memory_;
     std::vector<u16> touched_;

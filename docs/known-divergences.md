@@ -61,3 +61,38 @@ mode.
   the single-byte encoding `01110110`, with no operand field — unlike `ld r8,
   r8`, which the page notes `halt` is the one exception to (encoding `[hl],
   [hl]` yields `halt` instead).
+
+## Timing model (not a divergence: where Pan Docs is silent)
+
+Pan Docs gives cycle counts but not every within-M-cycle order. These are the
+choices FourShades makes, and the hardware-verified test ROMs that pin them.
+
+- **Advance, then access.** Every bus call first advances the timer, serial
+  port, LCD timing and OAM DMA by one M-cycle, then does the CPU's read or
+  write. All 13 Mooneye `timer` tests (which race TIMA, TMA, TAC and DIV
+  writes against the reload and overflow cycles) pass with this order, so it
+  was kept.
+- **Interrupts are sampled at the end of the opcode-fetch M-cycle.** A request
+  raised during that M-cycle, such as the timer's in its reload cycle
+  ("cycle B"), is taken instead of the fetched instruction, whose fetch becomes
+  the first of Pan Docs' two wait M-cycles (dispatch stays 5 M-cycles).
+  Pinned by `timer/rapid_toggle`: the interrupt must arrive before the `dec bc`
+  whose fetch coincides with cycle B.
+- **A halted CPU wakes within the M-cycle an interrupt becomes pending,** and
+  that M-cycle is also the fetch of the next opcode, so HALT services an
+  interrupt exactly as a run of NOPs would (Pan Docs: "the CPU simply wakes
+  up, and before executing the instruction after the halt, the interrupt
+  handler is called normally"). Pinned by `halt_ime0_nointr_timing`,
+  `halt_ime1_timing2-GS` and `di_timing-GS`, which compare the two paths to
+  the M-cycle. Halted M-cycles with nothing pending make no bus access, as
+  SingleStepTests' HALT cycles (`---`) have it.
+- **System counter at power-on: 0xABC8** before the fetch at 0x0100. Pan Docs
+  gives DIV = $AB only. `boot_div-dmgABCmgb` (DMG A-C, MGB) sees DIV turn $AC
+  in the 14th M-cycle, and `serial/boot_sclk_align-dmgABCmgb` sees the serial
+  interrupt at a time that depends on both this phase and the sampling point
+  above; both pass only with the two together.
+- **OAM DMA:** the M-cycle after the FF46 write is a start-up cycle; the CPU
+  is then locked out for the 160 M-cycles that copy bytes, the last included
+  (`oam_dma_timing`, `oam_dma_restart`, `push_timing`, `rst_timing`,
+  `call_timing2`, `call_cc_timing2`).
+- **Checked:** 2026-09-11.
