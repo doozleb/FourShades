@@ -18,8 +18,10 @@ public:
     u8 read(u16 address) const;         // FF01-FF02
     void write(u16 address, u8 value);  // FF01-FF02
 
-    // Every byte whose transfer was started, in order: what a link-cable
-    // partner would have received.
+    // The byte in SB each time an internal-clock transfer is started, in order.
+    // It is recorded when the transfer starts, so a transfer restarted before it
+    // finishes still appears here even though its last bits never went out.
+    // External-clock transfers are not recorded: with no partner they never run.
     const std::vector<u8>& sent() const { return sent_; }
 
 private:
