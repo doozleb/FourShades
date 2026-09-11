@@ -1,0 +1,1840 @@
+{
+ "shootout_commit": "38b926bdbc26993d1b4c43e97979ecc66287bf02",
+ "tests": [
+  {
+   "name": "blargg/cpu_instrs/01-special.gb",
+   "rom": "blargg/cpu_instrs/01-special.gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 3.0,
+   "limit_seconds": 8.0,
+   "references": [
+    "blargg/cpu_instrs/01-special.png"
+   ]
+  },
+  {
+   "name": "blargg/cpu_instrs/02-interrupts.gb",
+   "rom": "blargg/cpu_instrs/02-interrupts.gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/cpu_instrs/02-interrupts.png"
+   ]
+  },
+  {
+   "name": "blargg/cpu_instrs/03-op_sp,hl.gb",
+   "rom": "blargg/cpu_instrs/03-op_sp,hl.gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 2.5,
+   "limit_seconds": 7.5,
+   "references": [
+    "blargg/cpu_instrs/03-op_sp,hl.png"
+   ]
+  },
+  {
+   "name": "blargg/cpu_instrs/04-op_r,imm.gb",
+   "rom": "blargg/cpu_instrs/04-op_r,imm.gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 2.5,
+   "limit_seconds": 7.5,
+   "references": [
+    "blargg/cpu_instrs/04-op_r,imm.png"
+   ]
+  },
+  {
+   "name": "blargg/cpu_instrs/05-op_rp.gb",
+   "rom": "blargg/cpu_instrs/05-op_rp.gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 3.0,
+   "limit_seconds": 8.0,
+   "references": [
+    "blargg/cpu_instrs/05-op_rp.png"
+   ]
+  },
+  {
+   "name": "blargg/cpu_instrs/06-ld_r,r.gb",
+   "rom": "blargg/cpu_instrs/06-ld_r,r.gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/cpu_instrs/06-ld_r,r.png"
+   ]
+  },
+  {
+   "name": "blargg/cpu_instrs/07-jr,jp,call,ret,rst.gb",
+   "rom": "blargg/cpu_instrs/07-jr,jp,call,ret,rst.gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/cpu_instrs/07-jr,jp,call,ret,rst.png"
+   ]
+  },
+  {
+   "name": "blargg/cpu_instrs/08-misc_instrs.gb",
+   "rom": "blargg/cpu_instrs/08-misc_instrs.gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/cpu_instrs/08-misc_instrs.png"
+   ]
+  },
+  {
+   "name": "blargg/cpu_instrs/09-op_r,r.gb",
+   "rom": "blargg/cpu_instrs/09-op_r,r.gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 7.0,
+   "limit_seconds": 14.0,
+   "references": [
+    "blargg/cpu_instrs/09-op_r,r.png"
+   ]
+  },
+  {
+   "name": "blargg/cpu_instrs/10-bit_ops.gb",
+   "rom": "blargg/cpu_instrs/10-bit_ops.gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 14.0,
+   "limit_seconds": 28.0,
+   "references": [
+    "blargg/cpu_instrs/10-bit_ops.png"
+   ]
+  },
+  {
+   "name": "blargg/cpu_instrs/11-op_a,(hl).gb",
+   "rom": "blargg/cpu_instrs/11-op_a,(hl).gb",
+   "group": "cpu instructions",
+   "method": "blargg",
+   "runtime": 13.0,
+   "limit_seconds": 26.0,
+   "references": [
+    "blargg/cpu_instrs/11-op_a,(hl).png"
+   ]
+  },
+  {
+   "name": "blargg/halt_bug.gb",
+   "rom": "blargg/halt_bug.gb",
+   "group": "cpu timing",
+   "method": "blargg",
+   "runtime": 2.0,
+   "limit_seconds": 7.0,
+   "references": [
+    "blargg/halt_bug.png"
+   ]
+  },
+  {
+   "name": "blargg/instr_timing.gb",
+   "rom": "blargg/instr_timing.gb",
+   "group": "cpu timing",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/instr_timing.png"
+   ]
+  },
+  {
+   "name": "blargg/mem_timing/01-read_timing.gb",
+   "rom": "blargg/mem_timing/01-read_timing.gb",
+   "group": "cpu timing",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/mem_timing/01-read_timing.png"
+   ]
+  },
+  {
+   "name": "blargg/mem_timing/02-write_timing.gb",
+   "rom": "blargg/mem_timing/02-write_timing.gb",
+   "group": "cpu timing",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/mem_timing/02-write_timing.png"
+   ]
+  },
+  {
+   "name": "blargg/mem_timing/03-modify_timing.gb",
+   "rom": "blargg/mem_timing/03-modify_timing.gb",
+   "group": "cpu timing",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/mem_timing/03-modify_timing.png"
+   ]
+  },
+  {
+   "name": "blargg/mem_timing-2/01-read_timing.gb",
+   "rom": "blargg/mem_timing-2/01-read_timing.gb",
+   "group": "cpu timing",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/mem_timing-2/01-read_timing.png"
+   ]
+  },
+  {
+   "name": "blargg/mem_timing-2/02-write_timing.gb",
+   "rom": "blargg/mem_timing-2/02-write_timing.gb",
+   "group": "cpu timing",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/mem_timing-2/02-write_timing.png"
+   ]
+  },
+  {
+   "name": "blargg/mem_timing-2/03-modify_timing.gb",
+   "rom": "blargg/mem_timing-2/03-modify_timing.gb",
+   "group": "cpu timing",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/mem_timing-2/03-modify_timing.png"
+   ]
+  },
+  {
+   "name": "blargg/oam_bug/1-lcd_sync.gb",
+   "rom": "blargg/oam_bug/1-lcd_sync.gb",
+   "group": "oam bug",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/oam_bug/1-lcd_sync.png"
+   ]
+  },
+  {
+   "name": "blargg/oam_bug/2-causes.gb",
+   "rom": "blargg/oam_bug/2-causes.gb",
+   "group": "oam bug",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/oam_bug/2-causes.png"
+   ]
+  },
+  {
+   "name": "blargg/oam_bug/3-non_causes.gb",
+   "rom": "blargg/oam_bug/3-non_causes.gb",
+   "group": "oam bug",
+   "method": "blargg",
+   "runtime": 3.0,
+   "limit_seconds": 8.0,
+   "references": [
+    "blargg/oam_bug/3-non_causes.png"
+   ]
+  },
+  {
+   "name": "blargg/oam_bug/4-scanline_timing.gb",
+   "rom": "blargg/oam_bug/4-scanline_timing.gb",
+   "group": "oam bug",
+   "method": "blargg",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "blargg/oam_bug/4-scanline_timing.png"
+   ]
+  },
+  {
+   "name": "blargg/oam_bug/5-timing_bug.gb",
+   "rom": "blargg/oam_bug/5-timing_bug.gb",
+   "group": "oam bug",
+   "method": "blargg",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "blargg/oam_bug/5-timing_bug.png"
+   ]
+  },
+  {
+   "name": "blargg/oam_bug/6-timing_no_bug.gb",
+   "rom": "blargg/oam_bug/6-timing_no_bug.gb",
+   "group": "oam bug",
+   "method": "blargg",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "blargg/oam_bug/6-timing_no_bug.png"
+   ]
+  },
+  {
+   "name": "blargg/oam_bug/8-instr_effect.gb",
+   "rom": "blargg/oam_bug/8-instr_effect.gb",
+   "group": "oam bug",
+   "method": "blargg",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "blargg/oam_bug/8-instr_effect.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/01-registers.gb",
+   "rom": "blargg/dmg_sound/01-registers.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 2.0,
+   "limit_seconds": 7.0,
+   "references": [
+    "blargg/dmg_sound/01-registers.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/02-len_ctr.gb",
+   "rom": "blargg/dmg_sound/02-len_ctr.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 11.0,
+   "limit_seconds": 22.0,
+   "references": [
+    "blargg/dmg_sound/02-len_ctr.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/03-trigger.gb",
+   "rom": "blargg/dmg_sound/03-trigger.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 18.0,
+   "limit_seconds": 36.0,
+   "references": [
+    "blargg/dmg_sound/03-trigger.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/04-sweep.gb",
+   "rom": "blargg/dmg_sound/04-sweep.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 2.0,
+   "limit_seconds": 7.0,
+   "references": [
+    "blargg/dmg_sound/04-sweep.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/05-sweep_details.gb",
+   "rom": "blargg/dmg_sound/05-sweep_details.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 2.0,
+   "limit_seconds": 7.0,
+   "references": [
+    "blargg/dmg_sound/05-sweep_details.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/06-overflow_on_trigger.gb",
+   "rom": "blargg/dmg_sound/06-overflow_on_trigger.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 2.0,
+   "limit_seconds": 7.0,
+   "references": [
+    "blargg/dmg_sound/06-overflow_on_trigger.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/07-len_sweep_period_sync.gb",
+   "rom": "blargg/dmg_sound/07-len_sweep_period_sync.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 2.0,
+   "limit_seconds": 7.0,
+   "references": [
+    "blargg/dmg_sound/07-len_sweep_period_sync.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/08-len_ctr_during_power.gb",
+   "rom": "blargg/dmg_sound/08-len_ctr_during_power.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 2.0,
+   "limit_seconds": 7.0,
+   "references": [
+    "blargg/dmg_sound/08-len_ctr_during_power.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/09-wave_read_while_on.gb",
+   "rom": "blargg/dmg_sound/09-wave_read_while_on.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/dmg_sound/09-wave_read_while_on.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/10-wave_trigger_while_on.gb",
+   "rom": "blargg/dmg_sound/10-wave_trigger_while_on.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 5.0,
+   "limit_seconds": 10.0,
+   "references": [
+    "blargg/dmg_sound/10-wave_trigger_while_on.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/11-regs_after_power.gb",
+   "rom": "blargg/dmg_sound/11-regs_after_power.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "blargg/dmg_sound/11-regs_after_power.png"
+   ]
+  },
+  {
+   "name": "blargg/dmg_sound/12-wave_write_while_on.gb",
+   "rom": "blargg/dmg_sound/12-wave_write_while_on.gb",
+   "group": "sound",
+   "method": "blargg",
+   "runtime": 5.0,
+   "limit_seconds": 10.0,
+   "references": [
+    "blargg/dmg_sound/12-wave_write_while_on.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/add_sp_e_timing.gb",
+   "rom": "mooneye/acceptance/add_sp_e_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/add_sp_e_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/bits/mem_oam.gb",
+   "rom": "mooneye/acceptance/bits/mem_oam.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/bits/mem_oam.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/bits/reg_f.gb",
+   "rom": "mooneye/acceptance/bits/reg_f.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/bits/reg_f.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/bits/unused_hwio-GS.gb",
+   "rom": "mooneye/acceptance/bits/unused_hwio-GS.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/bits/unused_hwio-GS.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/boot_div-dmgABCmgb.gb",
+   "rom": "mooneye/acceptance/boot_div-dmgABCmgb.gb",
+   "group": "boot state",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/boot_div-dmgABCmgb.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/boot_hwio-dmgABCmgb.gb",
+   "rom": "mooneye/acceptance/boot_hwio-dmgABCmgb.gb",
+   "group": "boot state",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/boot_hwio-dmgABCmgb.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/boot_regs-dmgABC.gb",
+   "rom": "mooneye/acceptance/boot_regs-dmgABC.gb",
+   "group": "boot state",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/boot_regs-dmgABC.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/call_cc_timing.gb",
+   "rom": "mooneye/acceptance/call_cc_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/call_cc_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/call_cc_timing2.gb",
+   "rom": "mooneye/acceptance/call_cc_timing2.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/call_cc_timing2.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/call_timing.gb",
+   "rom": "mooneye/acceptance/call_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/call_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/call_timing2.gb",
+   "rom": "mooneye/acceptance/call_timing2.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/call_timing2.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/div_timing.gb",
+   "rom": "mooneye/acceptance/div_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/div_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/di_timing-GS.gb",
+   "rom": "mooneye/acceptance/di_timing-GS.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/di_timing-GS.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ei_sequence.gb",
+   "rom": "mooneye/acceptance/ei_sequence.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ei_sequence.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ei_timing.gb",
+   "rom": "mooneye/acceptance/ei_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ei_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/halt_ime0_ei.gb",
+   "rom": "mooneye/acceptance/halt_ime0_ei.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/halt_ime0_ei.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/halt_ime0_nointr_timing.gb",
+   "rom": "mooneye/acceptance/halt_ime0_nointr_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/halt_ime0_nointr_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/halt_ime1_timing.gb",
+   "rom": "mooneye/acceptance/halt_ime1_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/halt_ime1_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/halt_ime1_timing2-GS.gb",
+   "rom": "mooneye/acceptance/halt_ime1_timing2-GS.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/halt_ime1_timing2-GS.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/if_ie_registers.gb",
+   "rom": "mooneye/acceptance/if_ie_registers.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/if_ie_registers.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/instr/daa.gb",
+   "rom": "mooneye/acceptance/instr/daa.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/instr/daa.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/interrupts/ie_push.gb",
+   "rom": "mooneye/acceptance/interrupts/ie_push.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/interrupts/ie_push.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/intr_timing.gb",
+   "rom": "mooneye/acceptance/intr_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/intr_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/jp_cc_timing.gb",
+   "rom": "mooneye/acceptance/jp_cc_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/jp_cc_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/jp_timing.gb",
+   "rom": "mooneye/acceptance/jp_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/jp_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ld_hl_sp_e_timing.gb",
+   "rom": "mooneye/acceptance/ld_hl_sp_e_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ld_hl_sp_e_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/oam_dma/basic.gb",
+   "rom": "mooneye/acceptance/oam_dma/basic.gb",
+   "group": "oam dma",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/oam_dma/basic.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/oam_dma/reg_read.gb",
+   "rom": "mooneye/acceptance/oam_dma/reg_read.gb",
+   "group": "oam dma",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/oam_dma/reg_read.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/oam_dma/sources-GS.gb",
+   "rom": "mooneye/acceptance/oam_dma/sources-GS.gb",
+   "group": "oam dma",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/oam_dma/sources-GS.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/oam_dma_restart.gb",
+   "rom": "mooneye/acceptance/oam_dma_restart.gb",
+   "group": "oam dma",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/oam_dma_restart.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/oam_dma_start.gb",
+   "rom": "mooneye/acceptance/oam_dma_start.gb",
+   "group": "oam dma",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/oam_dma_start.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/oam_dma_timing.gb",
+   "rom": "mooneye/acceptance/oam_dma_timing.gb",
+   "group": "oam dma",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/oam_dma_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/pop_timing.gb",
+   "rom": "mooneye/acceptance/pop_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/pop_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.gb",
+   "rom": "mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/intr_1_2_timing-GS.gb",
+   "rom": "mooneye/acceptance/ppu/intr_1_2_timing-GS.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ppu/intr_1_2_timing-GS.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/intr_2_0_timing.gb",
+   "rom": "mooneye/acceptance/ppu/intr_2_0_timing.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ppu/intr_2_0_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/intr_2_mode0_timing.gb",
+   "rom": "mooneye/acceptance/ppu/intr_2_mode0_timing.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ppu/intr_2_mode0_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/intr_2_mode0_timing_sprites.gb",
+   "rom": "mooneye/acceptance/ppu/intr_2_mode0_timing_sprites.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 5.5,
+   "limit_seconds": 11.0,
+   "references": [
+    "mooneye/acceptance/ppu/intr_2_mode0_timing_sprites.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/intr_2_mode3_timing.gb",
+   "rom": "mooneye/acceptance/ppu/intr_2_mode3_timing.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ppu/intr_2_mode3_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/intr_2_oam_ok_timing.gb",
+   "rom": "mooneye/acceptance/ppu/intr_2_oam_ok_timing.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ppu/intr_2_oam_ok_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/lcdon_timing-GS.gb",
+   "rom": "mooneye/acceptance/ppu/lcdon_timing-GS.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ppu/lcdon_timing-GS.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/lcdon_write_timing-GS.gb",
+   "rom": "mooneye/acceptance/ppu/lcdon_write_timing-GS.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 2.0,
+   "limit_seconds": 7.0,
+   "references": [
+    "mooneye/acceptance/ppu/lcdon_write_timing-GS.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/stat_irq_blocking.gb",
+   "rom": "mooneye/acceptance/ppu/stat_irq_blocking.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ppu/stat_irq_blocking.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/stat_lyc_onoff.gb",
+   "rom": "mooneye/acceptance/ppu/stat_lyc_onoff.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ppu/stat_lyc_onoff.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ppu/vblank_stat_intr-GS.gb",
+   "rom": "mooneye/acceptance/ppu/vblank_stat_intr-GS.gb",
+   "group": "ppu timing",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ppu/vblank_stat_intr-GS.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/push_timing.gb",
+   "rom": "mooneye/acceptance/push_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/push_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/rapid_di_ei.gb",
+   "rom": "mooneye/acceptance/rapid_di_ei.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/rapid_di_ei.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/reti_intr_timing.gb",
+   "rom": "mooneye/acceptance/reti_intr_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/reti_intr_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/reti_timing.gb",
+   "rom": "mooneye/acceptance/reti_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/reti_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ret_cc_timing.gb",
+   "rom": "mooneye/acceptance/ret_cc_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ret_cc_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/ret_timing.gb",
+   "rom": "mooneye/acceptance/ret_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/ret_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/rst_timing.gb",
+   "rom": "mooneye/acceptance/rst_timing.gb",
+   "group": "cpu & interrupts",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/rst_timing.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/serial/boot_sclk_align-dmgABCmgb.gb",
+   "rom": "mooneye/acceptance/serial/boot_sclk_align-dmgABCmgb.gb",
+   "group": "serial",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/serial/boot_sclk_align-dmgABCmgb.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/div_write.gb",
+   "rom": "mooneye/acceptance/timer/div_write.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/div_write.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/rapid_toggle.gb",
+   "rom": "mooneye/acceptance/timer/rapid_toggle.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/rapid_toggle.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tim00.gb",
+   "rom": "mooneye/acceptance/timer/tim00.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tim00.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tim00_div_trigger.gb",
+   "rom": "mooneye/acceptance/timer/tim00_div_trigger.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tim00_div_trigger.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tim01.gb",
+   "rom": "mooneye/acceptance/timer/tim01.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tim01.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tim01_div_trigger.gb",
+   "rom": "mooneye/acceptance/timer/tim01_div_trigger.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tim01_div_trigger.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tim10.gb",
+   "rom": "mooneye/acceptance/timer/tim10.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tim10.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tim10_div_trigger.gb",
+   "rom": "mooneye/acceptance/timer/tim10_div_trigger.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tim10_div_trigger.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tim11.gb",
+   "rom": "mooneye/acceptance/timer/tim11.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tim11.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tim11_div_trigger.gb",
+   "rom": "mooneye/acceptance/timer/tim11_div_trigger.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tim11_div_trigger.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tima_reload.gb",
+   "rom": "mooneye/acceptance/timer/tima_reload.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tima_reload.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tima_write_reloading.gb",
+   "rom": "mooneye/acceptance/timer/tima_write_reloading.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tima_write_reloading.png"
+   ]
+  },
+  {
+   "name": "mooneye/acceptance/timer/tma_write_reloading.gb",
+   "rom": "mooneye/acceptance/timer/tma_write_reloading.gb",
+   "group": "timer",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/acceptance/timer/tma_write_reloading.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/bits_bank1.gb",
+   "rom": "mooneye/emulator-only/mbc1/bits_bank1.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 3.5,
+   "limit_seconds": 8.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/bits_bank1.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/bits_bank2.gb",
+   "rom": "mooneye/emulator-only/mbc1/bits_bank2.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 3.5,
+   "limit_seconds": 8.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/bits_bank2.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/bits_mode.gb",
+   "rom": "mooneye/emulator-only/mbc1/bits_mode.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 4.5,
+   "limit_seconds": 9.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/bits_mode.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/bits_ramg.gb",
+   "rom": "mooneye/emulator-only/mbc1/bits_ramg.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 6.5,
+   "limit_seconds": 13.0,
+   "references": [
+    "mooneye/emulator-only/mbc1/bits_ramg.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/multicart_rom_8Mb.gb",
+   "rom": "mooneye/emulator-only/mbc1/multicart_rom_8Mb.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 1.0,
+   "limit_seconds": 6.0,
+   "references": [
+    "mooneye/emulator-only/mbc1/multicart_rom_8Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/ram_256kb.gb",
+   "rom": "mooneye/emulator-only/mbc1/ram_256kb.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/ram_256kb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/ram_64kb.gb",
+   "rom": "mooneye/emulator-only/mbc1/ram_64kb.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/ram_64kb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/rom_16Mb.gb",
+   "rom": "mooneye/emulator-only/mbc1/rom_16Mb.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/rom_16Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/rom_1Mb.gb",
+   "rom": "mooneye/emulator-only/mbc1/rom_1Mb.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/rom_1Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/rom_2Mb.gb",
+   "rom": "mooneye/emulator-only/mbc1/rom_2Mb.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/rom_2Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/rom_4Mb.gb",
+   "rom": "mooneye/emulator-only/mbc1/rom_4Mb.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/rom_4Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/rom_512kb.gb",
+   "rom": "mooneye/emulator-only/mbc1/rom_512kb.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/rom_512kb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc1/rom_8Mb.gb",
+   "rom": "mooneye/emulator-only/mbc1/rom_8Mb.gb",
+   "group": "mbc1",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc1/rom_8Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc2/bits_ramg.gb",
+   "rom": "mooneye/emulator-only/mbc2/bits_ramg.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 7.5,
+   "limit_seconds": 15.0,
+   "references": [
+    "mooneye/emulator-only/mbc2/bits_ramg.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc2/bits_romb.gb",
+   "rom": "mooneye/emulator-only/mbc2/bits_romb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 4.0,
+   "limit_seconds": 9.0,
+   "references": [
+    "mooneye/emulator-only/mbc2/bits_romb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc2/bits_unused.gb",
+   "rom": "mooneye/emulator-only/mbc2/bits_unused.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 3.5,
+   "limit_seconds": 8.5,
+   "references": [
+    "mooneye/emulator-only/mbc2/bits_unused.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc2/ram.gb",
+   "rom": "mooneye/emulator-only/mbc2/ram.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc2/ram.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc2/rom_1Mb.gb",
+   "rom": "mooneye/emulator-only/mbc2/rom_1Mb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc2/rom_1Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc2/rom_2Mb.gb",
+   "rom": "mooneye/emulator-only/mbc2/rom_2Mb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc2/rom_2Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc2/rom_512kb.gb",
+   "rom": "mooneye/emulator-only/mbc2/rom_512kb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc2/rom_512kb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc5/rom_16Mb.gb",
+   "rom": "mooneye/emulator-only/mbc5/rom_16Mb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc5/rom_16Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc5/rom_1Mb.gb",
+   "rom": "mooneye/emulator-only/mbc5/rom_1Mb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc5/rom_1Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc5/rom_2Mb.gb",
+   "rom": "mooneye/emulator-only/mbc5/rom_2Mb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc5/rom_2Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc5/rom_32Mb.gb",
+   "rom": "mooneye/emulator-only/mbc5/rom_32Mb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc5/rom_32Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc5/rom_4Mb.gb",
+   "rom": "mooneye/emulator-only/mbc5/rom_4Mb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc5/rom_4Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc5/rom_512kb.gb",
+   "rom": "mooneye/emulator-only/mbc5/rom_512kb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc5/rom_512kb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc5/rom_64Mb.gb",
+   "rom": "mooneye/emulator-only/mbc5/rom_64Mb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc5/rom_64Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/emulator-only/mbc5/rom_8Mb.gb",
+   "rom": "mooneye/emulator-only/mbc5/rom_8Mb.gb",
+   "group": "mbc2 / mbc5",
+   "method": "mooneye",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/emulator-only/mbc5/rom_8Mb.png"
+   ]
+  },
+  {
+   "name": "mooneye/manual-only/sprite_priority.gb",
+   "rom": "mooneye/manual-only/sprite_priority.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "mooneye/manual-only/sprite_priority.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m2_win_en_toggle_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_bgp_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_bgp_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_bgp_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_bgp_change_sprites_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change_scx.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change_scx.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change_scx_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_obp0_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_obp0_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_obp0_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_scx_high_5_bits.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_scx_high_5_bits.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_scx_high_5_bits_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_scx_low_3_bits.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_scx_low_3_bits.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_scx_low_3_bits_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_scy_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_scy_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_scy_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_window_timing.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_window_timing.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_window_timing_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_window_timing_wx_0.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_window_timing_wx_0_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_wx_4_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_wx_4_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_wx_4_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_wx_4_change_sprites.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_wx_4_change_sprites.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_wx_4_change_sprites_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_wx_5_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_wx_5_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_wx_5_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "mealybug-tearoom-tests/ppu/m3_wx_6_change.gb (DMG)",
+   "rom": "mealybug-tearoom-tests/ppu/m3_wx_6_change.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "mealybug-tearoom-tests/ppu/m3_wx_6_change_dmg_blob.png"
+   ]
+  },
+  {
+   "name": "acid/which.gb (DMG)",
+   "rom": "acid/which.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": []
+  },
+  {
+   "name": "acid/dmg-acid2.gb",
+   "rom": "acid/dmg-acid2.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 1.5,
+   "limit_seconds": 6.5,
+   "references": [
+    "acid/dmg-acid2.png"
+   ]
+  },
+  {
+   "name": "ashiepaws/bully.gb (DMG)",
+   "rom": "ashiepaws/bully.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "ashiepaws/bully.png"
+   ]
+  },
+  {
+   "name": "ashiepaws/strikethrough.gb",
+   "rom": "ashiepaws/strikethrough.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "ashiepaws/strikethrough.png"
+   ]
+  },
+  {
+   "name": "cpp/rtc-invalid-banks-test.gb",
+   "rom": "cpp/rtc-invalid-banks-test.gb",
+   "group": "mbc3 / rtc",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "cpp/rtc-invalid-banks-test.png"
+   ]
+  },
+  {
+   "name": "cpp/latch-rtc-test.gb",
+   "rom": "cpp/latch-rtc-test.gb",
+   "group": "mbc3 / rtc",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "cpp/latch-rtc-test.png"
+   ]
+  },
+  {
+   "name": "cpp/ramg-mbc3-test.gb",
+   "rom": "cpp/ramg-mbc3-test.gb",
+   "group": "mbc3 / rtc",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "cpp/ramg-mbc3-test.png"
+   ]
+  },
+  {
+   "name": "daid/ppu_scanline_bgp.gb (DMG)",
+   "rom": "daid/ppu_scanline_bgp.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "daid/ppu_scanline_bgp_0.dmg.png",
+    "daid/ppu_scanline_bgp_1.dmg.png",
+    "daid/ppu_scanline_bgp_2.dmg.png"
+   ]
+  },
+  {
+   "name": "daid/stop_instr.gb (DMG)",
+   "rom": "daid/stop_instr.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": [
+    "daid/stop_instr.dmg.png"
+   ]
+  },
+  {
+   "name": "daid/rom_and_ram.gb",
+   "rom": "daid/rom_and_ram.gb",
+   "group": "screen",
+   "method": "screenshot",
+   "runtime": 0.5,
+   "limit_seconds": 5.5,
+   "references": []
+  }
+ ]
+}

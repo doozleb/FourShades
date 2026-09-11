@@ -1,2 +1,3 @@
 * text=auto
 tools/sst/manifest.sha256 text eol=lf
+tools/roms/manifest.sha256 text eol=lf

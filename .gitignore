@@ -2,4 +2,5 @@ build/
 out/
 .vs/
 tools/sst/data/
+tools/roms/data/
 __pycache__/
