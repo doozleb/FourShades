@@ -19,8 +19,11 @@ START = "<!-- scoreboard:start -->"
 END = "<!-- scoreboard:end -->"
 BAR = 16
 CPU_FILES = 500
-# Piece 2 replaces this with the test-ROM runner's results.
-TEST_ROMS = (0, 1300)
+# The original-Game-Boy (DMG) tests that gbdev's GBEmulatorShootout runs, at
+# commit 38b926bdbc26993d1b4c43e97979ecc66287bf02 (2026-07-13): 143 from its
+# suite files plus 24 Mealybug. Piece 2 replaces this with the test-ROM
+# runner's results.
+TEST_ROMS = (0, 167)
 
 
 def load_results(path):
