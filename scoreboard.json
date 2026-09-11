@@ -1,0 +1,14 @@
+{
+  "cpu_instructions": {
+    "passing": 5,
+    "total": 500
+  },
+  "test_roms": {
+    "passing": 0,
+    "total": 1300
+  },
+  "source": {
+    "suite": "SingleStepTests/sm83",
+    "commit": "f9c30210245dd691661db39f5ace022c465ecc2f"
+  }
+}
