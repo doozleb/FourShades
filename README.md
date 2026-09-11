@@ -6,7 +6,7 @@ and measured, honestly, against the public test ROMs.
 <!-- scoreboard:start -->
 ```
 cpu instructions  ███████████████░   499 / 500
-test roms         ██████░░░░░░░░░░    68 / 167
+test roms         ███████░░░░░░░░░    74 / 167
 ```
 <!-- scoreboard:end -->
 
@@ -29,9 +29,9 @@ The test-ROM line, group by group, with the first test each group fails:
 | cpu timing | 8 / 8 |  |
 | oam bug | 2 / 7 | `blargg/oam_bug/1-lcd_sync.gb`: Failed: Failed #3 |
 | sound | 0 / 12 | `blargg/dmg_sound/01-registers.gb`: Failed: Failed #2 |
-| cpu & interrupts | 18 / 31 | `mooneye/acceptance/add_sp_e_timing.gb`: timeout after 6.5 s |
+| cpu & interrupts | 22 / 31 | `mooneye/acceptance/add_sp_e_timing.gb`: timeout after 6.5 s |
 | boot state | 1 / 3 | `mooneye/acceptance/boot_div-dmgABCmgb.gb`: failure bytes (0x42) over serial |
-| oam dma | 3 / 6 | `mooneye/acceptance/oam_dma/sources-GS.gb`: cartridge: unsupported cartridge type 0x1B |
+| oam dma | 5 / 6 | `mooneye/acceptance/oam_dma/sources-GS.gb`: cartridge: unsupported cartridge type 0x1B |
 | ppu timing | 0 / 12 | `mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.gb`: timeout after 6.5 s |
 | serial | 1 / 1 |  |
 | timer | 12 / 13 | `mooneye/acceptance/timer/rapid_toggle.gb`: failure bytes (0x42) over serial |

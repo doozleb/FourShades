@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 68,
+    "passing": 74,
     "total": 167,
     "groups": [
       {
@@ -39,7 +39,7 @@
       },
       {
         "group": "cpu & interrupts",
-        "passing": 18,
+        "passing": 22,
         "total": 31,
         "first_failure": {
           "test": "mooneye/acceptance/add_sp_e_timing.gb",
@@ -57,7 +57,7 @@
       },
       {
         "group": "oam dma",
-        "passing": 3,
+        "passing": 5,
         "total": 6,
         "first_failure": {
           "test": "mooneye/acceptance/oam_dma/sources-GS.gb",

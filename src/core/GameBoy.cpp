@@ -32,6 +32,7 @@ void GameBoy::tick() {
 }
 
 void GameBoy::tickDma() {
+    dmaCopying_ = dmaActive_;
     if (dmaActive_) {
         u16 from = static_cast<u16>(dmaFrom_ + dmaIndex_);
         if (from >= 0xE000) {
@@ -49,14 +50,15 @@ void GameBoy::tickDma() {
     }
 }
 
-// DMA timing as implemented (to be judged by the test ROMs, and changed if
-// they disagree): the M-cycle after the FF46 write is a start-up cycle and
-// isn't blocked; blocking covers the cycles in which bytes 0-158 have been
-// copied; blocked reads return 0xFF; on a restart the old transfer keeps
-// copying through the new one's start-up cycle.
+// DMA timing: the M-cycle after the FF46 write is a start-up cycle and isn't
+// blocked; the CPU is blocked in each of the 160 M-cycles that copy a byte,
+// the one copying byte 159 included (hardware-verified test ROMs read OAM in
+// that M-cycle and see 0xFF, and see the data one M-cycle later); blocked
+// reads return 0xFF; on a restart the old transfer keeps copying, so keeps
+// blocking, through the new one's start-up cycle.
 bool GameBoy::dmaBlocks(u16 address) const {
     // On DMG the CPU sees only FF00-FFFF while bytes are being copied.
-    return dmaActive_ && dmaIndex_ > 0 && address < 0xFF00;
+    return dmaCopying_ && address < 0xFF00;
 }
 
 u8 GameBoy::read(u16 address) {
