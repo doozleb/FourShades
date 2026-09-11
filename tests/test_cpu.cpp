@@ -6,6 +6,7 @@
 #include <initializer_list>
 
 using namespace fourshades;
+using sst::Cycle;
 using sst::CycleKind;
 using sst::RecordingBus;
 
@@ -91,6 +92,21 @@ TEST_CASE("HALT stops fetching; each later step is one idle cycle") {
     REQUIRE(bus.log().size() == 2);
     CHECK(bus.log()[1].kind == CycleKind::Idle);
     CHECK(cpu.regs.pc == 0x0101);
+}
+
+// The M-cycle in which a halted CPU sees an interrupt is also its fetch.
+TEST_CASE("the M-cycle that wakes a halted CPU reads the next opcode") {
+    RecordingBus bus;
+    load(bus, {0x76, 0x3C}); // HALT, INC A
+    Cpu cpu(bus);
+    cpu.regs.pc = 0x0100;
+    cpu.step();
+    bus.setPendingInterrupts(0x04);
+    cpu.step(); // wakes; IME is off, so INC A runs
+    REQUIRE(bus.log().size() == 2);
+    CHECK(bus.log()[1] == Cycle{0x0101, 0x3C, CycleKind::Read});
+    CHECK(cpu.regs.a == 0x01);
+    CHECK(cpu.regs.pc == 0x0102);
 }
 
 TEST_CASE("STOP reads one byte, advances PC by 2, then idles (Pan Docs divergence, "

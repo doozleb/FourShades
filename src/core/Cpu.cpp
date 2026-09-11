@@ -3,22 +3,39 @@
 namespace fourshades {
 
 void Cpu::step() {
-    if (state_ == State::Halted) {
-        if (bus_.pendingInterrupts() == 0) {
-            bus_.idle();
-            return;
-        }
-        state_ = State::Running; // Pan Docs "halt": wakes whatever IME is
-    }
-    if (state_ != State::Running) {
+    if (state_ == State::Stopped || state_ == State::Locked) {
         bus_.idle();
         return;
     }
-    if (ime && bus_.pendingInterrupts() != 0) {
+    // The CPU samples IE & IF at the end of the opcode-fetch M-cycle, so a
+    // request raised during the fetch (the timer's reload cycle, for one) is
+    // taken now. If it dispatches, the fetched opcode is dropped and PC isn't
+    // advanced: the fetch was the first of the dispatch's two wait M-cycles.
+    // A halted CPU wakes within the M-cycle in which an interrupt becomes
+    // pending and fetches in that same M-cycle, so HALT services it exactly
+    // as quickly as a run of NOPs would (see Bus::haltedCycle).
+    u8 opcode = 0;
+    if (state_ == State::Halted) {
+        const std::optional<u8> fetched = bus_.haltedCycle(regs.pc);
+        if (!fetched) {
+            return;
+        }
+        state_ = State::Running; // Pan Docs "halt": wakes whatever IME is
+        opcode = *fetched;
+    } else {
+        opcode = bus_.read(regs.pc);
+    }
+    const u8 pending = bus_.pendingInterrupts();
+    if (ime && pending != 0) {
         dispatchInterrupt();
         return;
     }
-    execute(fetch8());
+    if (haltBug_) {
+        haltBug_ = false; // Pan Docs "halt bug": this fetch doesn't advance PC
+    } else {
+        regs.pc = static_cast<u16>(regs.pc + 1);
+    }
+    execute(opcode);
     // EI sets the delay to 2, so IME turns on at the end of the instruction
     // after EI. DI zeroes it, cancelling a pending EI.
     if (imeDelay_ > 0 && --imeDelay_ == 0) {
@@ -26,7 +43,8 @@ void Cpu::step() {
     }
 }
 
-// Pan Docs "Interrupts": two wait M-cycles, push PC (two), set PC (one).
+// Pan Docs "Interrupts": two wait M-cycles, push PC (two), set PC (one). The
+// first wait M-cycle is the dropped opcode fetch that step() already did.
 void Cpu::dispatchInterrupt() {
     ime = false;
     imeDelay_ = 0;
@@ -35,7 +53,6 @@ void Cpu::dispatchInterrupt() {
         haltBug_ = false;
         regs.pc = static_cast<u16>(regs.pc - 1);
     }
-    bus_.idle();
     bus_.idle();
     regs.sp = static_cast<u16>(regs.sp - 1);
     bus_.write(regs.sp, hi(regs.pc));
@@ -59,12 +76,8 @@ void Cpu::dispatchInterrupt() {
 }
 
 u8 Cpu::fetch8() {
-    const u8 value = bus_.read(regs.pc);
-    if (haltBug_) {
-        haltBug_ = false; // Pan Docs "halt bug": this fetch doesn't advance PC
-    } else {
-        regs.pc = static_cast<u16>(regs.pc + 1);
-    }
+    const u8 value = bus_.read(regs.pc); // operands; step() fetches opcodes
+    regs.pc = static_cast<u16>(regs.pc + 1);
     return value;
 }
 

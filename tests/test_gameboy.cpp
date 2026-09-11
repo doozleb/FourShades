@@ -55,6 +55,19 @@ TEST_CASE("power-on state matches a DMG after its boot ROM") {
     CHECK(gb->peek(0xFF41) == 0x86);
 }
 
+// Pan Docs gives DIV = $AB at PC = $0100 but not its phase. Hardware (DMG
+// A-C, MGB) sees DIV turn $AC in the 14th M-cycle from the fetch at $0100,
+// so before that fetch the system counter is $ABC8.
+TEST_CASE("DIV first increments in the 14th M-cycle after power-on") {
+    auto gb = makeGameBoy({0x00});
+    for (int i = 0; i < 13; ++i) {
+        gb->idle();
+    }
+    CHECK(gb->peek(0xFF04) == 0xAB);
+    gb->idle();
+    CHECK(gb->peek(0xFF04) == 0xAC);
+}
+
 TEST_CASE("every bus call advances the machine by one M-cycle") {
     auto gb = makeGameBoy({0x00, 0x00});
     gb->step(); // NOP: one fetch

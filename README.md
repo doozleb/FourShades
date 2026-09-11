@@ -6,7 +6,7 @@ and measured, honestly, against the public test ROMs.
 <!-- scoreboard:start -->
 ```
 cpu instructions  ███████████████░   499 / 500
-test roms         ███████░░░░░░░░░    74 / 167
+test roms         ███████░░░░░░░░░    76 / 167
 ```
 <!-- scoreboard:end -->
 
@@ -30,11 +30,11 @@ The test-ROM line, group by group, with the first test each group fails:
 | oam bug | 2 / 7 | `blargg/oam_bug/1-lcd_sync.gb`: Failed: Failed #3 |
 | sound | 0 / 12 | `blargg/dmg_sound/01-registers.gb`: Failed: Failed #2 |
 | cpu & interrupts | 22 / 31 | `mooneye/acceptance/add_sp_e_timing.gb`: timeout after 6.5 s |
-| boot state | 1 / 3 | `mooneye/acceptance/boot_div-dmgABCmgb.gb`: failure bytes (0x42) over serial |
+| boot state | 2 / 3 | `mooneye/acceptance/boot_hwio-dmgABCmgb.gb`: failure bytes (0x42) over serial |
 | oam dma | 5 / 6 | `mooneye/acceptance/oam_dma/sources-GS.gb`: cartridge: unsupported cartridge type 0x1B |
 | ppu timing | 0 / 12 | `mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.gb`: timeout after 6.5 s |
 | serial | 1 / 1 |  |
-| timer | 12 / 13 | `mooneye/acceptance/timer/rapid_toggle.gb`: failure bytes (0x42) over serial |
+| timer | 13 / 13 |  |
 | mbc1 | 12 / 13 | `mooneye/emulator-only/mbc1/multicart_rom_8Mb.gb`: failure bytes (0x42) over serial |
 | mbc2 / mbc5 | 0 / 15 | `mooneye/emulator-only/mbc2/bits_ramg.gb`: cartridge: unsupported cartridge type 0x06 |
 | screen | 0 / 32 | `mooneye/manual-only/sprite_priority.gb`: needs the PPU (piece 3) |
