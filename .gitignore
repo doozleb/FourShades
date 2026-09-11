@@ -1,6 +1,5 @@
-node_modules/
-dist/
-.astro/
-.env
-.DS_Store
 build/
+out/
+.vs/
+tools/sst/data/
+__pycache__/
