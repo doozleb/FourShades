@@ -25,6 +25,8 @@ add_library(fourshades_core STATIC
     src/core/CpuCb.cpp
     src/core/Cartridge.cpp
     src/core/Timer.cpp
+    src/core/Serial.cpp
+    src/core/LcdTiming.cpp
 )
 target_include_directories(fourshades_core PUBLIC src)
 add_subdirectory(tools/sst)
