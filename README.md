@@ -3,12 +3,19 @@
 A Game Boy emulator written in C++20, built in public with AI coding agents —
 and measured, honestly, against the public test ROMs.
 
+<!-- scoreboard:start -->
 ```
-test roms  ░░░░░░░░░░░░░░░░  0 / 1300
+cpu instructions  ░░░░░░░░░░░░░░░░     5 / 500
+test roms         ░░░░░░░░░░░░░░░░     0 / 1300
 ```
+<!-- scoreboard:end -->
 
-**Status: not started.** There is no emulator code in this repository yet. The
-scoreboard above is real, and it will stay at zero until it isn't.
+**Status: building the CPU (piece 1 of 6).** The CPU line counts SM83
+instructions passing every one of their 1,000
+[SingleStepTests](https://github.com/SingleStepTests/sm83), which check every
+register, every byte of memory and every bus cycle. The test-ROM line starts
+moving in piece 2. Both lines are generated from a real test run, and CI fails
+any commit whose scoreboard doesn't match what the code actually scores.
 
 ---
 
@@ -81,11 +88,27 @@ project page is **[doozleb.com/projects/fourshades](https://doozleb.com/projects
 ## Repository layout
 
 ```
-docs/superpowers/specs/   the reasoning behind the project
+src/core/                 the emulator core: CPU and bus (no window, no files)
+tests/                    unit tests (doctest)
+tools/sst/                the SingleStepTests harness and pinned-data manifest
+tools/scoreboard.py       turns a test run into the scoreboard above
+docs/superpowers/specs/   the reasoning behind each piece
 docs/superpowers/plans/   task-by-task implementation plans
+docs/known-divergences.md where a test and the hardware documentation disagree
 ```
 
-Source, tests and build files arrive with the first task.
+## Building
+
+Windows and Visual Studio 2026 (with the C++ workload). Open the folder in
+Visual Studio, or from PowerShell:
+
+```powershell
+.\tools\dev.cmd cmake --preset release
+.\tools\dev.cmd cmake --build --preset release
+.\tools\dev.cmd ctest --preset release
+python tools/sst/fetch_sst.py              # the test data, pinned and hash-checked
+.\build\release\tools\sst\sst_runner.exe   # score the CPU
+```
 
 ## Planned scope
 
@@ -98,9 +121,9 @@ Roughly in order, each gated on the test ROMs rather than on looking right:
   makes this hard
 - **Input, then audio**
 
-The first milestone is not "it plays Tetris". It is **the CPU passing Blargg's
-first test ROM** — at which point the scoreboard reads something other than
-zero.
+The first milestone is not "it plays Tetris". It is **the CPU passing every
+SingleStepTests instruction, then Blargg's first test ROM**, at which point the
+test-ROM line reads something other than zero.
 
 ## Licence
 
