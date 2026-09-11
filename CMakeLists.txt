@@ -23,6 +23,7 @@ add_library(fourshades_core STATIC
     src/core/CpuWide.cpp
     src/core/CpuControl.cpp
     src/core/CpuCb.cpp
+    src/core/Cartridge.cpp
 )
 target_include_directories(fourshades_core PUBLIC src)
 add_subdirectory(tools/sst)
