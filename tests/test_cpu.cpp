@@ -80,6 +80,28 @@ TEST_CASE("HALT stops fetching; each later step is one idle cycle") {
     CHECK(cpu.regs.pc == 0x0101);
 }
 
+TEST_CASE("STOP reads one byte, advances PC by 2, then idles (Pan Docs divergence, "
+          "see docs/known-divergences.md)") {
+    RecordingBus bus;
+    load(bus, {0x10, 0x00});
+    Cpu cpu(bus);
+    cpu.regs.pc = 0x0100;
+    cpu.step();
+    CHECK(cpu.regs.pc == 0x0102);
+    REQUIRE(bus.log().size() == 1);
+    CHECK(bus.log()[0].kind == CycleKind::Read);
+    CHECK(bus.log()[0].address == 0x0100);
+    CHECK(cpu.state() == Cpu::State::Stopped);
+
+    cpu.step();
+    cpu.step();
+    REQUIRE(bus.log().size() == 3);
+    CHECK(bus.log()[0].kind == CycleKind::Read);
+    CHECK(bus.log()[1].kind == CycleKind::Idle);
+    CHECK(bus.log()[2].kind == CycleKind::Idle);
+    CHECK(cpu.regs.pc == 0x0102);
+}
+
 TEST_CASE("an illegal opcode locks the CPU") {
     RecordingBus bus;
     load(bus, {0xD3});
