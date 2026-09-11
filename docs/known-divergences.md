@@ -1,11 +1,16 @@
 # Known divergences
 
-Places where a test expects something that Pan Docs says the hardware doesn't
-do. We follow Pan Docs and leave the test failing, so the scoreboard never
-claims more than the hardware documentation supports.
+The project's rule, refined 2026-09-11: Pan Docs outranks a test that only
+another emulator generated (SingleStepTests, for instance) — the test is left
+failing and recorded here, with the evidence. But a hardware-verified test —
+one run and checked against real DMG, MGB, SGB, SGB2, CGB, AGB or AGS
+hardware, as Mooneye's test suite marks its own — outranks a Pan Docs
+sentence that turns out to be a simplification, and that decision is recorded
+here too, with the evidence, instead of silently changing behaviour.
 
 Each entry gives the test, what it expects, what Pan Docs says (with a link),
-and what FourShades does.
+what FourShades does, and, where the hardware-verified rule applies, the
+decision and its date.
 
 ## STOP (0x10): Pan Docs says STOP is 2 bytes here; the test advances PC by 1
 
@@ -36,6 +41,21 @@ and what FourShades does.
   need piece 2's joypad and interrupts to implement.
 - **Checked:** 2026-09-11.
 
+## HALT (0x76): matches Pan Docs
+
+HALT (76) was checked against Pan Docs on 2026-09-11 for the no-pending-interrupt
+case the tests model and matches: one byte, PC + 1, and the CPU enters HALT
+mode.
+
+- **Pan Docs, [HALT](https://gbdev.io/pandocs/halt.html):** "If no interrupt is
+  pending, halt executes as normal, and the CPU resumes regular execution as
+  soon as an interrupt becomes pending."
+- **Pan Docs, [CPU Instruction
+  Set](https://gbdev.io/pandocs/CPU_Instruction_Set.html):** lists `halt` as
+  the single-byte encoding `01110110`, with no operand field — unlike `ld r8,
+  r8`, which the page notes `halt` is the one exception to (encoding `[hl],
+  [hl]` yields `halt` instead).
+
 ## STAT at power-on (0xFF41): 0x86 instead of 0x85
 
 - **Test:** `tests/test_gameboy.cpp`'s power-on test checks `FF41 == 0x86`.
@@ -52,7 +72,7 @@ and what FourShades does.
 - **Resolution:** the piece-3 PPU must reproduce the line-153 behaviour.
 - **Checked:** 2026-09-11.
 
-## OAM DMA bus conflicts: Pan Docs says only HRAM is usable; nine tests run code from ROM and WRAM during DMA
+## OAM DMA bus conflicts: resolved in favour of the hardware-verified tests (2026-09-11)
 
 - **Tests:** Mooneye `add_sp_e_timing`, `call_cc_timing`, `call_timing`,
   `jp_cc_timing`, `jp_timing`, `ld_hl_sp_e_timing`, `reti_timing`,
@@ -66,33 +86,26 @@ and what FourShades does.
   at $FF80-$FFFE)", and, by contrast, "On CGB, the cartridge and WRAM are on
   separate buses",
   [OAM DMA Transfer: OAM DMA bus conflicts](https://gbdev.io/pandocs/OAM_DMA_Transfer.html#oam-dma-bus-conflicts).
-- **FourShades:** follows Pan Docs and blocks everything below $FF00 while
-  bytes are copied (I/O stays reachable, so DMA can be restarted from HRAM).
-  The tests' opcode fetches from ROM or WRAM read $FF (`rst $38`), the program
-  runs away, and each test times out.
-- **Evidence that this is the only cause:** a throwaway build that blocked
-  only OAM and the bus the DMA reads from (VRAM for a $80-$9F source, the
-  external bus otherwise) passed all nine and lost no other test (76 → 85 of
-  167). It was not committed, because it contradicts the Pan Docs sentence
-  above.
-- **Resolution:** if the project decides the hardware-verified tests outweigh
-  that sentence (it reads as advice to programmers, and the tests show DMG's
-  VRAM bus is separate from the external one), per-bus blocking is a small,
-  contained change in `GameBoy::dmaBlocks`.
+- **What FourShades did before this decision:** followed Pan Docs and blocked
+  everything below $FF00 while bytes are copied (I/O stayed reachable, so DMA
+  could be restarted from HRAM). The tests' opcode fetches from ROM or WRAM
+  read $FF (`rst $38`), the program ran away, and each test timed out.
+- **Evidence that per-bus blocking is the only cause:** a throwaway build
+  that blocked only OAM and the bus the DMA reads from (VRAM for a $80-$9F
+  source, the external bus otherwise) passed all nine and lost no other test
+  (76 → 85 of 167).
+- **Decision (2026-09-11):** the project's rule is now that a hardware-verified
+  test outranks a Pan Docs sentence that turns out to be a simplification.
+  The DMG sentence above reads as advice to programmers ("only HRAM is safe
+  to use"), not as a specification of what the bus actually does, and the
+  nine tests above show DMG's video bus (VRAM) is already separate from its
+  external bus (ROM, cartridge RAM, WRAM) — the same separation Pan Docs
+  documents outright for CGB. `GameBoy::dmaBlocks` now blocks only OAM
+  (always) and whichever bus the DMA is currently reading from (the video
+  bus for a VRAM source, the external bus otherwise); I/O, HRAM and IE stay
+  reachable throughout. Test-ROM score: 76 → 85 of 167 (the nine tests
+  above gained, nothing lost).
 - **Checked:** 2026-09-11.
-
-HALT (76) was checked against Pan Docs on 2026-09-11 for the no-pending-interrupt
-case the tests model and matches: one byte, PC + 1, and the CPU enters HALT
-mode.
-
-- **Pan Docs, [HALT](https://gbdev.io/pandocs/halt.html):** "If no interrupt is
-  pending, halt executes as normal, and the CPU resumes regular execution as
-  soon as an interrupt becomes pending."
-- **Pan Docs, [CPU Instruction
-  Set](https://gbdev.io/pandocs/CPU_Instruction_Set.html):** lists `halt` as
-  the single-byte encoding `01110110`, with no operand field — unlike `ld r8,
-  r8`, which the page notes `halt` is the one exception to (encoding `[hl],
-  [hl]` yields `halt` instead).
 
 ## Timing model (not a divergence: where Pan Docs is silent)
 
@@ -107,9 +120,15 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
 - **Interrupts are sampled at the end of the opcode-fetch M-cycle.** A request
   raised during that M-cycle, such as the timer's in its reload cycle
   ("cycle B"), is taken instead of the fetched instruction, whose fetch becomes
-  the first of Pan Docs' two wait M-cycles (dispatch stays 5 M-cycles).
-  Pinned by `timer/rapid_toggle`: the interrupt must arrive before the `dec bc`
-  whose fetch coincides with cycle B.
+  the first of Pan Docs' two wait M-cycles (dispatch stays 5 M-cycles). Pan
+  Docs hedges on what those two M-cycles are: "2 M-cycles pass while nothing
+  happens; presumably the CPU is executing `nop`s during this time" ([Interrupts:
+  Interrupt handling](https://gbdev.io/pandocs/Interrupts.html#interrupt-handling)).
+  FourShades' first one is the opcode read `step()` already performed before
+  the interrupt was seen; that read has no side effects, so it's unobservable
+  and doesn't need to be told apart from a `nop`. Pinned by
+  `timer/rapid_toggle`: the interrupt must arrive before the `dec bc` whose
+  fetch coincides with cycle B.
 - **A halted CPU wakes within the M-cycle an interrupt becomes pending,** and
   that M-cycle is also the fetch of the next opcode, so HALT services an
   interrupt exactly as a run of NOPs would (Pan Docs: "the CPU simply wakes
@@ -120,9 +139,12 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   SingleStepTests' HALT cycles (`---`) have it.
 - **System counter at power-on: 0xABC8** before the fetch at 0x0100. Pan Docs
   gives DIV = $AB only. `boot_div-dmgABCmgb` (DMG A-C, MGB) sees DIV turn $AC
-  in the 14th M-cycle, and `serial/boot_sclk_align-dmgABCmgb` sees the serial
-  interrupt at a time that depends on both this phase and the sampling point
-  above; both pass only with the two together.
+  in the 14th M-cycle from the fetch at 0x0100, which puts the counter at
+  0xABC8 before that fetch (0xABCC, the value often quoted, is the counter
+  just after it); `boot_div` needs only this counter value to pass. Only
+  `serial/boot_sclk_align-dmgABCmgb` needs both this and the interrupt
+  sampling point above together: the serial interrupt it checks lands at a
+  time that depends on both.
 - **OAM DMA:** the M-cycle after the FF46 write is a start-up cycle; the CPU
   is then locked out for the 160 M-cycles that copy bytes, the last included
   (`oam_dma_timing`, `oam_dma_restart`, `push_timing`, `rst_timing`,

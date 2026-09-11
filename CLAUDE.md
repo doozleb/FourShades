@@ -18,8 +18,15 @@ scoreboard, so these rules are not negotiable.
 
 ## When a test disagrees with the hardware documentation
 
-Follow Pan Docs (https://gbdev.io/pandocs/). Leave the instruction failing,
-and add an entry to `docs/known-divergences.md` with the evidence.
+Follow Pan Docs (https://gbdev.io/pandocs/) over a test that only another
+emulator generated (SingleStepTests, for instance). Leave the instruction
+failing, and add an entry to `docs/known-divergences.md` with the evidence.
+
+A hardware-verified test — one run and checked against real DMG, MGB, SGB,
+SGB2, CGB, AGB or AGS hardware (Mooneye's test suite marks these) — outranks
+a Pan Docs sentence that turns out to be a simplification. Record that
+decision in `docs/known-divergences.md` too, with the evidence, instead of
+silently changing behaviour.
 
 ## Building (Windows, Visual Studio 2026)
 
