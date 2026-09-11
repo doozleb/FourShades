@@ -36,6 +36,19 @@ and what FourShades does.
   need piece 2's joypad and interrupts to implement.
 - **Checked:** 2026-09-11.
 
+## STAT at power-on (0xFF41): 0x86 instead of 0x85
+
+- **Test:** `tests/test_gameboy.cpp`'s power-on test checks `FF41 == 0x86`.
+- **Pan Docs:** [Power Up Sequence](https://gbdev.io/pandocs/Power_Up_Sequence.html)
+  lists STAT = $85 and LY = $00 for DMG at PC = $0100 — mode 1 (VBlank) while
+  LY already reads 0, i.e. the end of line 153.
+- **FourShades:** the LCD timing (`src/core/LcdTiming`) is a placeholder
+  until the PPU (piece 3) and starts at LY 0 in mode 2, so STAT reads $86.
+- **Affected:** Mooneye's `boot_hwio-dmgABCmgb` test (already failing for
+  other reasons: sound registers aren't implemented until piece 5).
+- **Resolution:** the piece-3 PPU must reproduce the line-153 behaviour.
+- **Checked:** 2026-09-11.
+
 HALT (76) was checked against Pan Docs on 2026-09-11 for the no-pending-interrupt
 case the tests model and matches: one byte, PC + 1, and the CPU enters HALT
 mode.

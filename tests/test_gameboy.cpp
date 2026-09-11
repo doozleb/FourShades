@@ -45,6 +45,14 @@ TEST_CASE("power-on state matches a DMG after its boot ROM") {
     CHECK(gb->peek(0xFF40) == 0x91);
     CHECK(gb->peek(0xFF46) == 0xFF);
     CHECK(gb->peek(0xFF47) == 0xFC);
+    CHECK(gb->peek(0xFF01) == 0x00); // SB
+    CHECK(gb->peek(0xFF05) == 0x00); // TIMA
+    CHECK(gb->peek(0xFF06) == 0x00); // TMA
+    CHECK(gb->peek(0xFF44) == 0x00); // LY
+    // Pan Docs: STAT = 0x85 (mode 1 with LY already 0, the end of line 153).
+    // The LCD placeholder can't model that and reads mode 2; recorded in
+    // docs/known-divergences.md until the PPU (piece 3) replaces it.
+    CHECK(gb->peek(0xFF41) == 0x86);
 }
 
 TEST_CASE("every bus call advances the machine by one M-cycle") {
