@@ -220,7 +220,10 @@ enable_testing()
 # ---------------------------------------------------------------------------
 file(GLOB FOURSHADES_TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/tests/*.cpp)
 add_executable(fourshades_tests ${FOURSHADES_TEST_SOURCES})
-target_include_directories(fourshades_tests PRIVATE src third_party tools)
+target_include_directories(fourshades_tests PRIVATE src tools)
+# SYSTEM: MSVC compiles vendored headers with /external:W0, so their warnings
+# (doctest's C5285) don't bury ours.
+target_include_directories(fourshades_tests SYSTEM PRIVATE third_party)
 add_test(NAME unit COMMAND fourshades_tests)
 ```
 
@@ -1642,7 +1645,8 @@ add_library(sst_harness STATIC
     Manifest.cpp
     Selection.cpp
 )
-target_include_directories(sst_harness PUBLIC ${CMAKE_SOURCE_DIR}/tools ${CMAKE_SOURCE_DIR}/third_party)
+target_include_directories(sst_harness PUBLIC ${CMAKE_SOURCE_DIR}/tools)
+target_include_directories(sst_harness SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/third_party)
 target_link_libraries(sst_harness PUBLIC fourshades_core)
 ```
 
