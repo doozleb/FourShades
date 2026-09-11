@@ -23,4 +23,10 @@ struct RomOutcome {
 // limit. Pass/fail is decided here, never by the core.
 RomOutcome runRomTest(const RomTest& test, std::vector<u8> romImage);
 
+// Formats a Blargg failure reason from its final line of text. Blargg's own
+// text often already starts with "Failed" (e.g. "Failed #3"), so this avoids
+// stuttering "Failed: Failed #3": the "Failed: " prefix is added only when
+// the line doesn't already start with "Failed".
+std::string blarggFailureReason(const std::string& text);
+
 } // namespace roms

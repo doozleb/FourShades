@@ -25,7 +25,7 @@
         "total": 7,
         "first_failure": {
           "test": "blargg/oam_bug/1-lcd_sync.gb",
-          "reason": "Failed: Failed #3"
+          "reason": "Failed #3"
         }
       },
       {
@@ -34,7 +34,7 @@
         "total": 12,
         "first_failure": {
           "test": "blargg/dmg_sound/01-registers.gb",
-          "reason": "Failed: Failed #2"
+          "reason": "Failed #2"
         }
       },
       {
