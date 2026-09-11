@@ -7,12 +7,14 @@ scoreboard, so these rules are not negotiable.
 
 - Edit anything in `tools/sst/data/`, or `tools/sst/manifest.sha256`.
 - Edit the README scoreboard block or `scoreboard.json` by hand. After a full
-  run, use `python tools/scoreboard.py update build/sst-results.json`.
+  run, use `python tools/scoreboard.py update build/sst-results.json build/rom-results.json`.
 - Make code in `src/core/` depend on the tests: no test names, no file or JSON
   access, no includes from `tools/`. `tools/check_core_isolation.py` enforces it.
 - Special-case a test, a test name, or an address pattern only a test uses.
 - Loosen the comparator (`tools/sst/SstCompare.cpp`) or the loader to make
   something pass.
+- Edit tools/roms/data/, tools/roms/manifest.sha256 or tools/roms/tests.json by hand (regenerate with make_test_list.py).
+- Raise a test's time limit, or special-case a ROM, to make it pass.
 
 ## When a test disagrees with the hardware documentation
 
@@ -29,7 +31,9 @@ and add an entry to `docs/known-divergences.md` with the evidence.
     python tools/check_core_isolation.py
     python tools/sst/fetch_sst.py
     .\build\release\tools\sst\sst_runner.exe
-    python tools/scoreboard.py update build/sst-results.json
+    python tools/roms/fetch_roms.py
+    .\build\release\tools\roms\rom_runner.exe
+    python tools/scoreboard.py update build/sst-results.json build/rom-results.json
 
 ## Commits
 
