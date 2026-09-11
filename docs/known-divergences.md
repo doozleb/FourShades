@@ -28,7 +28,23 @@ and what FourShades does.
   button-held and interrupt-pending branches (which Pan Docs says make STOP a
   1-byte opcode or turn it into HALT), need the timer, joypad and interrupts,
   which arrive in piece 2.
+- **Also noted by Pan Docs itself:** "stop is often considered a two-byte
+  instruction, though the second byte is not always ignored.",
+  [CPU Instruction Set](https://gbdev.io/pandocs/CPU_Instruction_Set.html#stop).
+  "Not always" refers to the button-held and interrupt-pending branches, where
+  STOP behaves differently — the branches this entry already covers, and which
+  need piece 2's joypad and interrupts to implement.
 - **Checked:** 2026-09-11.
 
 HALT (76) was checked against Pan Docs on 2026-09-11 for the no-pending-interrupt
-case the tests model and matches: one byte, PC + 1, and the CPU enters HALT mode.
+case the tests model and matches: one byte, PC + 1, and the CPU enters HALT
+mode.
+
+- **Pan Docs, [HALT](https://gbdev.io/pandocs/halt.html):** "If no interrupt is
+  pending, halt executes as normal, and the CPU resumes regular execution as
+  soon as an interrupt becomes pending."
+- **Pan Docs, [CPU Instruction
+  Set](https://gbdev.io/pandocs/CPU_Instruction_Set.html):** lists `halt` as
+  the single-byte encoding `01110110`, with no operand field — unlike `ld r8,
+  r8`, which the page notes `halt` is the one exception to (encoding `[hl],
+  [hl]` yields `halt` instead).

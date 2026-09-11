@@ -1,6 +1,6 @@
 # FourShades piece 1: foundation and SM83 CPU
 
-**Status:** design, awaiting review
+**Status:** implemented 2026-09-11 (CPU 499/500; see docs/known-divergences.md)
 **Date:** 2026-09-11
 **Piece:** 1 of 6 (foundation + CPU → machine + test-ROM scoreboard → graphics
 + window → cartridge chips → sound → browser build)
@@ -55,7 +55,10 @@ fourshades_core (static library: no window, no files, no JSON)
   core/Bus.h         abstract interface: read, write, idle, each one M-cycle
   core/Registers.h   AF BC DE HL SP PC, flag accessors (F's low nibble is always 0)
   core/Cpu.h/.cpp    state, step(), fetch/decode, interrupt state, HALT/STOP/lock
-  core/CpuAlu.cpp    8- and 16-bit arithmetic and logic, flag rules
+  core/CpuLoads8.cpp 8-bit loads
+  core/CpuAlu8.cpp   8- and 16-bit arithmetic and logic, flag rules
+  core/CpuWide.cpp   16-bit loads, stack, 16-bit arithmetic
+  core/CpuControl.cpp jumps, calls, returns, RST
   core/CpuCb.cpp     CB-prefixed rotates, shifts, BIT/RES/SET
 
 tools/sst/ (the test harness; never linked into the emulator)
@@ -68,6 +71,11 @@ tools/scoreboard.py  results JSON → scoreboard.json + README scoreboard block
 tests/               doctest unit tests for core and harness pieces
 third_party/         doctest.h, nlohmann/json.hpp (versions noted in a README)
 ```
+
+The opcode groups above ended up as one file per group —
+`CpuLoads8.cpp`/`CpuAlu8.cpp`/`CpuWide.cpp`/`CpuControl.cpp`/`CpuCb.cpp` —
+rather than the single `CpuAlu.cpp` this sketch originally named, matching the
+implementation plan's task split. The architecture is otherwise unchanged.
 
 **How the pieces fit.** The CPU only reaches the outside world through `Bus`.
 Every `read` and `write` is one M-cycle. Cycles with no memory access call

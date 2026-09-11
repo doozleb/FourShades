@@ -1857,6 +1857,8 @@ git commit -m "feat: pin SingleStepTests by commit and SHA-256 manifest" -m "Co-
 
 ### Task 5: Loader, comparator and single-test runner
 
+> Note: after review, SstLoader.cpp gained a stricter name check and a uint64 range check (commit 6955974). The code is the source of truth for that file.
+
 **Files:**
 - Create: `tools/sst/SstLoader.h`, `tools/sst/SstLoader.cpp`, `tools/sst/SstCompare.h`, `tools/sst/SstCompare.cpp`, `tools/sst/SstRun.h`, `tools/sst/SstRun.cpp`
 - Modify: `tools/sst/CMakeLists.txt`
