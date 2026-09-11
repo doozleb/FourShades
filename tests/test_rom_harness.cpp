@@ -159,7 +159,22 @@ TEST_CASE("Blargg's memory protocol reports Fail once running has genuinely been
     CHECK(roms::blarggMemoryVerdict(peek, sawRunning, &text) == roms::Verdict::Fail);
 }
 
-TEST_CASE("Blargg's memory protocol text is NUL-bounded, capped at 0xBFFF, and sanitized") {
+TEST_CASE("Blargg's memory protocol text stops at 0xBFFF, the end of cartridge RAM") {
+    std::map<u16, u8> mem;
+    const auto peek = [&](u16 a) { return mem.count(a) ? mem[a] : static_cast<u8>(0xFF); };
+    std::string text;
+    bool sawRunning = true;
+    mem[0xA001] = 0xDE;
+    mem[0xA002] = 0xB0;
+    mem[0xA003] = 0x61;
+    mem[0xA000] = 0x00;
+    for (unsigned a = 0xA004; a <= 0xBFFF; ++a) mem[static_cast<u16>(a)] = 'a'; // no NUL anywhere
+    // 0xC000 (WRAM, past the end) reads non-zero too, so only the cap can stop the scan.
+    CHECK(roms::blarggMemoryVerdict(peek, sawRunning, &text) == roms::Verdict::Pass);
+    CHECK(text.size() == 0xBFFF - 0xA004 + 1);
+}
+
+TEST_CASE("Blargg's memory protocol text is NUL-bounded and sanitized") {
     std::map<u16, u8> mem;
     const auto peek = [&](u16 a) { return mem.count(a) ? mem[a] : static_cast<u8>(0xFF); };
     std::string text;

@@ -66,8 +66,10 @@ CpuSnapshot snapshot(const json& object, bool isFinal, const std::string& test) 
         }
     } else {
         // "ie" is in every initial state and no final one: the generator's own
-        // interrupt-enable latch (0 or 1, not the 0xFFFF register). Interrupt
-        // delivery is piece 2, so it is validated here and otherwise unused.
+        // interrupt-enable latch (0 or 1, not the 0xFFFF register). The core
+        // has interrupts, but no SingleStepTests case raises one (RecordingBus
+        // always reports none pending), so it is validated here and otherwise
+        // unused.
         field(object, "ie", 1, test);
     }
     if (!object.contains("ram") || !object.at("ram").is_array()) {
