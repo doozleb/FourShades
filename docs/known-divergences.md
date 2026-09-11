@@ -44,9 +44,41 @@ and what FourShades does.
   LY already reads 0, i.e. the end of line 153.
 - **FourShades:** the LCD timing (`src/core/LcdTiming`) is a placeholder
   until the PPU (piece 3) and starts at LY 0 in mode 2, so STAT reads $86.
-- **Affected:** Mooneye's `boot_hwio-dmgABCmgb` test (already failing for
-  other reasons: sound registers aren't implemented until piece 5).
+- **Affected:** no test ROM at present. Mooneye's `boot_hwio-dmgABCmgb` reads
+  STAT and LY only after walking $FF00-$FF3F, when the placeholder happens to
+  agree with hardware; it fails first on NR10 ($FF10 reads $FF, expected
+  $80), because sound registers arrive in piece 5. With the sound registers
+  stubbed to their power-on values in a throwaway build, it passed.
 - **Resolution:** the piece-3 PPU must reproduce the line-153 behaviour.
+- **Checked:** 2026-09-11.
+
+## OAM DMA bus conflicts: Pan Docs says only HRAM is usable; nine tests run code from ROM and WRAM during DMA
+
+- **Tests:** Mooneye `add_sp_e_timing`, `call_cc_timing`, `call_timing`,
+  `jp_cc_timing`, `jp_timing`, `ld_hl_sp_e_timing`, `reti_timing`,
+  `ret_cc_timing`, `ret_timing` (all "verified: DMG, MGB, SGB, SGB2, CGB,
+  AGB, AGS"). Each starts an OAM DMA from $8000 (VRAM) and, while it runs,
+  executes an instruction from ROM, or from echo RAM at $FDFE/$FDFF, whose
+  operand or stack bytes lie in OAM. They expect the ROM and WRAM accesses to
+  work and only the OAM ones to read $FF, which places each memory access of
+  the instruction to the M-cycle.
+- **Pan Docs:** "On DMG, during OAM DMA, the CPU can access only HRAM (memory
+  at $FF80-$FFFE)", and, by contrast, "On CGB, the cartridge and WRAM are on
+  separate buses",
+  [OAM DMA Transfer: OAM DMA bus conflicts](https://gbdev.io/pandocs/OAM_DMA_Transfer.html#oam-dma-bus-conflicts).
+- **FourShades:** follows Pan Docs and blocks everything below $FF00 while
+  bytes are copied (I/O stays reachable, so DMA can be restarted from HRAM).
+  The tests' opcode fetches from ROM or WRAM read $FF (`rst $38`), the program
+  runs away, and each test times out.
+- **Evidence that this is the only cause:** a throwaway build that blocked
+  only OAM and the bus the DMA reads from (VRAM for a $80-$9F source, the
+  external bus otherwise) passed all nine and lost no other test (76 → 85 of
+  167). It was not committed, because it contradicts the Pan Docs sentence
+  above.
+- **Resolution:** if the project decides the hardware-verified tests outweigh
+  that sentence (it reads as advice to programmers, and the tests show DMG's
+  VRAM bus is separate from the external one), per-bus blocking is a small,
+  contained change in `GameBoy::dmaBlocks`.
 - **Checked:** 2026-09-11.
 
 HALT (76) was checked against Pan Docs on 2026-09-11 for the no-pending-interrupt
