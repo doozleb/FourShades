@@ -34,13 +34,14 @@ decision and its date.
   but STOP doesn't use them yet):
   - STOP never wakes. Pan Docs' way out of STOP mode is a button press, and
     there is no joypad input yet (P1 always reads "no buttons pressed").
+    Joypad input arrives with the window in piece 3, and STOP's wake-up with it.
   - STOP doesn't reset DIV. That is to be done with the planned
     centralisation of the system counter's edge handling (so a reset's
     falling edges reach the timer, and later the sound chip, from one place),
     before piece 5.
   - The interrupt-pending branch, where Pan Docs makes STOP a 1-byte opcode,
-    isn't implemented: STOP is always 2 bytes. (The button-held branches need
-    joypad input, above.)
+    isn't implemented: STOP is always 2 bytes. It is planned for piece 3,
+    together with the button-held branches, which need joypad input.
 - **Scored test affected:** `daid/stop_instr.gb (DMG)` is one of the 165
   scored test ROMs (screen group). It is a screenshot test, so it fails for
   now on "needs the PPU (piece 3)" before STOP's behaviour is ever checked.

@@ -191,8 +191,8 @@ bool Cpu::executeMisc(u8 opcode) {
         // interrupt pending, "STOP is a 2-byte opcode, STOP mode is entered".
         // Pan Docs is silent on whether the second byte is read with a bus
         // cycle, so the test's observed no-read bus pattern is kept. Still
-        // missing: STOP never wakes (there is no joypad input yet, and a
-        // button press is the way out); STOP doesn't reset DIV (to come with
+        // missing: STOP never wakes (there is no joypad input until the window
+        // arrives in piece 3, and a button press is the way out); STOP doesn't reset DIV (to come with
         // the planned centralisation of the system counter's edge handling,
         // before piece 5); and the interrupt-pending branch, where STOP is a
         // 1-byte opcode, isn't implemented. See docs/known-divergences.md.
