@@ -66,6 +66,7 @@ private:
     u16 dmaSource_ = 0;
     int dmaStartDelay_ = 0; // M-cycles until a requested DMA begins
     bool dmaActive_ = false;
+    bool dmaCopying_ = false; // a byte was copied in the current M-cycle
     int dmaIndex_ = 0;      // next byte to copy, 0-159
     u16 dmaFrom_ = 0;
     std::uint64_t cycles_ = 0;

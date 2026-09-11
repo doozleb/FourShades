@@ -139,6 +139,35 @@ TEST_CASE("OAM DMA copies 160 bytes and blocks the CPU outside FF00-FFFF meanwhi
     CHECK(gb->peek(0xFE9F) == 0xA0);
 }
 
+// Pan Docs: the transfer takes 160 M-cycles and starts after the M-cycle that
+// wrote FF46; the CPU is locked out for all 160 of them, the last included.
+TEST_CASE("OAM DMA blocks the CPU through the M-cycle that copies the last byte") {
+    auto gb = makeGameBoy({0x00});
+    gb->write(0xC000, 0x01);
+    gb->write(0xFF46, 0xC0); // M-cycle W
+    for (int i = 0; i < 160; ++i) {
+        gb->idle(); // W+1 (start-up) .. W+160
+    }
+    CHECK(gb->read(0xC000) == 0xFF); // W+161: byte 159 is being copied
+    CHECK(gb->read(0xC000) == 0x01); // W+162: the transfer is over
+}
+
+TEST_CASE("a restarted OAM DMA keeps the CPU blocked through the new start-up cycle") {
+    auto gb = makeGameBoy({0x00});
+    gb->write(0xC000, 0x01);
+    gb->write(0xFF46, 0xC0);
+    for (int i = 0; i < 9; ++i) {
+        gb->idle();
+    }
+    gb->write(0xFF46, 0xC0);         // restart, M-cycle W
+    CHECK(gb->read(0xC000) == 0xFF); // W+1: the old transfer is still copying
+    for (int i = 0; i < 159; ++i) {
+        gb->idle(); // W+2 .. W+160
+    }
+    CHECK(gb->read(0xC000) == 0xFF); // W+161: the new transfer's last byte
+    CHECK(gb->read(0xC000) == 0x01); // W+162
+}
+
 TEST_CASE("the CPU runs a program through the memory map") {
     // LD A,0x12 ; LD (0xC000),A ; LD HL,0xC000 ; INC (HL) ; HALT
     auto gb = makeGameBoy({0x3E, 0x12, 0xEA, 0x00, 0xC0, 0x21, 0x00, 0xC0, 0x34, 0x76});
