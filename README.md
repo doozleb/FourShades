@@ -5,7 +5,7 @@ and measured, honestly, against the public test ROMs.
 
 <!-- scoreboard:start -->
 ```
-cpu instructions  ████████████████   500 / 500
+cpu instructions  ███████████████░   499 / 500
 test roms         ░░░░░░░░░░░░░░░░     0 / 1300
 ```
 <!-- scoreboard:end -->
