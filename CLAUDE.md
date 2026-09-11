@@ -13,6 +13,8 @@ scoreboard, so these rules are not negotiable.
 - Special-case a test, a test name, or an address pattern only a test uses.
 - Loosen the comparator (`tools/sst/SstCompare.cpp`) or the loader to make
   something pass.
+- Loosen the test-ROM detectors or runner (`tools/roms/Detectors.cpp`,
+  `tools/roms/RomRun.cpp`), or any image comparator, to make something pass.
 - Edit tools/roms/data/, tools/roms/manifest.sha256 or tools/roms/tests.json by hand (regenerate with make_test_list.py).
 - Raise a test's time limit, or special-case a ROM, to make it pass.
 
