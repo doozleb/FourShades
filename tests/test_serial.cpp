@@ -50,3 +50,24 @@ TEST_CASE("SC reads with its unused bits set") {
     serial.write(0xFF02, 0x00);
     CHECK(serial.read(0xFF02) == 0x7E);
 }
+
+TEST_CASE("restarting a transfer mid-way records both bytes and runs the new one to completion") {
+    Serial serial;
+    u16 counter = 0;
+    serial.write(0xFF01, 'A');
+    serial.write(0xFF02, 0x81);
+    for (int i = 0; i < 300; ++i) { // a couple of bits of 'A' go out
+        const u16 before = counter;
+        counter = static_cast<u16>(counter + 4);
+        CHECK_FALSE(serial.tick(before, counter));
+    }
+    serial.write(0xFF01, 'B');
+    serial.write(0xFF02, 0x81); // restart
+    REQUIRE(serial.sent().size() == 2);
+    CHECK(serial.sent()[0] == 'A');
+    CHECK(serial.sent()[1] == 'B');
+    const int cycles = runUntilDone(serial, counter);
+    CHECK(cycles > 0);
+    CHECK(cycles <= 8 * 128); // the restart begins a fresh 8-bit transfer
+    CHECK(serial.read(0xFF01) == 0xFF);
+}
