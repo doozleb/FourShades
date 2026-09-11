@@ -14,6 +14,11 @@ public:
     virtual void write(u16 address, u8 value) = 0;
     // A cycle with no memory access (16-bit arithmetic, a taken branch, ...).
     virtual void idle() = 0;
+
+    // The interrupt lines. Neither costs a cycle: the CPU samples them between
+    // M-cycles rather than reading IE and IF over the bus.
+    virtual u8 pendingInterrupts() = 0;             // IE & IF & 0x1F
+    virtual void acknowledgeInterrupt(int bit) = 0; // clears that IF bit
 };
 
 } // namespace fourshades

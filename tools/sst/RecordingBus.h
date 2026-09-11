@@ -30,7 +30,14 @@ public:
         }
         touched_.clear();
         log_.clear();
+        pending_ = 0;
     }
+
+    // Interrupt lines for unit tests. SingleStepTests never set them, so every
+    // SST test sees "nothing pending", exactly as before interrupts existed.
+    void setPendingInterrupts(u8 bits) { pending_ = bits; }
+    u8 pendingInterrupts() override { return pending_; }
+    void acknowledgeInterrupt(int bit) override { pending_ = static_cast<u8>(pending_ & ~(1 << bit)); }
 
     u8 read(u16 address) override {
         const u8 value = memory_[address];
@@ -51,6 +58,7 @@ private:
     std::vector<u8> memory_;
     std::vector<u16> touched_;
     std::vector<Cycle> log_;
+    u8 pending_ = 0;
 };
 
 } // namespace sst

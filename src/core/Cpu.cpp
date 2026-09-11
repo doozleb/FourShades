@@ -3,8 +3,19 @@
 namespace fourshades {
 
 void Cpu::step() {
+    if (state_ == State::Halted) {
+        if (bus_.pendingInterrupts() == 0) {
+            bus_.idle();
+            return;
+        }
+        state_ = State::Running; // Pan Docs "halt": wakes whatever IME is
+    }
     if (state_ != State::Running) {
         bus_.idle();
+        return;
+    }
+    if (ime && bus_.pendingInterrupts() != 0) {
+        dispatchInterrupt();
         return;
     }
     execute(fetch8());
@@ -15,9 +26,45 @@ void Cpu::step() {
     }
 }
 
+// Pan Docs "Interrupts": two wait M-cycles, push PC (two), set PC (one).
+void Cpu::dispatchInterrupt() {
+    ime = false;
+    imeDelay_ = 0;
+    if (haltBug_) {
+        // EI then a bugged HALT: the handler returns to the HALT itself.
+        haltBug_ = false;
+        regs.pc = static_cast<u16>(regs.pc - 1);
+    }
+    bus_.idle();
+    bus_.idle();
+    regs.sp = static_cast<u16>(regs.sp - 1);
+    bus_.write(regs.sp, hi(regs.pc));
+    // The vector is chosen after the high byte is pushed. If that push
+    // overwrote IE (SP was 0x0000), nothing may be pending any more, and the
+    // CPU then continues at 0x0000 with nothing acknowledged.
+    const u8 pending = bus_.pendingInterrupts();
+    regs.sp = static_cast<u16>(regs.sp - 1);
+    bus_.write(regs.sp, lo(regs.pc));
+    if (pending == 0) {
+        regs.pc = 0x0000;
+    } else {
+        int bit = 0;
+        while ((pending & (1 << bit)) == 0) {
+            ++bit;
+        }
+        bus_.acknowledgeInterrupt(bit);
+        regs.pc = static_cast<u16>(0x40 + 8 * bit);
+    }
+    bus_.idle();
+}
+
 u8 Cpu::fetch8() {
     const u8 value = bus_.read(regs.pc);
-    regs.pc = static_cast<u16>(regs.pc + 1);
+    if (haltBug_) {
+        haltBug_ = false; // Pan Docs "halt bug": this fetch doesn't advance PC
+    } else {
+        regs.pc = static_cast<u16>(regs.pc + 1);
+    }
     return value;
 }
 
@@ -137,7 +184,11 @@ bool Cpu::executeMisc(u8 opcode) {
         state_ = State::Stopped;
         return true;
     case 0x76: // HALT
-        state_ = State::Halted;
+        if (!ime && bus_.pendingInterrupts() != 0) {
+            haltBug_ = true; // Pan Docs "halt bug": doesn't halt, next fetch repeats
+        } else {
+            state_ = State::Halted;
+        }
         return true;
     case 0xF3: // DI
         ime = false;
