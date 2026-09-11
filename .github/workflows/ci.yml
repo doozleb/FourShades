@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-score:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Puts MSVC, and Visual Studio's bundled CMake and Ninja, on PATH.
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure
+        run: cmake --preset release
+
+      - name: Build
+        run: cmake --build --preset release
+
+      - name: Unit tests
+        run: ctest --preset release
+
+      - name: Scoreboard script tests
+        run: python -m unittest discover -s tools -p "test_*.py"
+
+      - name: Core isolation
+        run: python tools/check_core_isolation.py
+
+      - uses: actions/cache@v4
+        with:
+          path: tools/sst/data
+          key: sst-f9c30210245dd691661db39f5ace022c465ecc2f
+
+      - name: Fetch SingleStepTests (pinned, hash-checked)
+        run: python tools/sst/fetch_sst.py
+
+      - name: Run SingleStepTests
+        run: .\build\release\tools\sst\sst_runner.exe
+
+      - name: Scoreboard matches the run
+        run: python tools/scoreboard.py check build/sst-results.json
