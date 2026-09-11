@@ -40,4 +40,6 @@ TEST_CASE("parseTests rejects anything it doesn't understand") {
     CHECK_THROWS_AS(sst::parseTests(with(kNop, R"("sp":65534,)", "")), std::runtime_error);
     CHECK_THROWS_AS(sst::parseTests(with(kNop, R"("name":"00 0000",)", R"("name":"00 0000","extra":1,)")),
                     std::runtime_error);
+    CHECK_THROWS_AS(sst::parseTests(with(kNop, R"("name":"00 0000",)", "")), std::runtime_error);          // no name
+    CHECK_THROWS_AS(sst::parseTests(with(kNop, R"("a":1,"b")", R"("a":4294967297,"b")")), std::runtime_error); // 2^32+1 must not wrap to 1
 }

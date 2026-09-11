@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
 #include <set>
 #include <stdexcept>
 
@@ -32,7 +33,7 @@ void checkKeys(const json& object, const std::set<std::string>& allowed, const s
 }
 
 unsigned number(const json& value, unsigned max, const std::string& test, const std::string& what) {
-    if (!value.is_number_unsigned() || value.get<unsigned>() > max) {
+    if (!value.is_number_unsigned() || value.get<std::uint64_t>() > max) {
         fail(test, "bad value for " + what);
     }
     return value.get<unsigned>();
@@ -112,9 +113,10 @@ std::vector<SstTest> parseTests(std::string_view jsonText) {
     std::vector<SstTest> tests;
     tests.reserve(document.size());
     for (const json& item : document) {
-        const std::string name = item.is_object() && item.contains("name") && item.at("name").is_string()
-                                     ? item.at("name").get<std::string>()
-                                     : std::string("<unnamed>");
+        if (!item.is_object() || !item.contains("name") || !item.at("name").is_string()) {
+            throw std::runtime_error("test without a string 'name'");
+        }
+        const std::string name = item.at("name").get<std::string>();
         checkKeys(item, kTestKeys, name, "test");
         if (!item.contains("initial") || !item.contains("final") || !item.contains("cycles") ||
             !item.at("cycles").is_array()) {
