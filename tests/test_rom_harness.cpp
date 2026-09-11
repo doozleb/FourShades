@@ -76,6 +76,38 @@ TEST_CASE("parseTestList requires a boolean 'informational' on every entry") {
                     std::runtime_error);
 }
 
+TEST_CASE("parseTestList rejects a time limit that isn't max(2 x runtime, runtime + 5)") {
+    CHECK_THROWS_AS(roms::parseTestList(replaced(kOneTest, "\"limit_seconds\":6.5", "\"limit_seconds\":7.0")),
+                    std::runtime_error);
+    CHECK_THROWS_AS(roms::parseTestList(replaced(kOneTest, "\"limit_seconds\":6.5", "\"limit_seconds\":6.4")),
+                    std::runtime_error);
+    // runtime 10 -> 2 x runtime wins.
+    const std::string longer =
+        replaced(replaced(kOneTest, "\"runtime\":1.5", "\"runtime\":10"), "\"limit_seconds\":6.5", "\"limit_seconds\":20");
+    CHECK(roms::parseTestList(longer).tests[0].limitSeconds == 20.0);
+    CHECK_THROWS_AS(roms::parseTestList(replaced(longer, "\"limit_seconds\":20", "\"limit_seconds\":15")),
+                    std::runtime_error);
+    // Floating-point rounding (0.1 + 5 written as 5.1) is not a mismatch.
+    CHECK_NOTHROW(roms::parseTestList(
+        replaced(replaced(kOneTest, "\"runtime\":1.5", "\"runtime\":0.1"), "\"limit_seconds\":6.5", "\"limit_seconds\":5.1")));
+}
+
+TEST_CASE("parseTestList rejects a method that doesn't follow from the ROM's path") {
+    // blargg/ -> blargg
+    CHECK_THROWS_AS(roms::parseTestList(replaced(kOneTest, "mooneye/t.gb", "blargg/t.gb")), std::runtime_error);
+    CHECK_NOTHROW(roms::parseTestList(
+        replaced(replaced(kOneTest, "mooneye/t.gb", "blargg/t.gb"), "\"method\":\"mooneye\"", "\"method\":\"blargg\"")));
+    // mooneye/manual-only/ -> screenshot, not mooneye
+    CHECK_THROWS_AS(roms::parseTestList(replaced(kOneTest, "mooneye/t.gb", "mooneye/manual-only/t.gb")),
+                    std::runtime_error);
+    CHECK_NOTHROW(roms::parseTestList(replaced(replaced(kOneTest, "mooneye/t.gb", "mooneye/manual-only/t.gb"),
+                                               "\"method\":\"mooneye\"", "\"method\":\"screenshot\"")));
+    // anything else -> screenshot
+    CHECK_THROWS_AS(roms::parseTestList(replaced(kOneTest, "mooneye/t.gb", "daid/t.gb")), std::runtime_error);
+    CHECK_THROWS_AS(roms::parseTestList(replaced(kOneTest, "\"method\":\"mooneye\"", "\"method\":\"screenshot\"")),
+                    std::runtime_error);
+}
+
 TEST_CASE("serial text: Failed beats Passed, and neither means still running") {
     CHECK(roms::serialVerdict("cpu_instrs\n\n01:ok\n\nPassed\n") == roms::Verdict::Pass);
     CHECK(roms::serialVerdict("02-interrupts\n\nFailed #3\n") == roms::Verdict::Fail);

@@ -1,6 +1,8 @@
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "roms"))
 import make_test_list  # noqa: E402
@@ -19,6 +21,23 @@ def full_list(extra_informational=()):
     entries += [entry(name, "screenshot", ()) for name in extra_informational]
     entries += [entry(f"t{i}.gb") for i in range(make_test_list.EXPECTED - len(entries))]
     return entries
+
+
+class RequestTest(unittest.TestCase):
+    def test_the_tree_request_carries_the_github_token_when_set(self):
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "t0ken"}):
+            request = make_test_list.request_for(make_test_list.TREE)
+        self.assertEqual(request.get_header("Authorization"), "Bearer t0ken")
+        self.assertEqual(request.full_url, make_test_list.TREE)
+
+    def test_no_token_no_header(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(make_test_list.request_for(make_test_list.TREE).get_header("Authorization"))
+
+    def test_the_token_is_never_sent_to_raw_githubusercontent(self):
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "t0ken"}):
+            request = make_test_list.request_for(make_test_list.RAW + "testroms/blargg.py")
+        self.assertIsNone(request.get_header("Authorization"))
 
 
 class InformationalTest(unittest.TestCase):
