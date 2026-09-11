@@ -10,12 +10,16 @@ test roms         ░░░░░░░░░░░░░░░░     0 / 1300
 ```
 <!-- scoreboard:end -->
 
-**Status: building the CPU (piece 1 of 6).** The CPU line counts SM83
+**Status: the CPU is done (piece 1 of 6).** The CPU line counts SM83
 instructions passing every one of their 1,000
 [SingleStepTests](https://github.com/SingleStepTests/sm83), which check every
-register, every byte of memory and every bus cycle. The test-ROM line starts
-moving in piece 2. Both lines are generated from a real test run, and CI fails
-any commit whose scoreboard doesn't match what the code actually scores.
+register, every byte of memory and every bus cycle. 499 of the 500 pass. The
+one that doesn't is STOP: the tests and the hardware documentation disagree
+about it, and FourShades follows the documentation. The details are in
+[docs/known-divergences.md](docs/known-divergences.md). The test-ROM line
+starts moving in piece 2. Both lines are generated from a real test run, and
+CI fails any commit whose scoreboard doesn't match what the code actually
+scores.
 
 ---
 
@@ -92,14 +96,18 @@ src/core/                 the emulator core: CPU and bus (no window, no files)
 tests/                    unit tests (doctest)
 tools/sst/                the SingleStepTests harness and pinned-data manifest
 tools/scoreboard.py       turns a test run into the scoreboard above
+third_party/              vendored doctest and nlohmann/json, hash-pinned
 docs/superpowers/specs/   the reasoning behind each piece
 docs/superpowers/plans/   task-by-task implementation plans
 docs/known-divergences.md where a test and the hardware documentation disagree
+scoreboard.json           the scoreboard above, as data (generated)
+CLAUDE.md                 rules for the AI agents working in this repo
 ```
 
 ## Building
 
-Windows and Visual Studio 2026 (with the C++ workload). Open the folder in
+Windows and Visual Studio 2026 (with the C++ workload), plus Python 3.9 or
+newer for the test-data fetcher and the scoreboard scripts. Open the folder in
 Visual Studio, or from PowerShell:
 
 ```powershell

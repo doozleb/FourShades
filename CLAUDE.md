@@ -26,6 +26,7 @@ and add an entry to `docs/known-divergences.md` with the evidence.
     .\tools\dev.cmd cmake --preset release
     .\tools\dev.cmd cmake --build --preset release
     .\tools\dev.cmd ctest --preset release
+    python tools/check_core_isolation.py
     python tools/sst/fetch_sst.py
     .\build\release\tools\sst\sst_runner.exe
     python tools/scoreboard.py update build/sst-results.json

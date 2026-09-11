@@ -129,10 +129,10 @@ bool Cpu::executeMisc(u8 opcode) {
         // Pan Docs' STOP flowchart (Reducing Power Consumption): with no button
         // held, no speed switch requested (always the case on a DMG) and no
         // interrupt pending, "STOP is a 2-byte opcode, STOP mode is entered".
-        // Pan Docs doesn't say whether the second byte is read, so it is
-        // skipped without a bus cycle. The button, interrupt and DIV-reset
-        // cases need the joypad, interrupts and timer (piece 2).
-        // See docs/known-divergences.md.
+        // Pan Docs is silent on whether the second byte is read with a bus
+        // cycle, so the test's observed no-read bus pattern is kept. The
+        // button, interrupt and DIV-reset cases need the joypad, interrupts
+        // and timer (piece 2). See docs/known-divergences.md.
         regs.pc = static_cast<u16>(regs.pc + 1);
         state_ = State::Stopped;
         return true;
