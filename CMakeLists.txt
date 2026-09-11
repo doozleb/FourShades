@@ -25,6 +25,7 @@ add_library(fourshades_core STATIC
     src/core/CpuCb.cpp
 )
 target_include_directories(fourshades_core PUBLIC src)
+add_subdirectory(tools/sst)
 
 enable_testing()
 
@@ -38,4 +39,4 @@ target_include_directories(fourshades_tests PRIVATE src tools)
 # (doctest's C5285) don't bury ours.
 target_include_directories(fourshades_tests SYSTEM PRIVATE third_party)
 add_test(NAME unit COMMAND fourshades_tests)
-target_link_libraries(fourshades_tests PRIVATE fourshades_core)
+target_link_libraries(fourshades_tests PRIVATE sst_harness)
