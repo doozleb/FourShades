@@ -207,7 +207,7 @@ TEST_CASE("each object lengthens mode 3") {
     CHECK(withOne == 184);
 }
 
-TEST_CASE("an object at OAM X = 0 always costs eleven dots") {
+TEST_CASE("an object at OAM X = 0 always costs eleven dots, unlike the general formula") {
     Ppu ppu;
     setUpObjects(ppu);
     const int plain = runLineObjects(ppu);
@@ -219,9 +219,33 @@ TEST_CASE("an object at OAM X = 0 always costs eleven dots") {
     // the general case above it can't vary with pixelX_ or SCX. 172 + 11 =
     // 183 raw dots, reported as 184: the same number as the x = 16 case
     // above, but for a different reason (a hardcoded 11, not a computed
-    // one), which is exactly why this needs its own assertion rather than
-    // reusing that test's tolerance.
+    // one). At SCX = 0 this coincidentally is also what the general formula
+    // would produce (tile 0, toTheRight = 7, 7 - 2 = 5, plus the flat 6 =
+    // 11), so on its own this assertion cannot tell the special case apart
+    // from falling through to the general path. The SCX = 3 assertion below
+    // is what actually separates them.
     CHECK(withOne == 184);
+
+    // SCX = 3: the object still triggers at pixelX_ == 0 (it is off-screen,
+    // so it uses the "screenX < 0 && pixelX_ == 0" trigger, not the normal
+    // one), so raw dots are 172 (plain) + 3 (SCX's discard, SCX % 8) + 11
+    // (the flat X = 0 cost) = 186, reported as 188 (rounded up to the next
+    // multiple of 4).
+    //
+    // If the X = 0 special case were deleted and execution fell through to
+    // the general formula instead: tile = (SCX + pixelX_) / 8 = 3 / 8 = 0;
+    // no earlier object used tile 0, so the tile term applies:
+    // toTheRight = 7 - ((3 + 0) & 7) = 7 - 3 = 4; 4 > 2, so the term is
+    // 4 - 2 = 2; penalty = flat 6 + 2 = 8. Raw dots would be
+    // 172 + 3 + 8 = 183, reported as 184 -- a different number from the
+    // correct 188, so unlike the SCX = 0 case above, this assertion does
+    // fail if the special case is removed (confirmed by temporarily
+    // deleting the `object.x == 0` branch in PixelPipeline.cpp: the
+    // rebuilt test failed with 184, exactly as predicted here, then passed
+    // again at 188 once the branch was restored).
+    ppu.write(0xFF43, 0x03); // SCX = 3
+    const int withOneScrolled = runLineObjects(ppu);
+    CHECK(withOneScrolled == 188);
 }
 
 TEST_CASE("clearing LCDC bit 1 hides objects") {
