@@ -24,6 +24,10 @@ std::vector<u8> loadShades(const std::filesystem::path& path) {
 }
 
 int compareFrame(const std::array<u8, kFramePixels>& frame, const std::vector<u8>& reference) {
+    if (reference.size() != kFramePixels) {
+        throw std::runtime_error("compareFrame: reference has " + std::to_string(reference.size()) +
+                                  " pixels, expected " + std::to_string(kFramePixels));
+    }
     int differing = 0;
     for (std::size_t i = 0; i < kFramePixels; ++i) {
         if (frame[i] != reference[i]) {
@@ -38,7 +42,11 @@ void writePgm(const std::filesystem::path& path, const std::array<u8, kFramePixe
     std::ofstream out(path, std::ios::binary);
     out << "P5\n" << kFrameWidth << " " << kFrameHeight << "\n255\n";
     for (const u8 shade : frame) {
-        out.put(static_cast<char>(kGrey[shade & 3]));
+        if (shade > 3) {
+            throw std::runtime_error("writePgm: shade " + std::to_string(static_cast<int>(shade)) +
+                                      " is out of range");
+        }
+        out.put(static_cast<char>(kGrey[shade]));
     }
 }
 
