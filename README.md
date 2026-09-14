@@ -10,26 +10,33 @@ test roms         ████████░░░░░░░░    85 / 165
 ```
 <!-- scoreboard:end -->
 
-**Status: the machine is done (piece 2 of 6).** The CPU line counts SM83
-instructions passing every one of their 1,000
-[SingleStepTests](https://github.com/SingleStepTests/sm83), which check every
-register, every byte of memory and every bus cycle. 499 of the 500 pass. The
-one that doesn't is STOP: the tests and the hardware documentation disagree
-about it, and FourShades follows the documentation. The test-ROM line counts
-the 165 original-Game-Boy tests that gbdev's Emulator Shootout runs with a
-pass condition; a test passes only on its author's own pass signal. Piece 2
-turned the CPU into a Game Boy that runs real test ROMs headless: the memory
-map, MBC1, the timer, interrupts, serial, joypad and OAM DMA, plus a
-placeholder LCD-line timer. The
-groups that depend only on that machine are complete or nearly so (the
-generated table below has each group's score), including Blargg's
-`cpu_instrs`, the independent CPU cross-check. The remaining groups wait
-on hardware piece 2 doesn't implement: pixel-accurate PPU timing (oam bug, ppu
-timing, screen — piece 3), the other cartridge chips (mbc2/mbc5, mbc3/rtc, the
-rest of mbc1 and oam dma — piece 4) and sound registers (boot state, sound —
-piece 5). Every divergence between a test and the hardware documentation,
-including the rule for resolving them, is in
-[docs/known-divergences.md](docs/known-divergences.md).
+**Status: the machine is done (piece 2 of 6).** FourShades is now a Game Boy
+that runs real test ROMs headless: memory map, MBC1 cartridge, timer,
+interrupts, serial, joypad and OAM DMA, plus a placeholder LCD line counter
+until the PPU arrives.
+
+The two lines above mean:
+
+- **cpu instructions** — SM83 instructions passing all 1,000 of their
+  [SingleStepTests](https://github.com/SingleStepTests/sm83), which check every
+  register, every byte of memory and every bus cycle. The one failure is STOP,
+  where the tests and the hardware documentation disagree and FourShades
+  follows the documentation.
+- **test roms** — the original-Game-Boy tests that gbdev's
+  [Emulator Shootout](https://gbdev.io/GBEmulatorShootout/) runs and that have
+  a pass condition. A test counts only on its author's own pass signal: Blargg's
+  result text, or Mooneye's registers and serial bytes.
+
+Every group that depends only on this machine is complete, including Blargg's
+`cpu_instrs` — written by someone other than SingleStepTests' author, so it is
+the independent check that the CPU wasn't fitted to one suite. The rest wait on
+hardware later pieces add: the PPU (oam bug, ppu timing, screen), the other
+cartridge chips (mbc2/mbc5, mbc3/rtc, and one mbc1 and one oam dma test) and
+the sound registers (sound, and one boot-state test).
+
+Where a test and the hardware documentation disagree, the decision and its
+evidence are in [docs/known-divergences.md](docs/known-divergences.md), along
+with the rule for resolving them.
 
 The test-ROM line, group by group, with the first test each group fails:
 
@@ -170,18 +177,19 @@ python tools/roms/fetch_roms.py            # the test ROMs, pinned and hash-chec
 
 ## Planned scope
 
-Roughly in order, each gated on the test ROMs rather than on looking right:
+Six pieces, each gated on the test ROMs rather than on looking right:
 
-- **SM83 CPU** — the ~500 opcodes, then Blargg's `cpu_instrs`
-- **Memory map and cartridge** — MBC1 at minimum
-- **Timer and interrupts** — where "looks fine" and "is correct" first diverge
-- **PPU** — background, window, sprites, and the mid-scanline behaviour that
-  makes this hard
-- **Input, then audio**
+| | Piece | State |
+|---|---|---|
+| 1 | **SM83 CPU** — every opcode, cycle by cycle | done: 499 / 500 |
+| 2 | **The machine** — memory map, MBC1, timer, interrupts, serial, DMA, and the test-ROM scoreboard | done: 85 / 165 |
+| 3 | **PPU and a window** — background, window, sprites, and the mid-scanline behaviour that makes this hard | next |
+| 4 | **Cartridge chips** — MBC2, MBC3 with its clock, MBC5 | |
+| 5 | **Sound** | |
+| 6 | **In the browser** — the same core compiled to WebAssembly, playable on the site | |
 
-The first milestone is not "it plays Tetris". It is **the CPU passing every
-SingleStepTests instruction, then Blargg's first test ROM**, at which point the
-test-ROM line reads something other than zero.
+The next milestone is the first picture: the boot logo, then dmg-acid2, then a
+commercial game.
 
 ## Licence
 
