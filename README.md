@@ -6,7 +6,7 @@ and measured, honestly, against the public test ROMs.
 <!-- scoreboard:start -->
 ```
 cpu instructions  ███████████████░   499 / 500
-test roms         ████████░░░░░░░░    85 / 165
+test roms         █████████░░░░░░░    93 / 165
 ```
 <!-- scoreboard:end -->
 
@@ -50,13 +50,13 @@ The test-ROM line, group by group, with the first test each group fails:
 | cpu & interrupts | 31 / 31 |  |
 | boot state | 2 / 3 | `mooneye/acceptance/boot_hwio-dmgABCmgb.gb`: failure bytes (0x42) over serial |
 | oam dma | 5 / 6 | `mooneye/acceptance/oam_dma/sources-GS.gb`: cartridge: unsupported cartridge type 0x1B |
-| ppu timing | 0 / 12 | `mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.gb`: timeout after 6.5 s |
+| ppu timing | 6 / 12 | `mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.gb`: failure bytes (0x42) over serial |
 | serial | 1 / 1 |  |
 | timer | 13 / 13 |  |
 | mbc1 | 12 / 13 | `mooneye/emulator-only/mbc1/multicart_rom_8Mb.gb`: failure bytes (0x42) over serial |
 | mbc2 / mbc5 | 0 / 15 | `mooneye/emulator-only/mbc2/bits_ramg.gb`: cartridge: unsupported cartridge type 0x06 |
-| screen | 0 / 30 | `mooneye/manual-only/sprite_priority.gb`: needs the PPU (piece 3) |
-| mbc3 / rtc | 0 / 3 | `cpp/rtc-invalid-banks-test.gb`: needs the PPU (piece 3) |
+| screen | 2 / 30 | `mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb (DMG)`: differs from the reference in 18060 pixels |
+| mbc3 / rtc | 0 / 3 | `cpp/rtc-invalid-banks-test.gb`: cartridge: unsupported cartridge type 0x10 |
 
 Not counted (informational in the Shootout, no pass condition): `acid/which.gb (DMG)`, `daid/rom_and_ram.gb`.
 <!-- groups:end -->

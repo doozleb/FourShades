@@ -3,6 +3,7 @@ add_library(rom_harness STATIC
     RomTests.cpp
     Detectors.cpp
     RomRun.cpp
+    Screenshot.cpp
 )
 target_link_libraries(rom_harness PUBLIC sst_harness)
 
