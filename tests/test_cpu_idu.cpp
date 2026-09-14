@@ -73,3 +73,27 @@ TEST_CASE("POP reports the stack pointer before each increment") {
     CHECK(bus.iduAddresses() == std::vector<u16>{0x0100, 0xFFFE, 0xFFFF});
     CHECK(bus.log().size() == 3); // fetch and two reads
 }
+
+TEST_CASE("interrupt dispatch reports the fetch and both stack decrements") {
+    RecordingBus bus;
+    load(bus, {0x00}); // NOP: fetched then dropped by the dispatch
+    Cpu cpu = makeCpu(bus);
+    cpu.regs.sp = 0xFE20;
+    cpu.ime = true;
+    bus.setPendingInterrupts(0x04); // timer
+    cpu.step();
+    CHECK(cpu.regs.pc == 0x0050);
+    CHECK(bus.iduAddresses() == std::vector<u16>{0x0100, 0xFE20, 0xFE1F});
+    // Same 5 logged M-cycles as before iduCycle existed: the hook is free.
+    CHECK(bus.log().size() == 5);
+}
+
+TEST_CASE("a CB-prefixed instruction reports both the prefix and sub-opcode fetch") {
+    RecordingBus bus;
+    load(bus, {0xCB, 0x30}); // SWAP B
+    Cpu cpu = makeCpu(bus);
+    cpu.regs.b = 0x12;
+    cpu.step();
+    CHECK(cpu.regs.b == 0x21); // nibbles swapped: confirms the CB byte ran
+    CHECK(bus.iduAddresses() == std::vector<u16>{0x0100, 0x0101});
+}

@@ -5,6 +5,10 @@ namespace fourshades {
 // CB xx: x = 0 rotate/shift/swap, 1 BIT, 2 RES, 3 SET; y = operation or bit;
 // z = register (6 is (HL), which reads memory and, except for BIT, writes it back).
 void Cpu::executeCb() {
+    // The CB byte is the second byte of a two-byte opcode, not an operand, so
+    // this fetch is reported like any other opcode fetch (see step()). It is
+    // not inside fetch8() itself, which also serves genuine operand reads.
+    bus_.iduCycle(regs.pc);
     const u8 opcode = fetch8();
     const int x = opcode >> 6;
     const int y = (opcode >> 3) & 7;
