@@ -2,6 +2,8 @@
 
 #include "core/Interrupts.h"
 
+#include <algorithm>
+
 namespace fourshades {
 
 u8 Ppu::tick() {
@@ -28,18 +30,21 @@ void Ppu::stepDot(u8& requested) {
             ++frames_;
             requested = static_cast<u8>(requested | irq::VBlank);
             setMode(1);
-        } else if (line_ == 0) {
+        } else if (line_ < 144) {
             setMode(2);
         }
     } else if (line_ < 144) {
-        if (dot_ == kOamScanDots) {
+        if (mode_ == 2 && dot_ == kOamScanDots) {
             setMode(3);
-        } else if (dot_ == kOamScanDots + kMinDrawDots) {
-            setMode(0);
+            lineBuffer_.fill(0);
+            pipeline_.startLine(*this);
+        } else if (mode_ == 3) {
+            if (pipeline_.stepDot(*this, lineBuffer_)) {
+                std::copy(lineBuffer_.begin(), lineBuffer_.end(),
+                          frame_.begin() + static_cast<std::size_t>(line_) * kWidth);
+                setMode(0);
+            }
         }
-    }
-    if (dot_ == 0 && line_ < 144 && line_ != 0) {
-        setMode(2);
     }
     updateStatLine(requested);
 }
