@@ -21,6 +21,11 @@ public:
     // fetch from `address` happens in it: the opcode is returned. Otherwise
     // the bus sees no access, as in idle(), and nothing is returned.
     virtual std::optional<u8> haltedCycle(u16 address) = 0;
+    // The CPU's 16-bit increment/decrement unit drove `address` in this
+    // M-cycle. It costs no cycle: the unit shares the address bus with the
+    // access (if any) already happening. Hardware corrupts OAM when this
+    // address lands in FE00-FEFF during OAM scan.
+    virtual void iduCycle(u16 address) = 0;
 
     // The interrupt lines. Neither costs a cycle: the CPU samples them at the
     // end of an M-cycle (after an opcode fetch, or while halted) rather than

@@ -10,14 +10,20 @@ bool Cpu::executeWide(u8 opcode) {
         case 0x1: // LD rr, nn
             writeRp(p, fetch16());
             return true;
-        case 0x3: // INC rr: the 16-bit increment costs an internal cycle
-            writeRp(p, static_cast<u16>(readRp(p) + 1));
+        case 0x3: { // INC rr: the 16-bit increment costs an internal cycle
+            const u16 before = readRp(p);
+            writeRp(p, static_cast<u16>(before + 1));
+            bus_.iduCycle(before);
             bus_.idle();
             return true;
-        case 0xB: // DEC rr
-            writeRp(p, static_cast<u16>(readRp(p) - 1));
+        }
+        case 0xB: { // DEC rr
+            const u16 before = readRp(p);
+            writeRp(p, static_cast<u16>(before - 1));
+            bus_.iduCycle(before);
             bus_.idle();
             return true;
+        }
         case 0x9: // ADD HL, rr
             addHl(readRp(p));
             bus_.idle();
