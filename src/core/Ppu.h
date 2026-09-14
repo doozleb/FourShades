@@ -60,6 +60,10 @@ public:
     const std::array<u8, kWidth * kHeight>& frame() const { return frame_; }
     std::uint64_t frameCount() const { return frames_; }
 
+    bool windowReached() const { return windowReached_; }
+    int windowLine() const { return windowLine_; }
+    void advanceWindowLine() { ++windowLine_; }
+
 private:
     void stepDot(u8& requested);
     void setMode(int mode);
@@ -89,6 +93,8 @@ private:
     bool statLine_ = false;  // the level line: an interrupt fires on its rise
     int statQuirk_ = 0;      // M-cycles left of the DMG "write acts as 0xFF" quirk
     std::uint64_t frames_ = 0;
+    bool windowReached_ = false; // WY has matched LY somewhere in this frame
+    int windowLine_ = 0;         // the window's own line counter
 };
 
 } // namespace fourshades

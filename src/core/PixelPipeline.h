@@ -18,9 +18,10 @@ u8 shadeFor(u8 palette, u8 colour);
 class PixelPipeline {
 public:
     // Called when mode 3 begins.
-    void startLine(const Ppu& ppu);
+    void startLine(Ppu& ppu);
     // One dot of mode 3. Returns true once 160 pixels have been emitted.
-    bool stepDot(const Ppu& ppu, std::array<u8, 160>& line);
+    // Non-const: starting the window advances the PPU's window line counter.
+    bool stepDot(Ppu& ppu, std::array<u8, 160>& line);
 
     int pixelX() const { return pixelX_; }
 
@@ -42,6 +43,13 @@ private:
     int queueHead_ = 0;
     int pixelX_ = 0;   // pixels emitted (0-160)
     int discard_ = 0;  // SCX % 8 pixels dropped at the start of the line
+    bool window_ = false;        // drawing the window on this line
+    bool windowCounted_ = false; // the window's line counter already advanced
+    // The window's own line counter as it stood when the window started on
+    // this line, cached so every fetch on the line reads the row the window
+    // is actually drawing rather than the value left behind once
+    // Ppu::advanceWindowLine() has bumped it for the next line.
+    int windowLineUsed_ = 0;
 };
 
 } // namespace fourshades

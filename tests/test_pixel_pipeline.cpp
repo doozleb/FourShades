@@ -199,6 +199,77 @@ TEST_CASE("SCY's high bits pick the tile-map row a line is fetched from (map scr
     CHECK(ppu.frame()[0] == 2); // tile 1's colour, proving map row 1 was fetched, not row 0
 }
 
+namespace {
+// Background tile 0 = colour 1 everywhere; window tile 1 = colour 3 everywhere;
+// background map at 0x9800 (all tile 0), window map at 0x9C00 (all tile 1).
+void setUpWindow(Ppu& ppu) {
+    ppu.write(0xFF40, 0x11); // LCD off
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8000 + row), 0xFF); // tile 0: colour 1
+        ppu.vramWrite(static_cast<u16>(0x8001 + row), 0x00);
+        ppu.vramWrite(static_cast<u16>(0x8010 + row), 0xFF); // tile 1: colour 3
+        ppu.vramWrite(static_cast<u16>(0x8011 + row), 0xFF);
+    }
+    for (u16 i = 0; i < 0x400; ++i) {
+        ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00);
+        ppu.vramWrite(static_cast<u16>(0x9C00 + i), 0x01);
+    }
+    ppu.write(0xFF47, 0xE4);
+    ppu.write(0xFF4A, 0x00); // WY = 0
+    ppu.write(0xFF4B, 0x27); // WX = 39, so the window starts at x = 32
+    ppu.write(0xFF40, 0xF1); // LCD on, BG on, window on, window map 0x9C00
+}
+} // namespace
+
+TEST_CASE("the window covers the background from WX-7 onwards") {
+    Ppu ppu;
+    setUpWindow(ppu);
+    runLine(ppu);
+    CHECK(ppu.frame()[31] == 1); // background
+    CHECK(ppu.frame()[32] == 3); // window starts
+    CHECK(ppu.frame()[159] == 3);
+}
+
+TEST_CASE("starting the window lengthens mode 3 by six dots") {
+    Ppu ppu;
+    setUpWindow(ppu);
+    // 0xF1 with bit 5 (window enable) cleared: 0xF1 keeps bits 6 (window map),
+    // 4 (tile data) and 0 (BG/window enable) set, so only bit 5 changes.
+    ppu.write(0xFF40, 0xD1); // window off for now
+
+    const int plain = runLine(ppu);
+    ppu.write(0xFF40, 0xF1); // window on
+    const int withWindow = runLine(ppu);
+    CHECK(withWindow == plain + 8); // 6 dots, rounded up to whole M-cycles
+}
+
+TEST_CASE("the window does not draw above WY") {
+    Ppu ppu;
+    setUpWindow(ppu);
+    ppu.write(0xFF4A, 0x02); // WY = 2
+    while (ppu.frameCount() == 0) {
+        ppu.tick();
+    }
+    CHECK(ppu.frame()[static_cast<std::size_t>(1) * Ppu::kWidth + 40] == 1); // line 1: background
+    CHECK(ppu.frame()[static_cast<std::size_t>(2) * Ppu::kWidth + 40] == 3); // line 2: window
+}
+
+TEST_CASE("the window's line counter only advances on lines that drew it") {
+    Ppu ppu;
+    setUpWindow(ppu);
+    ppu.write(0xFF4A, 0x00);
+    // Window tile row 1 is colour 0 so we can tell which window row was drawn.
+    ppu.write(0xFF40, 0x11);
+    ppu.vramWrite(0x8012, 0x00);
+    ppu.vramWrite(0x8013, 0x00);
+    ppu.write(0xFF40, 0xF1);
+    while (ppu.frameCount() == 0) {
+        ppu.tick();
+    }
+    CHECK(ppu.frame()[static_cast<std::size_t>(0) * Ppu::kWidth + 40] == 3); // window row 0
+    CHECK(ppu.frame()[static_cast<std::size_t>(1) * Ppu::kWidth + 40] == 0); // window row 1
+}
+
 TEST_CASE("a whole frame is drawn line by line") {
     Ppu ppu;
     ppu.write(0xFF40, 0x11);
