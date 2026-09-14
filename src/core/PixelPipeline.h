@@ -31,6 +31,15 @@ private:
     void stepFetcher(const Ppu& ppu);
     u16 tileRowAddress(const Ppu& ppu) const;
 
+    struct ObjectPixel {
+        u8 colour = 0;   // 0 is transparent
+        u8 palette = 0;  // 0 = OBP0, 1 = OBP1
+        bool behind = false; // the object's priority flag
+    };
+
+    // Fetches line object `index` and merges it into the pixels in the queue.
+    void startObject(Ppu& ppu, std::size_t index);
+
     Step step_ = Step::Tile;
     int stepDots_ = 0;   // dots spent in the current step
     int fetcherX_ = 0;   // tile column within the line
@@ -49,6 +58,11 @@ private:
     // is actually drawing rather than the value left behind once
     // Ppu::advanceWindowLine() has bumped it for the next line.
     int windowLineUsed_ = 0;
+
+    std::array<ObjectPixel, 8> objects_{}; // pixels waiting, index 0 is next
+    int objectDots_ = 0;      // dots of penalty still owed for a fetch
+    unsigned drawn_ = 0;      // bitmask of line objects already fetched
+    int lastPenaltyTile_ = -1; // background tile that already paid its share
 };
 
 } // namespace fourshades
