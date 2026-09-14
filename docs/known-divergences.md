@@ -118,6 +118,43 @@ mode.
   above gained, nothing lost).
 - **Checked:** 2026-09-11.
 
+## Object priority when sprites overlap: approximates Pan Docs' smaller-X-then-OAM-index rule (2026-09-14)
+
+- **Pan Docs, [OAM: Drawing priority](https://gbdev.io/pandocs/OAM.html#drawing-priority)**
+  (source: [`src/OAM.md`](https://github.com/gbdev/pandocs/blob/master/src/OAM.md)):
+  "In Non-CGB mode, the smaller the X coordinate, the higher the priority.
+  When X coordinates are identical, the object located first in OAM has
+  higher priority."
+- **FourShades:** `PixelPipeline::startObject` (`src/core/PixelPipeline.cpp`)
+  merges each object's pixels into the pending row on a first-claim basis —
+  whichever object reaches a pixel first wins it, full stop — while objects
+  are started left to right as `pixelX_` reaches each one's screen X. This
+  usually agrees with the documented rule: objects are fetched in increasing
+  screen-X order, so the first one to claim a pixel is usually the one with
+  the smallest X, and two objects sharing the same X both trigger on the
+  same dot and get scanned in OAM order, which happens to match the
+  documented tie-break exactly.
+- **Where it differs:** every object whose OAM X places it at or left of the
+  screen edge (X = 1-8, i.e. screen X <= 0) triggers at the same time,
+  `pixelX_ == 0`, regardless of the objects' true relative X values — the
+  trigger check only asks whether `screenX < 0 && pixelX_ == 0`, not which
+  of several such objects has the smaller X. The winner among them is
+  whichever the OAM-order scan reaches first. So two such objects
+  overlapping a pixel, with X = 2 and X = 6 respectively, are not a tie
+  under Pan Docs (X = 2 must win outright), but FourShades lets OAM order
+  decide and will let the X = 6 object win if it has the lower OAM index.
+- **Decision:** shipped deliberately in Task 6 (2026-09-14) as an
+  approximation, to get objects rendering without also building the exact
+  priority sort. The code comment at the merge site in
+  `PixelPipeline::startObject` names the documented rule, says plainly that
+  this is an approximation of it, and says what would arbitrate it.
+- **Scored test affected:** `mooneye/manual-only/sprite_priority.gb` and the
+  Mealybug object tests test exactly this and would arbitrate it, but both
+  currently sit in the `screen` group, which isn't scored yet (fails with
+  "needs the PPU (piece 3)"), so neither is available yet to confirm or
+  refute the approximation.
+- **Checked:** 2026-09-14.
+
 ## Timing model (not a divergence: where Pan Docs is silent)
 
 Pan Docs gives cycle counts but not every within-M-cycle order. These are the
