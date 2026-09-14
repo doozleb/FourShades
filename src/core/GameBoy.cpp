@@ -94,7 +94,20 @@ bool GameBoy::dmaBlocks(u16 address) const {
 
 u8 GameBoy::read(u16 address) {
     tick();
-    return dmaBlocks(address) ? 0xFF : peek(address);
+    if (dmaBlocks(address)) {
+        return 0xFF;
+    }
+    if (address >= 0x8000 && address < 0xA000) {
+        return ppu_.vramRead(address);
+    }
+    if (address >= 0xFE00 && address < 0xFEA0) {
+        return ppu_.oamRead(address);
+    }
+    if (address >= 0xFEA0 && address < 0xFF00) {
+        // Pan Docs: this area reads 0xFF while OAM is blocked, 0x00 otherwise.
+        return ppu_.oamBlocked() ? 0xFF : 0x00;
+    }
+    return peek(address);
 }
 
 void GameBoy::write(u16 address, u8 value) {

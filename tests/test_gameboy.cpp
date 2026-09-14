@@ -78,6 +78,7 @@ TEST_CASE("every bus call advances the machine by one M-cycle") {
 
 TEST_CASE("memory regions route correctly, and echo RAM mirrors WRAM") {
     auto gb = makeGameBoy({0x00});
+    gb->write(0xFF40, 0x11); // LCD off, so VRAM and OAM are reachable
     gb->write(0xC123, 0x42);
     CHECK(gb->peek(0xE123) == 0x42);
     gb->write(0xE200, 0x17);
@@ -93,6 +94,19 @@ TEST_CASE("memory regions route correctly, and echo RAM mirrors WRAM") {
     CHECK(gb->peek(0x0100) == 0x00); // ROM
     gb->write(0x0100, 0x99);         // ROM writes go to the (absent) MBC
     CHECK(gb->peek(0x0100) == 0x00);
+}
+
+TEST_CASE("the CPU sees the PPU's blocking, and FEA0-FEFF follows OAM") {
+    auto gb = makeGameBoy({0x00});
+    // Power-on is mode 2 on line 0: OAM blocked, VRAM readable.
+    CHECK(gb->read(0xFE00) == 0xFF);
+    CHECK(gb->peek(0xFE00) == 0x00);  // the debugger view is never blocked
+    CHECK(gb->read(0xFEA0) == 0xFF);  // the unusable area follows OAM
+    gb->write(0xFF40, 0x11);          // LCD off
+    CHECK(gb->read(0xFE00) == 0x00);
+    CHECK(gb->read(0xFEA0) == 0x00);
+    gb->write(0xFE00, 0x42);
+    CHECK(gb->peek(0xFE00) == 0x42);
 }
 
 TEST_CASE("IF and IE drive the CPU's interrupt lines") {
@@ -134,6 +148,7 @@ TEST_CASE("the serial port records bytes and interrupts when done") {
 
 TEST_CASE("OAM DMA from WRAM copies 160 bytes and blocks WRAM, ROM and OAM, but VRAM and HRAM stay readable") {
     auto gb = makeGameBoy({0x00});
+    gb->write(0xFF40, 0x11); // LCD off: the DMA's own bus blocking is what's under test here
     for (int i = 0; i < 0xA0; ++i) {
         gb->write(static_cast<u16>(0xC000 + i), static_cast<u8>(i + 1));
     }

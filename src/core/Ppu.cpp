@@ -76,27 +76,31 @@ u8 Ppu::ly() const {
 }
 
 bool Ppu::vramBlocked() const {
-    return false; // Task 3
+    return lcdOn() && mode_ == 3;
 }
 
 bool Ppu::oamBlocked() const {
-    return false; // Task 3
+    return lcdOn() && (mode_ == 2 || mode_ == 3);
 }
 
 u8 Ppu::vramRead(u16 address) const {
-    return peekVram(address);
+    return vramBlocked() ? 0xFF : peekVram(address);
 }
 
 void Ppu::vramWrite(u16 address, u8 value) {
-    vram_[address - 0x8000] = value;
+    if (!vramBlocked()) {
+        vram_[address - 0x8000] = value;
+    }
 }
 
 u8 Ppu::oamRead(u16 address) const {
-    return peekOam(address);
+    return oamBlocked() ? 0xFF : peekOam(address);
 }
 
 void Ppu::oamWrite(u16 address, u8 value) {
-    oam_[address - 0xFE00] = value;
+    if (!oamBlocked()) {
+        oam_[address - 0xFE00] = value;
+    }
 }
 
 u8 Ppu::read(u16 address) const {

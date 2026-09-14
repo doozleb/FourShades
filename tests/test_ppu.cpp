@@ -111,6 +111,46 @@ TEST_CASE("VRAM and OAM keep their own storage, and LY is read-only") {
     CHECK(ppu.read(0xFF44) == 0x00);
 }
 
+TEST_CASE("VRAM is blocked in mode 3, OAM in modes 2 and 3") {
+    Ppu ppu;
+    ppu.write(0xFF40, 0x11); // LCD off: nothing blocked
+    ppu.vramWrite(0x8000, 0x11);
+    ppu.oamWrite(0xFE00, 0x22);
+    CHECK(ppu.vramRead(0x8000) == 0x11);
+    CHECK(ppu.oamRead(0xFE00) == 0x22);
+
+    ppu.write(0xFF40, 0x91); // on: line 0 starts in mode 2
+    CHECK(ppu.mode() == 2);
+    CHECK_FALSE(ppu.vramBlocked());
+    CHECK(ppu.oamBlocked());
+    CHECK(ppu.vramRead(0x8000) == 0x11);
+    CHECK(ppu.oamRead(0xFE00) == 0xFF);
+    ppu.oamWrite(0xFE00, 0x33); // dropped
+    CHECK(ppu.peekOam(0xFE00) == 0x22);
+
+    run(ppu, Ppu::kOamScanDots); // into mode 3
+    CHECK(ppu.mode() == 3);
+    CHECK(ppu.vramBlocked());
+    CHECK(ppu.oamBlocked());
+    CHECK(ppu.vramRead(0x8000) == 0xFF);
+    ppu.vramWrite(0x8000, 0x44); // dropped
+    CHECK(ppu.peekVram(0x8000) == 0x11);
+
+    run(ppu, Ppu::kMinDrawDots); // into mode 0
+    CHECK(ppu.mode() == 0);
+    CHECK_FALSE(ppu.vramBlocked());
+    CHECK_FALSE(ppu.oamBlocked());
+    CHECK(ppu.vramRead(0x8000) == 0x11);
+    CHECK(ppu.oamRead(0xFE00) == 0x22);
+}
+
+TEST_CASE("DMA and peek ignore blocking") {
+    Ppu ppu; // mode 2: OAM blocked
+    ppu.dmaWriteOam(0, 0x5A);
+    CHECK(ppu.peekOam(0xFE00) == 0x5A);
+    CHECK(ppu.oamRead(0xFE00) == 0xFF);
+}
+
 TEST_CASE("the frame starts blank and every pixel is a shade 0-3") {
     Ppu ppu;
     run(ppu, 154 * Ppu::kDotsPerLine);
