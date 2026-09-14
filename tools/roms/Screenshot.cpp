@@ -39,13 +39,15 @@ int compareFrame(const std::array<u8, kFramePixels>& frame, const std::vector<u8
 
 void writePgm(const std::filesystem::path& path, const std::array<u8, kFramePixels>& frame) {
     static constexpr u8 kGrey[4] = {255, 170, 85, 0};
-    std::ofstream out(path, std::ios::binary);
-    out << "P5\n" << kFrameWidth << " " << kFrameHeight << "\n255\n";
     for (const u8 shade : frame) {
         if (shade > 3) {
             throw std::runtime_error("writePgm: shade " + std::to_string(static_cast<int>(shade)) +
                                       " is out of range");
         }
+    }
+    std::ofstream out(path, std::ios::binary);
+    out << "P5\n" << kFrameWidth << " " << kFrameHeight << "\n255\n";
+    for (const u8 shade : frame) {
         out.put(static_cast<char>(kGrey[shade]));
     }
 }
