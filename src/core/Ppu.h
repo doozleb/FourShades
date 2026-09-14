@@ -25,7 +25,9 @@ public:
     u8 read(u16 address) const;        // FF40-FF4B
     void write(u16 address, u8 value); // FF40-FF4B
 
-    // The CPU's view. Blocking by mode arrives in Task 3.
+    // The CPU's view: VRAM is unreadable in mode 3, OAM in modes 2 and 3
+    // (except through dmaWriteOam). A blocked read gives 0xFF; a blocked
+    // write is dropped.
     u8 vramRead(u16 address) const;
     void vramWrite(u16 address, u8 value);
     u8 oamRead(u16 address) const;
