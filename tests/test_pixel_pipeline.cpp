@@ -40,12 +40,12 @@ TEST_CASE("shadeFor picks the two bits a palette assigns to a colour") {
 
 TEST_CASE("a tiled background is drawn with the palette applied") {
     Ppu ppu;
-    setUpTile(ppu, 0b10101010, 0b11001100); // colours 3,1,2,0 repeating
+    setUpTile(ppu, 0b10101010, 0b11001100); // colours 3,2,1,0 repeating
     runLine(ppu);
     const auto& frame = ppu.frame();
     CHECK(frame[0] == 3);
-    CHECK(frame[1] == 1);
-    CHECK(frame[2] == 2);
+    CHECK(frame[1] == 2);
+    CHECK(frame[2] == 1);
     CHECK(frame[3] == 0);
     CHECK(frame[4] == 3);
     CHECK(frame[8] == 3); // the next tile repeats
@@ -57,7 +57,7 @@ TEST_CASE("a plain line draws in 172 dots and SCX's low bits lengthen it") {
     setUpTile(ppu, 0xFF, 0x00); // every pixel colour 1
     CHECK(runLine(ppu) == 172);
     ppu.write(0xFF43, 0x05); // SCX = 5
-    CHECK(runLine(ppu) == 176); // 172 + 5, rounded up to whole M-cycles
+    CHECK(runLine(ppu) == 180); // 172 + 5 = 177 dots, reported as 180 when counted in whole M-cycles
 }
 
 TEST_CASE("SCX and SCY move the viewport") {
@@ -81,9 +81,9 @@ TEST_CASE("SCX and SCY move the viewport") {
     CHECK(ppu.frame()[8] == 3); // tile 1 starts at x = 8
 
     ppu.write(0xFF43, 0x08); // SCX = 8: that tile moves to x = 0
-    runLine(ppu);
-    CHECK(ppu.frame()[0] == 3);
-    CHECK(ppu.frame()[8] == 0);
+    runLine(ppu); // this draws line 1, not line 0, so read row 1 below
+    CHECK(ppu.frame()[Ppu::kWidth + 0] == 3);
+    CHECK(ppu.frame()[Ppu::kWidth + 8] == 0);
 }
 
 TEST_CASE("clearing LCDC bit 0 blanks the background") {
@@ -92,8 +92,8 @@ TEST_CASE("clearing LCDC bit 0 blanks the background") {
     runLine(ppu);
     CHECK(ppu.frame()[0] == 3);
     ppu.write(0xFF40, 0x90); // background off
-    runLine(ppu);
-    CHECK(ppu.frame()[0] == 0);
+    runLine(ppu); // this draws line 1, not line 0, so read row 1 below
+    CHECK(ppu.frame()[Ppu::kWidth] == 0);
 }
 
 TEST_CASE("a whole frame is drawn line by line") {
