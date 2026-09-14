@@ -31,7 +31,7 @@ void GameBoy::tick() {
     if (serial_.tick(before, timer_.counter())) {
         if_ = static_cast<u8>(if_ | irq::Serial);
     }
-    if_ = static_cast<u8>(if_ | lcd_.tick());
+    if_ = static_cast<u8>(if_ | ppu_.tick());
     tickDma();
 }
 
@@ -46,7 +46,7 @@ void GameBoy::tickDma() {
             from = static_cast<u16>(from - 0x2000);
         }
         dmaCurrentSource_ = from;
-        oam_[static_cast<std::size_t>(dmaIndex_)] = peek(from);
+        ppu_.dmaWriteOam(dmaIndex_, peek(from));
         if (++dmaIndex_ == 0xA0) {
             dmaActive_ = false;
         }
@@ -118,11 +118,11 @@ std::optional<u8> GameBoy::haltedCycle(u16 address) {
 
 u8 GameBoy::peek(u16 address) const {
     if (address < 0x8000) return cart_.read(address);
-    if (address < 0xA000) return vram_[address - 0x8000];
+    if (address < 0xA000) return ppu_.peekVram(address);
     if (address < 0xC000) return cart_.read(address);
     if (address < 0xE000) return wram_[address - 0xC000];
     if (address < 0xFE00) return wram_[address - 0xE000];
-    if (address < 0xFEA0) return oam_[address - 0xFE00];
+    if (address < 0xFEA0) return ppu_.peekOam(address);
     if (address < 0xFF00) return 0x00;
     if (address < 0xFF80) return readIo(address);
     if (address < 0xFFFF) return hram_[address - 0xFF80];
@@ -133,7 +133,7 @@ void GameBoy::writeMemory(u16 address, u8 value) {
     if (address < 0x8000) {
         cart_.write(address, value);
     } else if (address < 0xA000) {
-        vram_[address - 0x8000] = value;
+        ppu_.vramWrite(address, value);
     } else if (address < 0xC000) {
         cart_.write(address, value);
     } else if (address < 0xE000) {
@@ -141,7 +141,7 @@ void GameBoy::writeMemory(u16 address, u8 value) {
     } else if (address < 0xFE00) {
         wram_[address - 0xE000] = value;
     } else if (address < 0xFEA0) {
-        oam_[address - 0xFE00] = value;
+        ppu_.oamWrite(address, value);
     } else if (address < 0xFF00) {
         // unusable area: writes are ignored
     } else if (address < 0xFF80) {
@@ -166,7 +166,7 @@ u8 GameBoy::readIo(u16 address) const {
     case 0xFF46: return dmaRegister_;
     default:
         if (address >= 0xFF40 && address <= 0xFF4B) {
-            return lcd_.read(address);
+            return ppu_.read(address);
         }
         return 0xFF; // not implemented yet (sound is piece 5)
     }
@@ -189,7 +189,7 @@ void GameBoy::writeIo(u16 address, u8 value) {
         break;
     default:
         if (address >= 0xFF40 && address <= 0xFF4B) {
-            lcd_.write(address, value);
+            ppu_.write(address, value);
         }
         break;
     }
