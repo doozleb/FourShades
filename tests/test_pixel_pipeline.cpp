@@ -254,7 +254,13 @@ TEST_CASE("the window does not draw above WY") {
     CHECK(ppu.frame()[static_cast<std::size_t>(2) * Ppu::kWidth + 40] == 3); // line 2: window
 }
 
-TEST_CASE("the window's line counter only advances on lines that drew it") {
+TEST_CASE("consecutive lines draw consecutive window rows when the window is enabled all frame") {
+    // Pins the row mapping (windowLine_ -> tile row), not the "only advances
+    // on lines that drew it" rule: WY = 0 and LCDC bit 5 stay set for the
+    // whole frame here, so the window is drawn on every line and this test
+    // would still pass even if the counter advanced unconditionally. See
+    // "the window's counter does not advance on lines LCDC disables it..."
+    // below for a test that actually exercises that rule.
     Ppu ppu;
     setUpWindow(ppu);
     ppu.write(0xFF4A, 0x00);
@@ -268,6 +274,43 @@ TEST_CASE("the window's line counter only advances on lines that drew it") {
     }
     CHECK(ppu.frame()[static_cast<std::size_t>(0) * Ppu::kWidth + 40] == 3); // window row 0
     CHECK(ppu.frame()[static_cast<std::size_t>(1) * Ppu::kWidth + 40] == 0); // window row 1
+}
+
+TEST_CASE("the window's counter does not advance on lines LCDC disables it, so a mid-frame enable starts at row 0") {
+    // WY = 0 latches windowReached() from line 0 onward regardless of LCDC
+    // bit 5 (that's the divergence recorded in docs/known-divergences.md),
+    // but LCDC bit 5 itself stays clear for lines 0 and 1, so the window
+    // must not actually draw, and its line counter must not advance, on
+    // either of them. If advanceWindowLine() were called unconditionally
+    // instead of only on lines the window actually drew, line 2 would show
+    // window row 2, not row 0.
+    Ppu ppu;
+    setUpWindow(ppu);
+    // Window tile (index 1) row 0 is colour 3 (set by setUpWindow's fill);
+    // give every other row colour 2 so row 0 and row 2 are visibly
+    // different: a tile row is two bytes, the first the low bit of each
+    // pixel and the second the high bit, so colour = (high << 1) | low.
+    // low = 0x00, high = 0xFF makes every pixel in the row colour 2.
+    ppu.write(0xFF40, 0x11); // LCD off so writes land
+    for (u16 row = 2; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8010 + row), 0x00);
+        ppu.vramWrite(static_cast<u16>(0x8011 + row), 0xFF);
+    }
+    // 0xD1 is 0xF1 with LCDC bit 5 (window enable) cleared: window disabled
+    // for lines 0 and 1.
+    ppu.write(0xFF40, 0xD1);
+    runLine(ppu); // line 0: window disabled, background only
+    runLine(ppu); // line 1: window disabled, background only
+    ppu.write(0xFF40, 0xF1); // window enabled from line 2 onward
+    runLine(ppu); // line 2: window enabled, should draw its row 0
+
+    CHECK(ppu.frame()[static_cast<std::size_t>(0) * Ppu::kWidth + 40] == 1); // line 0: background
+    CHECK(ppu.frame()[static_cast<std::size_t>(1) * Ppu::kWidth + 40] == 1); // line 1: background
+    // BGP = 0xE4 is the identity mapping (bits 1:0 shade colour 0, 3:2 shade
+    // colour 1, and so on, here set up so shade == colour), so window row 0
+    // (colour 3) reads back as shade 3, and the wrongly-advanced row 2
+    // (colour 2) would read back as shade 2.
+    CHECK(ppu.frame()[static_cast<std::size_t>(2) * Ppu::kWidth + 40] == 3); // line 2: window row 0
 }
 
 TEST_CASE("a whole frame is drawn line by line") {

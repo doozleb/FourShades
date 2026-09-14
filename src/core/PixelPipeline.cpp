@@ -18,7 +18,6 @@ void PixelPipeline::startLine(Ppu& ppu) {
     pixelX_ = 0;
     discard_ = ppu.scx() & 0x07;
     window_ = false;
-    windowCounted_ = false;
 }
 
 u16 PixelPipeline::tileRowAddress(const Ppu& ppu) const {
@@ -101,16 +100,13 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
         step_ = Step::Tile;
         stepDots_ = 0;
         fetcherX_ = 0;
-        if (!windowCounted_) {
-            windowCounted_ = true;
-            // Cache the row the window is drawing on this line before
-            // advancing the PPU's counter for the next one: every fetch
-            // below reads windowLineUsed_, never ppu.windowLine() directly,
-            // so the just-bumped value doesn't leak into this line's tiles.
-            windowLineUsed_ = ppu.windowLine();
-            // The window's line counter only advances on lines that drew it.
-            ppu.advanceWindowLine();
-        }
+        // Cache the row the window is drawing on this line before advancing
+        // the PPU's counter for the next one: every fetch below reads
+        // windowLineUsed_, never ppu.windowLine() directly, so the
+        // just-bumped value doesn't leak into this line's tiles.
+        windowLineUsed_ = ppu.windowLine();
+        // The window's line counter only advances on lines that drew it.
+        ppu.advanceWindowLine();
     }
     stepFetcher(ppu);
     if (queueSize_ > 0) {
