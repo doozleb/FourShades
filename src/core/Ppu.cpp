@@ -26,6 +26,10 @@ void Ppu::stepDot(u8& requested) {
     if (dot_ >= kDotsPerLine) {
         dot_ = 0;
         line_ = line_ + 1 >= kLines ? 0 : line_ + 1;
+        if (line_ == 0) {
+            windowReached_ = false;
+            windowLine_ = 0;
+        }
         if (line_ == 144) {
             ++frames_;
             requested = static_cast<u8>(requested | irq::VBlank);
@@ -37,6 +41,14 @@ void Ppu::stepDot(u8& requested) {
         if (mode_ == 2 && dot_ == kOamScanDots) {
             setMode(3);
             lineBuffer_.fill(0);
+            // Ppu::windowReached() promises only that WY matched LY at some
+            // point this frame, independent of whether the window happens to
+            // be enabled at that instant; PixelPipeline::stepDot separately
+            // checks LCDC bit 5 (window enable) before it ever draws the
+            // window on a given line.
+            if (line_ == wy_) {
+                windowReached_ = true;
+            }
             pipeline_.startLine(*this);
         } else if (mode_ == 3) {
             if (pipeline_.stepDot(*this, lineBuffer_)) {
@@ -137,6 +149,8 @@ void Ppu::write(u16 address, u8 value) {
             mode_ = 0;
             statLine_ = false;
             frame_.fill(0);
+            windowReached_ = false;
+            windowLine_ = 0;
         } else if (!wasOn && lcdOn()) {
             // Pan Docs: drawing starts again immediately. The first line is
             // shorter than 456 dots; lcdon_timing-GS pins that in Task 8.

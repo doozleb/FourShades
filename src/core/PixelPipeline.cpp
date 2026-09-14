@@ -8,7 +8,7 @@ u8 shadeFor(u8 palette, u8 colour) {
     return static_cast<u8>((palette >> (colour * 2)) & 0x03);
 }
 
-void PixelPipeline::startLine(const Ppu& ppu) {
+void PixelPipeline::startLine(Ppu& ppu) {
     step_ = Step::Tile;
     stepDots_ = 0;
     fetcherX_ = 0;
@@ -17,10 +17,13 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     queueHead_ = 0;
     pixelX_ = 0;
     discard_ = ppu.scx() & 0x07;
+    window_ = false;
+    windowCounted_ = false;
 }
 
 u16 PixelPipeline::tileRowAddress(const Ppu& ppu) const {
-    const u8 y = static_cast<u8>(ppu.lineNumber() + ppu.scy());
+    const u8 y = window_ ? static_cast<u8>(windowLineUsed_)
+                          : static_cast<u8>(ppu.lineNumber() + ppu.scy());
     const u16 base = (ppu.lcdc() & 0x10) != 0
                          ? static_cast<u16>(0x8000 + tileIndex_ * 16)
                          : static_cast<u16>(0x9000 + static_cast<i8>(tileIndex_) * 16);
@@ -35,9 +38,12 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
         }
         stepDots_ = 0;
         {
-            const u16 map = (ppu.lcdc() & 0x08) != 0 ? 0x9C00 : 0x9800;
-            const u8 y = static_cast<u8>(ppu.lineNumber() + ppu.scy());
-            const u8 x = static_cast<u8>(((ppu.scx() / 8) + fetcherX_) & 0x1F);
+            const bool window = window_;
+            const u16 map = (window ? (ppu.lcdc() & 0x40) : (ppu.lcdc() & 0x08)) != 0 ? 0x9C00 : 0x9800;
+            const u8 y = window ? static_cast<u8>(windowLineUsed_)
+                                 : static_cast<u8>(ppu.lineNumber() + ppu.scy());
+            const u8 x = window ? static_cast<u8>(fetcherX_ & 0x1F)
+                                 : static_cast<u8>(((ppu.scx() / 8) + fetcherX_) & 0x1F);
             tileIndex_ = ppu.peekVram(static_cast<u16>(map + (y / 8) * 32 + x));
         }
         step_ = Step::DataLow;
@@ -84,7 +90,28 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
     }
 }
 
-bool PixelPipeline::stepDot(const Ppu& ppu, std::array<u8, 160>& line) {
+bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
+    if (!window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached() &&
+        discard_ == 0 && pixelX_ >= static_cast<int>(ppu.wx()) - 7) {
+        // Pan Docs: the background queue is cleared and the fetcher restarts,
+        // which costs the documented six dots.
+        window_ = true;
+        queueSize_ = 0;
+        queueHead_ = 0;
+        step_ = Step::Tile;
+        stepDots_ = 0;
+        fetcherX_ = 0;
+        if (!windowCounted_) {
+            windowCounted_ = true;
+            // Cache the row the window is drawing on this line before
+            // advancing the PPU's counter for the next one: every fetch
+            // below reads windowLineUsed_, never ppu.windowLine() directly,
+            // so the just-bumped value doesn't leak into this line's tiles.
+            windowLineUsed_ = ppu.windowLine();
+            // The window's line counter only advances on lines that drew it.
+            ppu.advanceWindowLine();
+        }
+    }
     stepFetcher(ppu);
     if (queueSize_ > 0) {
         const u8 colour = queue_[static_cast<std::size_t>(queueHead_)];
