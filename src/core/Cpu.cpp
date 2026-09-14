@@ -56,12 +56,14 @@ void Cpu::dispatchInterrupt() {
         regs.pc = static_cast<u16>(regs.pc - 1);
     }
     bus_.idle();
+    bus_.iduCycle(regs.sp);
     regs.sp = static_cast<u16>(regs.sp - 1);
     bus_.write(regs.sp, hi(regs.pc));
     // The vector is chosen after the high byte is pushed. If that push
     // overwrote IE (SP was 0x0000), nothing may be pending any more, and the
     // CPU then continues at 0x0000 with nothing acknowledged.
     const u8 pending = bus_.pendingInterrupts();
+    bus_.iduCycle(regs.sp);
     regs.sp = static_cast<u16>(regs.sp - 1);
     bus_.write(regs.sp, lo(regs.pc));
     if (pending == 0) {
