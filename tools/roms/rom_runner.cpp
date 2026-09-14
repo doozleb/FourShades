@@ -4,10 +4,11 @@
 // the results but never run or counted, so a full run scores N / 165.
 //
 //   rom_runner                all tests
-//   rom_runner --only timer   tests whose name contains "timer" (marked partial)
+//   rom_runner --only timer   tests whose name or group contains "timer" (marked partial)
 
 #include "roms/RomRun.h"
 #include "roms/RomTests.h"
+#include "roms/Screenshot.h"
 #include "sst/Manifest.h"
 #include "sst/Sha256.h"
 
@@ -39,7 +40,8 @@ struct Options {
 };
 
 int usage() {
-    std::cerr << "usage: rom_runner [--data DIR] [--manifest FILE] [--tests FILE] [--out FILE] [--only TEXT]\n";
+    std::cerr << "usage: rom_runner [--data DIR] [--manifest FILE] [--tests FILE] [--out FILE] [--only TEXT]\n"
+                  "  --only TEXT   tests whose name or group contains TEXT\n";
     return 2;
 }
 
@@ -109,7 +111,8 @@ int main(int argc, char** argv) {
         std::map<std::string, std::string> firstFailure;
 
         for (const roms::RomTest& test : list.tests) {
-            if (partial && test.name.find(options.only) == std::string::npos) continue;
+            if (partial && test.name.find(options.only) == std::string::npos &&
+                test.group.find(options.only) == std::string::npos) continue;
             const char* method = test.method == roms::Method::Blargg ? "blargg"
                                : test.method == roms::Method::Mooneye ? "mooneye" : "screenshot";
             if (test.informational) {
@@ -122,7 +125,13 @@ int main(int argc, char** argv) {
             }
             ++total;
             const std::string bytes = sst::readBinaryFile(options.data / std::filesystem::path(test.rom));
-            const auto outcome = roms::runRomTest(test, std::vector<fourshades::u8>(bytes.begin(), bytes.end()));
+            std::vector<std::vector<fourshades::u8>> references;
+            for (const auto& reference : test.references) {
+                references.push_back(roms::loadShades(
+                    options.data / std::filesystem::path(reference + ".shades")));
+            }
+            const auto outcome = roms::runRomTest(test, std::vector<fourshades::u8>(bytes.begin(), bytes.end()),
+                                                  references, "build/frames");
             const bool pass = outcome.status == roms::Verdict::Pass;
             if (!groups.count(test.group)) groupOrder.push_back(test.group);
             auto& g = groups[test.group];

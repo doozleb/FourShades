@@ -26,10 +26,11 @@ std::string blarggFailureReason(const std::string& text) {
     return "Failed: " + line;
 }
 
-RomOutcome runRomTest(const RomTest& test, std::vector<u8> romImage) {
+RomOutcome runRomTest(const RomTest& test, std::vector<u8> romImage,
+                      const std::vector<std::vector<u8>>& references, const std::filesystem::path& frameDir) {
     RomOutcome out;
-    if (test.method == Method::Screenshot) {
-        out.reason = "needs the PPU (piece 3)";
+    if (test.method == Method::Screenshot && references.empty()) {
+        out.reason = "no reference image";
         return out;
     }
     std::string error;
@@ -39,7 +40,8 @@ RomOutcome runRomTest(const RomTest& test, std::vector<u8> romImage) {
         return out;
     }
     auto gb = std::make_unique<fourshades::GameBoy>(std::move(*cart));
-    const auto limit = static_cast<std::uint64_t>(test.limitSeconds * static_cast<double>(kCyclesPerSecond));
+    const double seconds = test.method == Method::Screenshot ? test.runtime : test.limitSeconds;
+    const auto limit = static_cast<std::uint64_t>(seconds * static_cast<double>(kCyclesPerSecond));
     const auto peek = [&gb](u16 address) { return gb->peek(address); };
     std::uint64_t nextBlarggCheck = 0;
     bool sawBlarggRunning = false;       // per-test state for blarggMemoryVerdict
@@ -100,6 +102,33 @@ RomOutcome runRomTest(const RomTest& test, std::vector<u8> romImage) {
         gb->step();
     }
     out.emulatedSeconds = static_cast<double>(gb->cycles()) / static_cast<double>(kCyclesPerSecond);
+    if (test.method == Method::Screenshot) {
+        const auto& frame = gb->ppu().frame();
+        int best = -1;
+        for (const auto& reference : references) {
+            const int differing = compareFrame(frame, reference);
+            if (differing == 0) {
+                out.status = Verdict::Pass;
+                out.reason = "matches the reference";
+                return out;
+            }
+            if (best < 0 || differing < best) {
+                best = differing;
+            }
+        }
+        out.status = Verdict::Fail;
+        out.reason = "differs from the reference in " + std::to_string(best) + " pixels";
+        if (!frameDir.empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(frameDir, ec);
+            std::string name = test.name;
+            for (char& c : name) {
+                if (c == '/' || c == ' ' || c == '(' || c == ')') { c = '_'; }
+            }
+            writePgm(frameDir / (name + ".pgm"), frame);
+        }
+        return out;
+    }
     out.serial = printable(gb->serialOutput(), 2048);
     if (memoryEvidence && out.serial.empty()) {
         // The result came from cartridge RAM, not the link port: carry the

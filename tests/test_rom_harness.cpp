@@ -261,10 +261,10 @@ TEST_CASE("runRomTest catches a Mooneye failure signaled only over serial, regis
     CHECK(outcome.reason == "failure bytes (0x42) over serial");
 }
 
-TEST_CASE("screenshot tests fail with the reason, without running") {
+TEST_CASE("a screenshot test with no reference fails without running") {
     const auto outcome = roms::runRomTest(testOf(roms::Method::Screenshot), romWith({0x00}));
     CHECK(outcome.status == roms::Verdict::Fail);
-    CHECK(outcome.reason == "needs the PPU (piece 3)");
+    CHECK(outcome.reason == "no reference image");
     CHECK(outcome.emulatedSeconds == 0.0);
 }
 
