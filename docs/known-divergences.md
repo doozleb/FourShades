@@ -173,7 +173,18 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   if the *Y condition* is true and the [Window enable bit] is set in
   `LCDC`, background rendering is reset, beginning anew from the active row
   of the Window's tilemap,"
-  [Scrolling: FF4A/FF4B — WY, WX (Window Y Position, X Position Plus 7)](https://gbdev.io/pandocs/Scrolling.html#ff4aff4b--wy-wx-window-y-position-x-position-plus-7).
+  [Window behavior: Window rendering criteria](https://gbdev.io/pandocs/Window.html#window-rendering-criteria).
+  The same section goes on: "The coordinate of the active Window row is
+  then incremented," and that toggling the Window enable bit off and on
+  mid-scanline "can happen more than once per scanline, making the
+  Window's 'tilemap Y coordinate' increase more than once in the
+  scanline" — advancing the row counter this way needs no fresh `WY ==
+  LY` match, which only supports an ungated latch: if the coincidence had
+  to be re-established, a second advance mid-scanline couldn't happen
+  without LY changing. FourShades doesn't model that mid-scanline
+  multiple-advance behaviour yet; Mealybug's `m3_lcdc_win_en_change_multiple`
+  and `m3_lcdc_win_en_change_multiple_wx` tests probe it and are left for a
+  later task.
   (Pan Docs does note that on GBC, clearing bit 5 resets the Y condition
   too — but says so only for GBC, which FourShades doesn't model yet, so it
   doesn't bear on this DMG-era decision.) The alternative — gating the latch
