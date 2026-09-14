@@ -49,6 +49,7 @@ void Ppu::stepDot(u8& requested) {
             if (line_ == wy_) {
                 windowReached_ = true;
             }
+            scanOam();
             pipeline_.startLine(*this);
         } else if (mode_ == 3) {
             if (pipeline_.stepDot(*this, lineBuffer_)) {
@@ -82,6 +83,21 @@ void Ppu::updateStatLine(u8& requested) {
         requested = static_cast<u8>(requested | irq::Lcd);
     }
     statLine_ = line;
+}
+
+void Ppu::scanOam() {
+    lineObjects_.clear();
+    const int height = objectHeight();
+    for (int index = 0; index < 40 && lineObjects_.size() < 10; ++index) {
+        const u16 base = static_cast<u16>(0xFE00 + index * 4);
+        const u8 y = peekOam(base);
+        const int top = static_cast<int>(y) - 16;
+        if (line_ >= top && line_ < top + height) {
+            lineObjects_.push_back(Object{y, peekOam(static_cast<u16>(base + 1)),
+                                          peekOam(static_cast<u16>(base + 2)),
+                                          peekOam(static_cast<u16>(base + 3)), index});
+        }
+    }
 }
 
 u8 Ppu::ly() const {

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 namespace fourshades {
 
@@ -64,11 +65,24 @@ public:
     int windowLine() const { return windowLine_; }
     void advanceWindowLine() { ++windowLine_; }
 
+    struct Object {
+        u8 y = 0;      // as stored in OAM: screen Y + 16
+        u8 x = 0;      // as stored in OAM: screen X + 8
+        u8 tile = 0;
+        u8 flags = 0;
+        int oamIndex = 0;
+    };
+
+    // The objects mode 2 picked for the line being drawn, in OAM order.
+    const std::vector<Object>& lineObjects() const { return lineObjects_; }
+    int objectHeight() const { return (lcdc_ & 0x04) != 0 ? 16 : 8; }
+
 private:
     void stepDot(u8& requested);
     void setMode(int mode);
     void updateStatLine(u8& requested);
     bool lycMatch() const;
+    void scanOam();
 
     std::array<u8, 0x2000> vram_{};
     std::array<u8, 0xA0> oam_{};
@@ -95,6 +109,7 @@ private:
     std::uint64_t frames_ = 0;
     bool windowReached_ = false; // WY has matched LY somewhere in this frame
     int windowLine_ = 0;         // the window's own line counter
+    std::vector<Object> lineObjects_;
 };
 
 } // namespace fourshades
