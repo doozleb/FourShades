@@ -160,4 +160,32 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   is then locked out for the 160 M-cycles that copy bytes, the last included
   (`oam_dma_timing`, `oam_dma_restart`, `push_timing`, `rst_timing`,
   `call_timing2`, `call_cc_timing2`).
-- **Checked:** 2026-09-11.
+- **The WY == LY coincidence ("Y condition") latches independently of LCDC
+  bit 5.** `Ppu::stepDot` sets `windowReached_` at the start of mode 2 on
+  every line whenever `LY == WY`, whether or not the window is enabled at
+  that instant. Bit 5 is checked separately, in `PixelPipeline::stepDot`,
+  only once the X counter reaches WX − 7, and the window is drawn there only
+  if bit 5 is set at that moment. Pan Docs' own model keeps these two checks
+  apart the same way: "At the beginning of each scanline, if the value of
+  `WY` is equal to `LY`, the *Y condition* becomes true (and remains so for
+  subsequent scanlines)" — with no mention of LCDC bit 5 — and only the
+  later, separate check gates on it: "When this counter is equal to `WX`,
+  if the *Y condition* is true and the [Window enable bit] is set in
+  `LCDC`, background rendering is reset, beginning anew from the active row
+  of the Window's tilemap,"
+  [Scrolling: FF4A/FF4B — WY, WX (Window Y Position, X Position Plus 7)](https://gbdev.io/pandocs/Scrolling.html#ff4aff4b--wy-wx-window-y-position-x-position-plus-7).
+  (Pan Docs does note that on GBC, clearing bit 5 resets the Y condition
+  too — but says so only for GBC, which FourShades doesn't model yet, so it
+  doesn't bear on this DMG-era decision.) The alternative — gating the latch
+  on bit 5 too — would mean a window enabled mid-frame could never start on
+  that frame: it would have missed the one line where LY == WY, and the
+  coincidence never recurs before the next VBlank resets `windowReached_`.
+  FourShades takes the ungated latch as the more likely hardware behaviour.
+  Mooneye's and Mealybug's window tests arbitrate this in later pieces of
+  work; if that evidence says the gate belongs, the test that depends on the
+  ungated latch (`the window's counter does not advance on lines LCDC
+  disables it...` in `tests/test_pixel_pipeline.cpp`) gets restructured to
+  match — the implementation is not to be bent to keep that test passing.
+  Checked 2026-09-14.
+- **Checked:** 2026-09-11, except the WY-latch entry above, checked
+  2026-09-14.

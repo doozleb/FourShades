@@ -44,7 +44,6 @@ private:
     int pixelX_ = 0;   // pixels emitted (0-160)
     int discard_ = 0;  // SCX % 8 pixels dropped at the start of the line
     bool window_ = false;        // drawing the window on this line
-    bool windowCounted_ = false; // the window's line counter already advanced
     // The window's own line counter as it stood when the window started on
     // this line, cached so every fetch on the line reads the row the window
     // is actually drawing rather than the value left behind once
