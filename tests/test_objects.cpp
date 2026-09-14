@@ -106,6 +106,40 @@ TEST_CASE("8x16 objects use two tiles and ignore the index's low bit") {
     CHECK(ppu.frame()[16] == 1); // tile 0 is colour 1, drawn through OBP0
 }
 
+TEST_CASE("an 8x16 object reads tile + 1 once the screen row reaches 8") {
+    Ppu ppu;
+    setUpObjects(ppu);
+    ppu.write(0xFF40, 0x97); // 8x16 objects
+    // Y = 8 puts the object's own rows 0-7 off the top of the screen, so
+    // line 0 (the only line runLineObjects draws) is the object's row
+    // 8 - lineNumber(0) - (y(8) - 16) = 8 - the first row of its bottom
+    // tile. Tile data is contiguous in VRAM, so "tile + 1" here is tile
+    // 0's neighbour, tile 1, which setUpObjects gives a distinct pattern
+    // (colour 3 / colour 0) from tile 0 (uniform colour 1).
+    putObject(ppu, 0, 8, 8 + 16, 0x01, 0x00); // index 1 -> masked to tile 0, +1 = tile 1
+    runLineObjects(ppu);
+    CHECK(ppu.frame()[16] == 3); // tile 1's left half
+    CHECK(ppu.frame()[20] == 1); // tile 1's right half is transparent: background shows
+}
+
+TEST_CASE("a Y-flipped 8x16 object flips across all sixteen rows, not each half") {
+    Ppu ppu;
+    setUpObjects(ppu);
+    ppu.write(0xFF40, 0x97); // 8x16 objects
+    // Y = 16 (screen y = 0) puts line 0 at the object's own row 0. Y-flipped,
+    // Pan Docs' rule is row = height - 1 - row = 16 - 1 - 0 = 15, which (via
+    // the same contiguous-VRAM arithmetic as the test above) reads tile 1's
+    // last row, not tile 0's: a flip confined to each 8-row half would
+    // instead reflect row 0 within the top half alone (row 7 of tile 0,
+    // colour 1 -- indistinguishable from "no object" here), so seeing tile
+    // 1's pattern (colour 3 / colour 0) is what proves the flip spans the
+    // whole 16 rows.
+    putObject(ppu, 0, 16, 8 + 16, 0x01, 0x40); // index 1 -> tile 0/1 pair, Y flip
+    runLineObjects(ppu);
+    CHECK(ppu.frame()[16] == 3); // tile 1's last row, left half
+    CHECK(ppu.frame()[20] == 1); // tile 1's last row, right half is transparent
+}
+
 TEST_CASE("only ten objects are drawn on a line, chosen in OAM order") {
     Ppu ppu;
     setUpObjects(ppu);
@@ -130,14 +164,64 @@ TEST_CASE("an object off the left edge still uses one of the ten slots") {
     CHECK(ppu.frame()[80] == 1); // the eleventh object never got a slot
 }
 
+TEST_CASE("an object at the left edge stays aligned with pixelX_ when SCX discards pixels") {
+    Ppu ppu;
+    setUpObjects(ppu);
+    ppu.write(0xFF43, 0x03); // SCX = 3: the line's first 3 background pixels are discarded
+    putObject(ppu, 0, 16, 8, 1, 0x00); // OAM X = 8 -> screen X = 0
+    runLineObjects(ppu);
+    // The object's X is already in screen space (Pan Docs), so it belongs
+    // at screen columns 0-3 (colour 3) / 4-7 (colour 0, transparent)
+    // regardless of SCX: SCX only discards background pixels scrolled off
+    // the left edge before pixelX_ starts counting, and never touches the
+    // object's own coordinates. objects_ is a shift register whose
+    // invariant is "objects_[k] holds the object pixel for screen pixel
+    // pixelX_ + k"; if it shifts once per popped background pixel even
+    // while SCX's discard is draining (pixelX_ not yet advancing), the
+    // object's leftmost 3 columns are shifted out during the discard and
+    // the whole object appears 3 columns to the left of where it belongs.
+    CHECK(ppu.frame()[0] == 3);
+    CHECK(ppu.frame()[1] == 3);
+    CHECK(ppu.frame()[2] == 3);
+    CHECK(ppu.frame()[3] == 3);
+    CHECK(ppu.frame()[4] == 1); // transparent: background shows through
+    CHECK(ppu.frame()[5] == 1);
+    CHECK(ppu.frame()[6] == 1);
+    CHECK(ppu.frame()[7] == 1);
+}
+
 TEST_CASE("each object lengthens mode 3") {
     Ppu ppu;
     setUpObjects(ppu);
     const int plain = runLineObjects(ppu);
-    putObject(ppu, 0, 16, 8 + 16, 1, 0x00);
+    CHECK(plain == 172);
+    putObject(ppu, 0, 16, 8 + 16, 1, 0x00); // screen x = 16, SCX = 0
     const int withOne = runLineObjects(ppu);
-    CHECK(withOne > plain);
-    CHECK(withOne - plain <= 12); // one object costs 6-11 dots
+    // Pan Docs' "OBJ penalty algorithm": a flat 6 dots plus a tile term the
+    // first time an object's leftmost pixel falls in a new tile. Screen
+    // x = 16 with SCX = 0 is tile (0 + 16) / 8 = 2, and the object's pixel
+    // sits 7 - (16 & 7) = 7 pixels short of that tile's right edge; since
+    // 7 > 2, the tile term is 7 - 2 = 5. So the penalty is the flat 6 plus
+    // 5 = 11 raw dots on top of the plain line's 172 raw dots: 183 raw,
+    // which runLineObjects (counting whole 4-dot M-cycles) reports as 184.
+    CHECK(withOne == 184);
+}
+
+TEST_CASE("an object at OAM X = 0 always costs eleven dots") {
+    Ppu ppu;
+    setUpObjects(ppu);
+    const int plain = runLineObjects(ppu);
+    CHECK(plain == 172);
+    putObject(ppu, 0, 16, 0, 1, 0x00); // OAM X = 0
+    const int withOne = runLineObjects(ppu);
+    // X = 0 is the special case that always costs the flat 6 plus the full
+    // 5-dot tile term -- 11 dots flat, no tile lookup at all -- so unlike
+    // the general case above it can't vary with pixelX_ or SCX. 172 + 11 =
+    // 183 raw dots, reported as 184: the same number as the x = 16 case
+    // above, but for a different reason (a hardcoded 11, not a computed
+    // one), which is exactly why this needs its own assertion rather than
+    // reusing that test's tolerance.
+    CHECK(withOne == 184);
 }
 
 TEST_CASE("clearing LCDC bit 1 hides objects") {

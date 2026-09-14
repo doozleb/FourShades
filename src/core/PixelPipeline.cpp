@@ -116,6 +116,22 @@ void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
         const int bit = (object.flags & 0x20) != 0 ? i : 7 - i; // X flip
         const u8 colour = static_cast<u8>((((high >> bit) & 1) << 1) | ((low >> bit) & 1));
         ObjectPixel& slot = objects_[static_cast<std::size_t>(x - pixelX_)];
+        // Pan Docs' documented DMG priority rule ("OAM: Drawing priority"):
+        // the object with the smaller X coordinate wins, and ties (equal X)
+        // are broken by the lower OAM index. This is an approximation of
+        // that rule, not an implementation of it: the first object to claim
+        // a pixel wins, full stop. It usually agrees, because objects are
+        // started left to right as pixelX_ reaches each one's screen X, so
+        // the first claimant is usually the one with the smallest X, and two
+        // objects sharing an X both trigger on the same dot and get scanned
+        // in OAM order, which matches the documented tie-break. It differs
+        // for objects at or left of the screen edge (X = 1-8): they all
+        // trigger together at pixelX_ == 0 regardless of their true relative
+        // X, so among those the winner is whichever this OAM-order scan
+        // reaches first, not necessarily the one with the smallest X.
+        // Hardware-verified image-comparison test ROMs that probe overlapping
+        // objects directly would arbitrate this; see docs/known-divergences.md
+        // for the decision, the evidence and which ROMs those are.
         if (colour != 0 && slot.colour == 0) { // the first object to claim it wins
             slot = ObjectPixel{colour, static_cast<u8>((object.flags & 0x10) != 0 ? 1 : 0),
                                (object.flags & 0x80) != 0};
@@ -124,12 +140,24 @@ void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
 
     // Pan Docs "OBJ penalty algorithm": a flat six dots, plus the wait for the
     // background fetch of the tile the object's leftmost pixel falls in, the
-    // first time an object lands in that tile. X = 0 always costs eleven.
+    // first time an object lands in that tile. X = 0 always costs eleven,
+    // which is exactly the flat six plus the full tile term, so this object
+    // has effectively already paid for the tile at pixelX_ (always tile 0 of
+    // the discard-adjusted grid, since X = 0 only ever triggers at pixelX_ ==
+    // 0): record that before returning, or a second object triggering at
+    // pixelX_ == 0 would pay the tile term again.
     if (object.x == 0) {
         objectDots_ = 11;
+        lastPenaltyTile_ = (ppu.scx() + pixelX_) / 8;
         return;
     }
     objectDots_ = 6;
+    // NOTE: this tile index is in background coordinates (SCX + pixelX_).
+    // Once the window is drawing, tile boundaries actually follow WX - 7
+    // instead, so on a line with both a window and an object this term can
+    // be wrong by up to 5 dots. Left for the hardware timing tests in a
+    // later task to arbitrate; see docs/known-divergences.md conventions
+    // for how to record the resolution once they do.
     const int tileOfPixel = (ppu.scx() + pixelX_) / 8;
     if (tileOfPixel != lastPenaltyTile_) {
         lastPenaltyTile_ = tileOfPixel;
@@ -186,14 +214,21 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
         const u8 background = queue_[static_cast<std::size_t>(queueHead_)];
         queueHead_ = (queueHead_ + 1) % 8;
         --queueSize_;
-        const ObjectPixel object = objects_[0];
-        for (std::size_t i = 0; i + 1 < objects_.size(); ++i) {
-            objects_[i] = objects_[i + 1];
-        }
-        objects_[objects_.size() - 1] = ObjectPixel{};
         if (discard_ > 0) {
+            // These are background pixels scrolled off the left edge by SCX;
+            // pixelX_ does not advance for them, so objects_ (whose
+            // invariant is "objects_[k] holds the object pixel for screen
+            // pixel pixelX_ + k") must not shift either, or it desyncs from
+            // pixelX_ and an object merged before the discard drains (any
+            // object at screen X <= 0) renders shifted left by the discard
+            // count once emission actually starts.
             --discard_;
         } else {
+            const ObjectPixel object = objects_[0];
+            for (std::size_t i = 0; i + 1 < objects_.size(); ++i) {
+                objects_[i] = objects_[i + 1];
+            }
+            objects_[objects_.size() - 1] = ObjectPixel{};
             const u8 bgColour = (ppu.lcdc() & 0x01) != 0 ? background : 0;
             u8 shade = shadeFor(ppu.bgp(), bgColour);
             const bool objectWins = object.colour != 0 && (ppu.lcdc() & 0x02) != 0 &&
