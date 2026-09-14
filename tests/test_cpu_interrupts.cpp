@@ -65,6 +65,9 @@ public:
         }
         return memory[address];
     }
+    // Task 10 gives this its effect: the DMG OAM corruption bug. This test is
+    // about interrupt timing and has no use for the addresses.
+    void iduCycle(u16) override {}
     u8 pendingInterrupts() override { return pending_; }
     void acknowledgeInterrupt(int bit) override { pending_ = static_cast<u8>(pending_ & ~(1 << bit)); }
     std::array<u8, 0x10000> memory{};

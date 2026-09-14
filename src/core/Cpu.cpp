@@ -20,10 +20,12 @@ void Cpu::step() {
         if (!fetched) {
             return;
         }
+        bus_.iduCycle(regs.pc);
         state_ = State::Running; // Pan Docs "halt": wakes whatever IME is
         opcode = *fetched;
     } else {
         opcode = bus_.read(regs.pc);
+        bus_.iduCycle(regs.pc);
     }
     const u8 pending = bus_.pendingInterrupts();
     if (ime && pending != 0) {
@@ -145,16 +147,20 @@ void Cpu::writeRp2(int index, u16 value) {
 
 void Cpu::push16(u16 value) {
     bus_.idle(); // SP is decremented before the first write, costing a cycle
+    bus_.iduCycle(regs.sp);
     regs.sp = static_cast<u16>(regs.sp - 1);
     bus_.write(regs.sp, hi(value));
+    bus_.iduCycle(regs.sp);
     regs.sp = static_cast<u16>(regs.sp - 1);
     bus_.write(regs.sp, lo(value));
 }
 
 u16 Cpu::pop16() {
     const u8 low = bus_.read(regs.sp);
+    bus_.iduCycle(regs.sp);
     regs.sp = static_cast<u16>(regs.sp + 1);
     const u8 high = bus_.read(regs.sp);
+    bus_.iduCycle(regs.sp);
     regs.sp = static_cast<u16>(regs.sp + 1);
     return make16(high, low);
 }

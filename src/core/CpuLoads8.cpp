@@ -22,20 +22,24 @@ bool Cpu::executeLoads8(u8 opcode) {
     case 0x12: bus_.write(regs.de(), regs.a); return true;
     case 0x22: // LD (HL+), A
         bus_.write(regs.hl(), regs.a);
+        bus_.iduCycle(regs.hl());
         regs.setHl(static_cast<u16>(regs.hl() + 1));
         return true;
     case 0x32: // LD (HL-), A
         bus_.write(regs.hl(), regs.a);
+        bus_.iduCycle(regs.hl());
         regs.setHl(static_cast<u16>(regs.hl() - 1));
         return true;
     case 0x0A: regs.a = bus_.read(regs.bc()); return true;
     case 0x1A: regs.a = bus_.read(regs.de()); return true;
     case 0x2A: // LD A, (HL+)
         regs.a = bus_.read(regs.hl());
+        bus_.iduCycle(regs.hl());
         regs.setHl(static_cast<u16>(regs.hl() + 1));
         return true;
     case 0x3A: // LD A, (HL-)
         regs.a = bus_.read(regs.hl());
+        bus_.iduCycle(regs.hl());
         regs.setHl(static_cast<u16>(regs.hl() - 1));
         return true;
     case 0xE0: { // LDH (n), A

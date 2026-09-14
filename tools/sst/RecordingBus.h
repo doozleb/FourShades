@@ -30,6 +30,7 @@ public:
         }
         touched_.clear();
         log_.clear();
+        idu_.clear();
         pending_ = 0;
     }
 
@@ -63,10 +64,16 @@ public:
         return read(address);
     }
 
+    // Recorded for unit tests. Never a logged cycle: SingleStepTests' cycle
+    // counts must not change.
+    void iduCycle(u16 address) override { idu_.push_back(address); }
+    const std::vector<u16>& iduAddresses() const { return idu_; }
+
 private:
     std::vector<u8> memory_;
     std::vector<u16> touched_;
     std::vector<Cycle> log_;
+    std::vector<u16> idu_;
     u8 pending_ = 0;
 };
 
