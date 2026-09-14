@@ -148,11 +148,18 @@ mode.
   priority sort. The code comment at the merge site in
   `PixelPipeline::startObject` names the documented rule, says plainly that
   this is an approximation of it, and says what would arbitrate it.
-- **Scored test affected:** `mooneye/manual-only/sprite_priority.gb` and the
-  Mealybug object tests test exactly this and would arbitrate it, but both
-  currently sit in the `screen` group, which isn't scored yet (fails with
-  "needs the PPU (piece 3)"), so neither is available yet to confirm or
-  refute the approximation.
+- **Scored test affected:** `mooneye/manual-only/sprite_priority.gb` is the
+  test that arbitrates this. Since the screenshot comparator was built
+  (2026-09-14) it is scored, and it passes. That is evidence the
+  approximation is harmless for what that test draws — not proof it is
+  correct: whether it puts two objects at or left of the screen edge over the
+  same pixel, which is the case where FourShades and Pan Docs part company,
+  has not been checked.
+  The Mealybug object tests do **not** arbitrate this. The ones in the suite
+  are `m3_lcdc_obj_en_change`, `m3_lcdc_obj_en_change_variant`,
+  `m3_lcdc_obj_size_change` and `m3_lcdc_obj_size_change_scx`, which probe
+  mid-line changes to the object enable and size bits, not overlap priority.
+  An earlier version of this entry claimed they did; that was wrong.
 - **Checked:** 2026-09-14.
 
 ## Timing model (not a divergence: where Pan Docs is silent)
