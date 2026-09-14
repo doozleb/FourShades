@@ -27,6 +27,7 @@ add_library(fourshades_core STATIC
     src/core/Timer.cpp
     src/core/Serial.cpp
     src/core/Ppu.cpp
+    src/core/PixelPipeline.cpp
     src/core/GameBoy.cpp
 )
 target_include_directories(fourshades_core PUBLIC src)

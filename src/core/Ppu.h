@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/PixelPipeline.h"
 #include "core/Types.h"
 
 #include <array>
@@ -46,6 +47,16 @@ public:
     u8 ly() const;
     bool lcdOn() const { return (lcdc_ & 0x80) != 0; }
 
+    u8 lcdc() const { return lcdc_; }
+    u8 scx() const { return scx_; }
+    u8 scy() const { return scy_; }
+    u8 wx() const { return wx_; }
+    u8 wy() const { return wy_; }
+    u8 bgp() const { return bgp_; }
+    u8 obp(int which) const { return which != 0 ? obp1_ : obp0_; }
+    // The line being drawn. LY can read differently (line 153 reads 0).
+    int lineNumber() const { return line_; }
+
     const std::array<u8, kWidth * kHeight>& frame() const { return frame_; }
     std::uint64_t frameCount() const { return frames_; }
 
@@ -58,6 +69,8 @@ private:
     std::array<u8, 0x2000> vram_{};
     std::array<u8, 0xA0> oam_{};
     std::array<u8, kWidth * kHeight> frame_{};
+    PixelPipeline pipeline_;
+    std::array<u8, kWidth> lineBuffer_{};
 
     u8 lcdc_ = 0x91;
     u8 statSelect_ = 0x00; // STAT bits 6-3
