@@ -47,6 +47,9 @@ TEST_CASE("comparing against a short reference throws instead of guessing") {
 TEST_CASE("a frame can be written out for inspection") {
     std::array<fourshades::u8, roms::kFramePixels> frame{};
     frame[0] = 3;
+    // frame[1] stays 0 (shade 0, value-initialised) so the test also reads a
+    // pixel whose correct byte is non-zero -- otherwise an implementation that
+    // emitted 0 for every pixel would pass alongside the correct one.
     const auto path = std::filesystem::temp_directory_path() / "fourshades-frame.pgm";
     roms::writePgm(path, frame);
     std::ifstream in(path, std::ios::binary);
@@ -59,10 +62,12 @@ TEST_CASE("a frame can be written out for inspection") {
     CHECK(width == 160);
     CHECK(height == 144);
     CHECK(maximum == 255);
-    // Shade 3 (black) maps to grey byte 0 in the kGrey table in Screenshot.cpp.
+    // kGrey table in Screenshot.cpp: shade 0 -> 255, shade 1 -> 170, shade 2 -> 85, shade 3 -> 0.
     in.get(); // consume the newline after the maxval
-    const int firstPixel = in.get();
+    const int firstPixel = in.get();  // shade 3 -> 0
+    const int secondPixel = in.get(); // shade 0 -> 255
     CHECK(firstPixel == 0);
+    CHECK(secondPixel == 255);
 }
 
 TEST_CASE("writePgm rejects an out-of-range shade instead of masking it") {

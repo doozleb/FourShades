@@ -60,8 +60,17 @@ class RefsTest(unittest.TestCase):
         # Samples alternate 1,0,1,0,... . maximum = 2**1 - 1 = 1, so the PNG
         # spec's linear scaling (sample * 255 // maximum) sends 1 -> 255 and
         # 0 -> 0. SHADE_FOR_GREY maps grey 255 -> shade 0 and grey 0 -> shade 3.
-        samples = [1, 0] * 80
-        row = pack_samples(samples, 1)
+        #
+        # Hand-encoded, not built via pack_samples: the PNG spec packs samples
+        # MSB-first, 8 per byte at depth 1, so the leftmost sample of each
+        # group of 8 sits in bit 7 and the rightmost in bit 0. The repeating
+        # sample pattern 1,0,1,0,1,0,1,0 packs into one byte as:
+        #   bit:    7 6 5 4 3 2 1 0
+        #   sample: 1 0 1 0 1 0 1 0
+        #   byte  = 0b10101010 = 0xAA
+        # and every byte in the row is that same 0xAA since the 2-sample
+        # pattern divides evenly into the 8-sample byte.
+        row = bytes([0b10101010] * 20)  # 160 samples / 8 per byte = 20 bytes
         shades = fetch_roms.decode_png(png(160, 144, 1, 0, [row] * 144))
         self.assertEqual(len(shades), 160 * 144)
         self.assertEqual(shades[0:4], [0, 3, 0, 3])
@@ -78,9 +87,17 @@ class RefsTest(unittest.TestCase):
     def test_four_bit_indexed_shades(self):
         # PLTE entry i is looked up directly (no scaling) and then run through
         # SHADE_FOR_RGB: (0,0,0)->3, (85,85,85)->2, (170,170,170)->1, (255,255,255)->0.
+        #
+        # Hand-encoded, not built via pack_samples: the PNG spec packs samples
+        # MSB-first, 2 per byte at depth 4, so the first index of each pair
+        # sits in the high nibble and the second in the low nibble. The
+        # repeating index pattern 0,1,2,3 packs into bytes as:
+        #   pair (0,1) -> high nibble 0, low nibble 1 -> 0x01
+        #   pair (2,3) -> high nibble 2, low nibble 3 -> 0x23
+        # and the pattern repeats every 2 bytes since the 4-index pattern
+        # divides evenly into the 2-index byte.
         palette = [(0, 0, 0), (85, 85, 85), (170, 170, 170), (255, 255, 255)]
-        indices = [0, 1, 2, 3] * 40
-        row = pack_samples(indices, 4)
+        row = bytes([0x01, 0x23] * 40)  # 160 indices / 2 per byte = 80 bytes
         shades = fetch_roms.decode_png(png(160, 144, 4, 3, [row] * 144, palette=palette))
         self.assertEqual(len(shades), 160 * 144)
         self.assertEqual(shades[0:4], [3, 2, 1, 0])
