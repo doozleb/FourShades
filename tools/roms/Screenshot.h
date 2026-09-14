@@ -20,9 +20,11 @@ constexpr std::size_t kFramePixels = kFrameWidth * kFrameHeight;
 std::vector<u8> loadShades(const std::filesystem::path& path);
 
 // The number of pixels that differ. Exact: there is no tolerance.
+// `reference` must have exactly kFramePixels elements; throws std::runtime_error otherwise.
 int compareFrame(const std::array<u8, kFramePixels>& frame, const std::vector<u8>& reference);
 
 // Writes the frame as a binary PGM, so a failure can be looked at.
+// Throws std::runtime_error if `frame` contains a shade outside 0-3.
 void writePgm(const std::filesystem::path& path, const std::array<u8, kFramePixels>& frame);
 
 } // namespace roms

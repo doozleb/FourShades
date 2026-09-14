@@ -36,6 +36,14 @@ TEST_CASE("comparing counts differing pixels exactly") {
     CHECK(roms::compareFrame(frame, reference) == 2);
 }
 
+TEST_CASE("comparing against a short reference throws instead of guessing") {
+    std::array<fourshades::u8, roms::kFramePixels> frame{};
+    std::vector<fourshades::u8> shortReference(roms::kFramePixels - 1, 0);
+    CHECK_THROWS_AS(roms::compareFrame(frame, shortReference), std::runtime_error);
+    std::vector<fourshades::u8> longReference(roms::kFramePixels + 1, 0);
+    CHECK_THROWS_AS(roms::compareFrame(frame, longReference), std::runtime_error);
+}
+
 TEST_CASE("a frame can be written out for inspection") {
     std::array<fourshades::u8, roms::kFramePixels> frame{};
     frame[0] = 3;
@@ -51,4 +59,15 @@ TEST_CASE("a frame can be written out for inspection") {
     CHECK(width == 160);
     CHECK(height == 144);
     CHECK(maximum == 255);
+    // Shade 3 (black) maps to grey byte 0 in the kGrey table in Screenshot.cpp.
+    in.get(); // consume the newline after the maxval
+    const int firstPixel = in.get();
+    CHECK(firstPixel == 0);
+}
+
+TEST_CASE("writePgm rejects an out-of-range shade instead of masking it") {
+    std::array<fourshades::u8, roms::kFramePixels> frame{};
+    frame[0] = 4;
+    const auto path = std::filesystem::temp_directory_path() / "fourshades-frame-bad.pgm";
+    CHECK_THROWS_AS(roms::writePgm(path, frame), std::runtime_error);
 }
