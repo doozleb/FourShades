@@ -3,7 +3,7 @@
 #include "core/Bus.h"
 #include "core/Cartridge.h"
 #include "core/Cpu.h"
-#include "core/LcdTiming.h"
+#include "core/Ppu.h"
 #include "core/Serial.h"
 #include "core/Timer.h"
 #include "core/Types.h"
@@ -37,6 +37,9 @@ public:
     // M-cycles since power-on.
     std::uint64_t cycles() const { return cycles_; }
 
+    Ppu& ppu() { return ppu_; }
+    const Ppu& ppu() const { return ppu_; }
+
     u8 read(u16 address) override;
     void write(u16 address, u8 value) override;
     void idle() override;
@@ -57,10 +60,8 @@ private:
     Cartridge cart_;
     Timer timer_;
     Serial serial_;
-    LcdTiming lcd_;
-    std::array<u8, 0x2000> vram_{};
+    Ppu ppu_;
     std::array<u8, 0x2000> wram_{};
-    std::array<u8, 0xA0> oam_{};
     std::array<u8, 0x7F> hram_{};
     u8 ie_ = 0x00;
     u8 if_ = 0x01;          // bits 0-4; reads OR in 0xE0
