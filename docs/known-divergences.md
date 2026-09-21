@@ -194,11 +194,12 @@ mode.
     in the 104 cases: an object at X = 3 must report 2 extra M-cycles, and one
     at X = 4 must report 1. A rebate of 4 puts the X = 3 case at 176 raw
     dots, which the ROM forbids; a rebate of 2 puts an OAM X = 0 object at
-    184 raw dots, which the ROM also forbids. Only 3 survives both.
+    181 raw dots (184 once rounded up to the next whole M-cycle), which the
+    ROM also forbids. Only 3 survives both.
   - **All 104 cases run at SCX = 0.** The rebate's interaction with SCX is
     therefore entirely unmeasured. `tests/test_objects.cpp`'s "an object at
     OAM X = 0 always costs eleven dots, unlike the general formula" checks
-    184 raw dots for such an object with SCX = 3 - that figure comes from
+    183 raw dots (reported as 184) for such an object with SCX = 3 - that figure comes from
     applying the model above, not from the hardware ROM (which never reaches
     a non-zero SCX for this case), and should be read as a prediction the
     unit test pins, not a measurement.
@@ -345,9 +346,10 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   which reproduces every entry of the table. That much is what the ROM
   measures. That there is therefore no OAM scan, and so no objects are
   selected on that line, is FourShades' inference from the absence of mode 2
-  - a reasonable one, but not itself something the ROM checks: no test in the
-  165 places an object so it would be selected only if this line did scan
-  OAM. Checked 2026-09-21.
+  - a reasonable one, but not itself something the ROM checks. Whether any
+  of the other 164 tests would notice has not been established either:
+  what is known is only that no test's verdict moves either way, which is
+  weaker than no test exercising it. Checked 2026-09-21.
 - **The mode 2 STAT source is pulsed at the top of line 144, on the same dot
   as the VBlank interrupt.** Pan Docs' STAT page describes the mode 2 source
   only as "the Mode 2 condition". `vblank_stat_intr-GS` (DMG, MGB, SGB, SGB2)

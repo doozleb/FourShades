@@ -156,7 +156,8 @@ void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
     // Hardware then charges three dots less per line than that sum, once, for
     // the first object fetched on the line. Both findings come from the
     // hardware-verified object timing ROM; see docs/known-divergences.md,
-    // "OBJ penalty: hardware charges three dots fewer per scanline".
+    // "OBJ penalty: the first object fetched on a line gets a three-dot
+    // rebate against Pan Docs' algorithm".
     const int backgroundX = static_cast<int>(ppu.scx()) + static_cast<int>(object.x) - 8;
     objectDots_ = 6;
     // NOTE: this tile index is in background coordinates (SCX + the object's
