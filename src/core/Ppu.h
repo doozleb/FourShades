@@ -71,8 +71,19 @@ public:
     u8 scy() const { return scy_; }
     u8 wx() const { return wx_; }
     u8 wy() const { return wy_; }
-    u8 bgp() const { return bgp_; }
-    u8 obp(int which) const { return which != 0 ? obp1_ : obp0_; }
+    // The palette the pixel pipeline shades with. On DMG a write to a
+    // palette register leaves the old and new values shorted together for
+    // one dot, so the pixel drawn on the dot a write lands on is shaded with
+    // their bitwise OR; $FF47-$FF49 still read back the value written. See
+    // docs/known-divergences.md, "Palette writes short the old and
+    // new values together for one dot".
+    u8 bgp() const { return (paletteGlitch_ & 0x01) != 0 ? bgpGlitch_ : bgp_; }
+    u8 obp(int which) const {
+        if (which != 0) {
+            return (paletteGlitch_ & 0x04) != 0 ? obp1Glitch_ : obp1_;
+        }
+        return (paletteGlitch_ & 0x02) != 0 ? obp0Glitch_ : obp0_;
+    }
     // The line being drawn. LY can read differently (line 153 reads 0).
     int lineNumber() const { return line_; }
     // Dots elapsed in the current line, 0-455.
@@ -122,11 +133,20 @@ private:
     u8 obp1_ = 0xFF;
     u8 wy_ = 0x00;
     u8 wx_ = 0x00;
+    // One dot's worth of "old OR new" for each palette, and which of them are
+    // live: bit 0 BGP, bit 1 OBP0, bit 2 OBP1.
+    u8 bgpGlitch_ = 0x00;
+    u8 obp0Glitch_ = 0x00;
+    u8 obp1Glitch_ = 0x00;
+    u8 paletteGlitch_ = 0x00;
 
     int line_ = 0;   // 0-153, the real line; LY reads differently on line 153
     int dot_ = 0;    // 0-455 within the line
     int mode_ = 2;        // the PPU's own mode
     int visibleMode_ = 2; // what the CPU sees: mode_ one M-cycle ago
+    bool rendering_ = false;  // the pixel pipeline is running (it outlives mode 3)
+    int renderLag_ = 0;       // dots still to wait before the fetcher starts
+    int lineRenderLag_ = 0;   // the lag this line began with, in dots
     bool lcdOnLine_ = false;  // this line began when the LCD was switched on
     bool lycSuppressed_ = false; // the first M-cycle of a line compares as "no match"
     bool lycFrozen_ = false;     // the comparison's last result before the LCD went off

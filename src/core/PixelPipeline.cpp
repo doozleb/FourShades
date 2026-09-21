@@ -18,6 +18,7 @@ void PixelPipeline::startLine(Ppu& ppu) {
     pixelX_ = 0;
     discard_ = ppu.scx() & 0x07;
     window_ = false;
+    windowSkip_ = 0;
     objects_ = {};
     objectDots_ = 0;
     drawn_ = 0;
@@ -88,6 +89,15 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
             queue_[static_cast<std::size_t>((queueHead_ + queueSize_) % 8)] =
                 static_cast<u8>((high << 1) | low);
             ++queueSize_;
+        }
+        if (windowSkip_ > 0) {
+            // The window pixels that fall off the left edge (see the WX < 7
+            // note in stepDot) are dropped here, as the tile is pushed,
+            // rather than emitted and thrown away: they take no dots.
+            const int drop = windowSkip_ < queueSize_ ? windowSkip_ : queueSize_;
+            queueHead_ = (queueHead_ + drop) % 8;
+            queueSize_ -= drop;
+            windowSkip_ -= drop;
         }
         ++fetcherX_;
         step_ = Step::Tile;
@@ -192,7 +202,21 @@ void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
     }
 }
 
-bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
+bool PixelPipeline::finishesWithin(Ppu& ppu, int dots) const {
+    if (pixelX_ + dots < 160) {
+        return false; // more pixels are left than there are dots to emit them
+    }
+    PixelPipeline trial = *this;
+    std::array<u8, 160> scratch{};
+    for (int i = 0; i < dots; ++i) {
+        if (trial.stepDot(ppu, scratch, true)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line, bool trial) {
     if (!window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached() &&
         discard_ == 0 && pixelX_ >= static_cast<int>(ppu.wx()) - 7) {
         // Pan Docs: the background queue is cleared and the fetcher restarts,
@@ -207,9 +231,20 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
         // the PPU's counter for the next one: every fetch below reads
         // windowLineUsed_, never ppu.windowLine() directly, so the
         // just-bumped value doesn't leak into this line's tiles.
+        // WX = 7 lines the window's first pixel up with screen x = 0, so a
+        // smaller WX pushes 7 - WX of them off the left edge: the fetcher
+        // still starts at the window's own column 0 and those pixels never
+        // reach the LCD. Mealybug Tearoom's m3_wx_4_change and
+        // m3_wx_5_change photograph the three and two pixel versions of
+        // this. Unlike SCX's low bits they cost no dots: m3_window_timing
+        // sets WX to LY on lines 0-9 and its reference shows the window
+        // starting on the same dot on every one of them.
+        windowSkip_ = ppu.wx() < 7 ? 7 - static_cast<int>(ppu.wx()) : 0;
         windowLineUsed_ = ppu.windowLine();
         // The window's line counter only advances on lines that drew it.
-        ppu.advanceWindowLine();
+        if (!trial) {
+            ppu.advanceWindowLine();
+        }
     }
 
     if (objectDots_ > 0) {

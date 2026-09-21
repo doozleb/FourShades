@@ -21,9 +21,26 @@ public:
     void startLine(Ppu& ppu);
     // One dot of mode 3. Returns true once 160 pixels have been emitted.
     // Non-const: starting the window advances the PPU's window line counter.
-    bool stepDot(Ppu& ppu, std::array<u8, 160>& line);
+    // That is the dot's only effect on the PPU, and `trial` suppresses it, so
+    // a copy of the pipeline can be run forward to see what it is about to do.
+    bool stepDot(Ppu& ppu, std::array<u8, 160>& line, bool trial = false);
 
     int pixelX() const { return pixelX_; }
+
+    // The dots that separate the pipeline from the mode-3 window it runs
+    // inside: rendering starts this many dots after mode 3 begins, and the
+    // last pixels of the line reach the LCD this many dots after mode 3
+    // ends. See finishesWithin below and docs/known-divergences.md,
+    // "Rendering runs seven dots behind the mode-3 window".
+    static constexpr int kRenderLag = 7;
+
+    // Whether the line would be finished within `dots` more dots, answered by
+    // running a copy of the pipeline that far forward. Mode 3 ends kRenderLag
+    // dots before the last pixel reaches the LCD, and how many dots are left
+    // is not a function of the pixel count alone: an object fetched over the
+    // last few pixels stalls them. Cheap because the only dots it is ever
+    // asked about are the handful at the very end of a line.
+    bool finishesWithin(Ppu& ppu, int dots) const;
 
 private:
     enum class Step { Tile, DataLow, DataHigh, Push };
@@ -53,6 +70,7 @@ private:
     int pixelX_ = 0;   // pixels emitted (0-160)
     int discard_ = 0;  // SCX % 8 pixels dropped at the start of the line
     bool window_ = false;        // drawing the window on this line
+    int windowSkip_ = 0;         // window pixels off the left edge, for WX < 7
     // The window's own line counter as it stood when the window started on
     // this line, cached so every fetch on the line reads the row the window
     // is actually drawing rather than the value left behind once

@@ -239,6 +239,243 @@ mode.
     it.
 - **Checked:** 2026-09-21.
 
+## Rendering runs seven dots behind the mode-3 window (2026-09-21)
+
+Not a divergence: a timing model FourShades now implements, recorded here
+because two bodies of hardware-verified evidence pin its two ends and neither
+alone explains it.
+
+- **What the Mealybug Tearoom images measure.** Every `m3_*` test runs its
+  handler from the mode-2 STAT interrupt in a field of NOPs and writes a PPU
+  register a known number of cycles later, so each reference image names the
+  pixel a write at a given dot of the line first reaches. `m3_bgp_change`
+  pins it to the dot: its handler's six BGP writes land on line dots 100,
+  112, 172, 184, 244 and 256 (measured inside FourShades), and the DMG
+  reference shows their seams at pixels 1, 13, 73, 85, 145 and 157. So the
+  pixel drawn on line dot D is pixel D - 100: **pixel 0 leaves the PPU on
+  line dot 100**, twenty dots after mode 3 begins on dot 80.
+- **What the LCD timing ROMs measure.** `intr_2_mode3_timing` and
+  `intr_2_mode0_timing` ("verified: DMG, MGB, SGB, SGB2, CGB, AGB, AGS") pin
+  STAT's own view: mode 3 is reported for exactly 172 dots, from line dot 81
+  to line dot 252 inclusive, with the PPU's internal transitions an M-cycle
+  earlier. Those must not move, and don't.
+- **FourShades before this task** started the fetcher on the first dot of
+  mode 3, which put pixel 0 on line dot 93 - seven dots early against the
+  images, so every mid-line write landed seven pixels to the right of where
+  hardware puts it. That single number accounted for most of the failing
+  screenshot tests: `m3_bgp_change` alone went from 5084 differing pixels to
+  517 when the seven dots were added.
+- **FourShades now** runs the pipeline `PixelPipeline::kRenderLag` = 7 dots
+  behind the mode-3 window at both ends. The fetcher starts on line dot 87
+  and pixel 0 is emitted on dot 100; mode 3 still ends where it did, seven
+  dots before the last pixel reaches the LCD, so the final seven pixels of
+  every line are drawn during the first dots of HBlank. `Ppu::stepDot` keeps
+  the pipeline running after `mode_` has gone to 0 for exactly that reason,
+  and `PixelPipeline::finishesWithin` answers "will the line be done in seven
+  more dots?" by running a copy of the pipeline that far forward - a pixel
+  count alone would not do, because an object fetched over the last few
+  pixels stalls them, and `intr_2_mode0_timing_sprites` measures objects at
+  OAM X 160-167 doing exactly that.
+- **What this is physically.** The natural reading is that mode 3 ends when
+  the PPU has finished reading VRAM for the line while pixels are still
+  shifting out of the FIFO, which is also why the fetcher can start a little
+  after VRAM locks. FourShades does not claim more than the two measurements
+  above: it puts the seven dots where the images put them and leaves the mode
+  boundaries where the timing ROMs put them.
+- **What was ruled out.** Moving the mode-2 STAT interrupt eight dots earlier
+  produces the same images but breaks six of the twelve LCD timing ROMs
+  (every `intr_2_*`), and delaying mode 3 itself by seven dots breaks eight
+  of them. Both were tried and reverted; the lag is the only placement
+  measured that satisfies both sets.
+- **Checked:** 2026-09-21.
+
+## Palette writes short the old and new values together for one dot (2026-09-21)
+
+- **Test:** Mealybug Tearoom `m3_bgp_change` (DMG reference image,
+  photographed from hardware). On line 100 the handler drives BGP
+  0x46 -> 0x47 -> 0x46 -> 0x48 -> 0x46 -> 0x45 -> 0x46 during mode 3, and the
+  reference shows a one-pixel seam at each of the six writes. At the
+  0x46 -> 0x45 write the seam pixel is shade 3, which is colour 0 under
+  neither palette (0x46 gives 2, 0x45 gives 1) but is colour 0 under
+  0x46 | 0x45 = 0x47. The same seam appears at every write on every line of
+  the image, so it is the write that causes it, not those two values.
+- **Pan Docs:** silent. [Palettes](https://gbdev.io/pandocs/Palettes.html)
+  describes BGP, OBP0 and OBP1 as plain registers and says nothing about
+  writing one during mode 3.
+- **FourShades:** `Ppu::write` records `old | new` alongside the new value and
+  `Ppu::bgp()` / `Ppu::obp()` hand that to the pipeline for exactly one dot -
+  the first dot after the writing M-cycle - after which the register's own
+  value is used. $FF47-$FF49 always read back the value written.
+- **Effect:** with this and the seven-dot lag above, `m3_bgp_change` matches
+  its reference in all 23,040 pixels.
+- **Checked:** 2026-09-21.
+
+## Line 0 starts drawing four dots early (2026-09-21)
+
+- **Test:** every Mealybug Tearoom `m3_*` test. Each runs its handler from the
+  mode-2 STAT interrupt and opens with `inc/utils.asm`'s `line_0_fix` macro,
+  whose comment reads "line 0 timing is different by 4 cycles, so jump only
+  when on line 0": on every line except line 0 the handler takes a `jr` and so
+  spends four extra T-cycles before its first write. In every DMG reference
+  image line 0 then comes out identical to line 1, so on hardware something at
+  the top of a frame gives line 0 those four dots back.
+- **Pan Docs:** silent. [Rendering](https://gbdev.io/pandocs/Rendering.html)
+  gives one mode-2 length (80 dots) for every drawn line.
+- **What it is not.** It is not the interrupt: `intr_1_2_timing-GS`
+  ("verified: DMG, MGB, SGB, SGB2") times the gap from the mode-1 STAT
+  interrupt at line 144 to the next mode-2 STAT interrupt, which is line 0's,
+  and pins it. Raising line 0's mode-2 source four dots late was tried and
+  fails that ROM and `stat_irq_blocking`.
+- **FourShades:** line 0 starts its pipeline four dots earlier than other
+  lines (`Ppu::stepDot`, the `renderLag_` assignment), leaving its mode
+  boundaries alone - mode 3 still begins 80 dots in and still lasts 172.
+  Nothing in the 165 test ROMs measures line 0's mode boundaries, so moving
+  them would be an unevidenced claim; the images measure the drawing, so the
+  drawing is what moves. The line the LCD was switched on keeps the ordinary
+  lag: `lcdon_timing-GS` measures that line directly.
+- **Effect:** line 0 was the only line of `m3_bgp_change` still wrong once the
+  seven-dot lag and the palette seam were in; with this it is exact.
+- **Checked:** 2026-09-21.
+
+## A WX below 7 pushes the window's leftmost pixels off the screen (2026-09-21)
+
+- **Tests:** Mealybug Tearoom `m3_wx_4_change` and `m3_wx_5_change` set WX to
+  4 and 5 before mode 3 and photograph the line. Both references show the same
+  picture WX = 7 would give, moved three and two pixels left, with that many
+  more window pixels visible at the right-hand edge.
+- **Pan Docs, [LCD Position and Scrolling](https://gbdev.io/pandocs/Scrolling.html):**
+  WX "is the window's leftmost pixel's X position, plus 7", and WX values 0
+  and 166 are called unreliable. It does not say what WX = 1-6 draws.
+- **FourShades:** `PixelPipeline::stepDot` sets `windowSkip_` to 7 - WX when
+  the window starts, and the fetcher's push drops that many pixels off the
+  front of the tile it has just fetched. They cost no dots: `m3_window_timing`
+  sets WX to LY on lines 0-9 and its reference shows the window starting on
+  the same dot on every one of them, so the clipped pixels are not
+  emitted-and-discarded the way SCX's low bits are.
+- **Effect:** `m3_wx_4_change` 10138 differing pixels -> 229,
+  `m3_wx_5_change` 9521 -> 638. `m3_wx_6_change` is not a shift at all (see
+  below) and went 13281 -> 13799.
+- **Checked:** 2026-09-21.
+
+## Screenshot tests still failing after Task 9 (2026-09-21)
+
+Twenty-six of the thirty tests in the `screen` group still fail. Each is
+listed with the number of the 23,040 pixels that differ, what it measures and
+why it is not fixed. Four pass: `acid/dmg-acid2`,
+`mooneye/manual-only/sprite_priority`,
+`mealybug-tearoom-tests/ppu/m2_win_en_toggle` and, new in this task,
+`mealybug-tearoom-tests/ppu/m3_bgp_change`.
+
+**The window re-activates mid-line, and FourShades never does** - the single
+largest unmodelled behaviour left, and the cause of five of the entries below.
+Mealybug's own
+[PPU documentation](https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md)
+states it for LCDC bit 5: disabling the window during mode 3 takes effect at
+the end of the window tile being drawn, the background then resumes on a tile
+boundary with SCX's low bits ignored, and re-enabling it has no effect unless
+WX has been moved to a pixel not yet drawn - in which case the window starts
+again *on the next window row*, on the same scanline. `m3_wx_4_change`'s own
+comment shows the same thing happens for a WX write alone, with a "window
+reactivation zero pixel" appearing when the re-activation dot coincides with
+the window's tile-map read. FourShades starts the window at most once per
+line. This is the same behaviour the older "window line counter" note below
+records for `m3_lcdc_win_en_change_multiple`.
+
+| test | pixels | why it still fails |
+| --- | --- | --- |
+| `m3_wx_4_change_sprites` | 10 | window re-activation: one zero pixel per affected line |
+| `m3_window_timing` | 28 | the WX < 7 window start costs the wrong number of dots |
+| `ashiepaws/strikethrough` | 53 | not diagnosed |
+| `m3_scx_high_5_bits` | 80 | one background tile per affected line takes the wrong SCX |
+| `m3_lcdc_obj_en_change` | 146 | mid-line LCDC bit 1 changes |
+| `m3_wx_4_change` | 229 | window re-activation |
+| `m3_lcdc_obj_size_change_scx` | 270 | mid-line LCDC bit 2 changes |
+| `ashiepaws/bully` | 346 | not diagnosed |
+| `m3_lcdc_obj_size_change` | 410 | mid-line LCDC bit 2 changes |
+| `m3_obp0_change` | 432 | object pixels in the leftmost 18 columns |
+| `m3_scx_low_3_bits` | 540 | mid-line SCX changes inside the fetch |
+| `m3_lcdc_obj_en_change_variant` | 578 | mid-line LCDC bit 1 changes |
+| `m3_window_timing_wx_0` | 584 | the WX < 7 window start costs the wrong number of dots |
+| `m3_wx_5_change` | 638 | window re-activation |
+| `m3_lcdc_bg_map_change` | 714 | mid-line LCDC bit 3 changes |
+| `m3_lcdc_bg_en_change` | 855 | mid-line LCDC bit 0 changes |
+| `m3_lcdc_tile_sel_change` | 1070 | mid-line LCDC bit 4 changes |
+| `m3_scy_change` | 1256 | mid-line SCY changes inside the fetch |
+| `m3_lcdc_win_map_change` | 2044 | mid-line LCDC bit 6 changes |
+| `m3_lcdc_tile_sel_win_change` | 2286 | mid-line LCDC bit 4 changes, with a window |
+| `m3_bgp_change_sprites` | 3076 | as `m3_bgp_change`, plus objects |
+| `m3_lcdc_win_en_change_multiple_wx` | 5942 | window re-activation (LCDC bit 5) |
+| `daid/ppu_scanline_bgp` | 7187 | disagrees with the Mealybug references by 12 dots |
+| `m3_lcdc_win_en_change_multiple` | 8316 | window re-activation (LCDC bit 5) |
+| `m3_wx_6_change` | 13799 | WX = 6 is not a one-pixel shift of WX = 7 |
+| `daid/stop_instr` | 22739 | needs STOP's wake-up, which needs joypad input |
+
+The mid-line LCDC, SCX and SCY entries above are all the same shape: the
+register is read live, at the dot the fetcher needs it, but which of a fetch's
+six dots reads what has not been pinned to the dot. Mealybug's PPU
+documentation says TILE_SEL (bit 4) is read during the two bitplane stages and
+SCY during all three stages, which is what `PixelPipeline::stepFetcher` and
+`tileRowAddress` do; the remaining error is smaller than a stage, and the
+references have not been decoded far enough to say which dot of which stage is
+wrong. They are left failing rather than tuned by trial.
+
+Notes on the ones that are more than "a behaviour not written yet":
+
+- **`m3_window_timing` (28) and `m3_window_timing_wx_0` (584).** These set WX
+  to LY on lines 0-9 and change BGP during the window's six-dot start-up
+  fetch, so the number of pale pixels at the left of each line measures the
+  dot the window starts on. The reference gives the same three pixels for
+  every WX from 0 to 10 and then grows by one per line from WX = 11: the
+  window start costs six dots wherever it happens, and a WX below 7 neither
+  delays nor advances it. FourShades gets lines 9 upwards right and lines 0-8
+  wrong, by between one and six pixels: when the window triggers on the first
+  dot of the pipeline the fetcher has not yet done anything, so the restart
+  costs nothing instead of six dots, and the clipped pixels leave the FIFO
+  short enough to stall the refill. Two placements of the clipping were
+  measured - dropping the pixels at the output, which costs a dot each (24 and
+  692 differing pixels), and dropping them at the push, which costs none (28
+  and 584) - and neither reproduces a constant six. The evidence points at the
+  window comparison running against a pixel counter that has not started
+  counting at the top of mode 3, which FourShades does not model.
+- **`m3_wx_6_change` (13799).** Not the same shape as WX = 4 and WX = 5. Its
+  reference draws the window two rows behind and two pixels right of where
+  WX = 5's does, and shows the background on lines the window covers in the
+  WX = 5 image. Since the three ROMs differ only in that one constant, WX = 6
+  is doing something else on hardware; it has not been diagnosed. The WX
+  clipping above made it 518 pixels worse, which is not evidence against the
+  clipping - the WX = 4 and WX = 5 references pin that - only a sign that
+  whatever WX = 6 does is not a clip.
+- **`m3_scx_high_5_bits` (80).** Only the third background tile of a line
+  (x = 16-23) is ever wrong, and only on the 28 lines where SCX = LY crosses a
+  tile boundary: the SCX write lands within a dot or two of that tile's map
+  read. Sampling the tile index, and both bitplane bytes, on the first dot of
+  their two-dot fetch stages instead of the second was tried; it took this
+  test from 80 to 77 but the `screen` group as a whole from 73,628 differing
+  pixels to 78,855, so it was reverted. The remaining error is under two dots
+  and is not yet pinned to a stage.
+- **`daid/ppu_scanline_bgp` (7187).** This one disagrees with the Mealybug
+  references rather than with a behaviour. It writes BGP repeatedly during
+  mode 3; on line 100 FourShades lands those writes on line dots 100, 108,
+  116, 124 and so on and draws their seams from pixel 1, while the reference
+  puts the first seam at pixel 13 - a uniform 12-dot (three M-cycle) offset
+  over the whole image, in the opposite direction to the seven-dot lag this
+  task added (it was a five-dot offset before). One of its three reference
+  images, `ppu_scanline_bgp_1.dmg.png`, shows the one-pixel palette seam
+  described above and the other two do not, so the three are not all from the
+  same machine. The Mealybug references are photographed from real DMG
+  hardware, are unanimous, and `m3_bgp_change` now matches its own to the
+  pixel across 144 lines and six writes per line, so FourShades follows them.
+  What remains is a difference in where this ROM thinks a line starts - a
+  question about the ROM's synchronisation, not about the pipeline - and it
+  has not been diagnosed. The count is worse than before this task (3410)
+  purely because the seven dots moved in the direction the Mealybug images
+  require and this reference wants the opposite.
+- **`daid/stop_instr` (22739).** Out of scope for this task: it needs STOP to
+  wake, which needs joypad input. See the STOP entry at the top of this file.
+- **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (346).** Not
+  diagnosed. Both were failing before this task with the same counts, so
+  nothing here moved them either way.
+
 ## Timing model (not a divergence: where Pan Docs is silent)
 
 Pan Docs gives cycle counts but not every within-M-cycle order. These are the
