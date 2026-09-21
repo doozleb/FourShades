@@ -249,9 +249,10 @@ alone explains it.
   handler from the mode-2 STAT interrupt in a field of NOPs and writes a PPU
   register a known number of cycles later, so each reference image names the
   pixel a write at a given dot of the line first reaches. `m3_bgp_change`
-  pins it to the dot: its handler's six BGP writes land on line dots 100,
-  112, 172, 184, 244 and 256 (measured inside FourShades), and the DMG
-  reference shows their seams at pixels 1, 13, 73, 85, 145 and 157. So the
+  pins it to the dot: its handler writes BGP seven times a line, and the six
+  that land once drawing has started are on line dots 100, 112, 172, 184, 244
+  and 256 (measured inside FourShades, on line 100), while the DMG reference
+  shows their seams at pixels 1, 13, 73, 85, 145 and 157. So the
   pixel drawn on line dot D is pixel D - 100: **pixel 0 leaves the PPU on
   line dot 100**, twenty dots after mode 3 begins on dot 80.
 - **What the LCD timing ROMs measure.** `intr_2_mode3_timing` and
