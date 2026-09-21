@@ -55,6 +55,12 @@ int runLineObjects(Ppu& ppu) {
     while (ppu.mode() != 3) { ppu.tick(); }
     int drawing = 0;
     while (ppu.mode() == 3) { ppu.tick(); drawing += 4; }
+    // A line's last pixels reach the frame up to PixelPipeline::kRenderLag
+    // dots after mode 3 ends - rendering trails the mode-3 window at both
+    // ends (docs/known-divergences.md, "Rendering runs seven dots behind the
+    // mode-3 window") - so let the pipeline finish before frame() is read.
+    ppu.tick();
+    ppu.tick();
     return drawing;
 }
 } // namespace

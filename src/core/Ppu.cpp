@@ -29,6 +29,7 @@ void Ppu::stepDot(u8& requested) {
     if (dot_ >= kDotsPerLine) {
         dot_ = 0;
         lcdOnLine_ = false;
+        rendering_ = false;
         line_ = line_ + 1 >= kLines ? 0 : line_ + 1;
         if (line_ == 0) {
             windowReached_ = false;
@@ -64,12 +65,47 @@ void Ppu::stepDot(u8& requested) {
             } else {
                 scanOam();
             }
-            pipeline_.startLine(*this);
-        } else if (mode_ == 3) {
-            if (pipeline_.stepDot(*this, lineBuffer_)) {
-                std::copy(lineBuffer_.begin(), lineBuffer_.end(),
-                          frame_.begin() + static_cast<std::size_t>(line_) * kWidth);
-                setMode(0);
+            // Rendering trails the mode-3 window by PixelPipeline::kRenderLag
+            // dots at both ends: the fetcher starts that many dots after mode
+            // 3 does, and the pixels still in the FIFO when mode 3 ends reach
+            // the LCD over the first dots of HBlank. The Mealybug Tearoom
+            // images measure the near end of that gap directly, while the
+            // mode boundaries, which the hardware-verified LCD timing ROMs
+            // measure, do not move. See docs/known-divergences.md,
+            // "Rendering runs seven dots behind the mode-3 window".
+            //
+            // Line 0 draws four dots ahead of every other line. Every
+            // Mealybug Tearoom ppu test measures this from the outside: each
+            // runs its handler off the mode-2 STAT interrupt and spends four
+            // extra cycles on every line except line 0 (inc/utils.asm's
+            // line_0_fix, "line 0 timing is different by 4 cycles"), and in
+            // every DMG reference image line 0 then comes out identical to
+            // line 1. The interrupt is not what moves: the hardware-verified
+            // intr_1_2_timing-GS times the gap from the VBlank STAT interrupt
+            // to this one and pins it. Nothing measured here says line 0's
+            // mode boundaries move either, so only the drawing does - mode 3
+            // still begins 80 dots in and still lasts 172. The line the LCD
+            // was switched on is ordinary in this respect; lcdon_timing-GS
+            // measures that one directly. See docs/known-divergences.md,
+            // "Line 0 starts drawing four dots early".
+            renderLag_ = PixelPipeline::kRenderLag - (line_ == 0 && !lcdOnLine_ ? 4 : 0);
+            lineRenderLag_ = renderLag_;
+            rendering_ = true;
+        } else if (rendering_) {
+            if (renderLag_ > 0) {
+                if (--renderLag_ == 0) {
+                    pipeline_.startLine(*this);
+                }
+            } else {
+                const bool lineDrawn = pipeline_.stepDot(*this, lineBuffer_);
+                if (mode_ == 3 && pipeline_.finishesWithin(*this, lineRenderLag_)) {
+                    setMode(0); // the last pixels are still on their way out
+                }
+                if (lineDrawn) {
+                    std::copy(lineBuffer_.begin(), lineBuffer_.end(),
+                              frame_.begin() + static_cast<std::size_t>(line_) * kWidth);
+                    rendering_ = false;
+                }
             }
         }
     }
@@ -78,6 +114,9 @@ void Ppu::stepDot(u8& requested) {
     // there and only turns 1 an M-cycle later, while it still drops to 0 on
     // the M-cycle LY changes away: a one-M-cycle hole, not a delay.
     lycSuppressed_ = dot_ < 4;
+    // The palette short lasts one dot: the write lands at the end of the
+    // CPU's M-cycle, so the dot it colours is the first of the next one.
+    paletteGlitch_ = 0x00;
     updateStatLine(requested);
 }
 
@@ -225,6 +264,7 @@ u8 Ppu::write(u16 address, u8 value) {
             visibleMode_ = 0;
             lcdOnLine_ = false;
             lycSuppressed_ = false;
+            rendering_ = false;
             frame_.fill(0);
             windowReached_ = false;
             windowLine_ = 0;
@@ -290,9 +330,26 @@ u8 Ppu::write(u16 address, u8 value) {
         // docs/known-divergences.md, "Timing model").
         lyc_ = value;
         break;
-    case 0xFF47: bgp_ = value; break;
-    case 0xFF48: obp0_ = value; break;
-    case 0xFF49: obp1_ = value; break;
+    // A palette write shorts the old and new values together for one dot:
+    // Mealybug Tearoom's m3_bgp_change photographs the one-pixel seam it
+    // leaves at every band edge, in a shade neither palette can produce. The
+    // register itself takes the new value at once; only what the pipeline
+    // shades with is affected, and only for the dot after the write.
+    case 0xFF47:
+        bgpGlitch_ = static_cast<u8>(bgp_ | value);
+        paletteGlitch_ = static_cast<u8>(paletteGlitch_ | 0x01);
+        bgp_ = value;
+        break;
+    case 0xFF48:
+        obp0Glitch_ = static_cast<u8>(obp0_ | value);
+        paletteGlitch_ = static_cast<u8>(paletteGlitch_ | 0x02);
+        obp0_ = value;
+        break;
+    case 0xFF49:
+        obp1Glitch_ = static_cast<u8>(obp1_ | value);
+        paletteGlitch_ = static_cast<u8>(paletteGlitch_ | 0x04);
+        obp1_ = value;
+        break;
     case 0xFF4A: wy_ = value; break;
     case 0xFF4B: wx_ = value; break;
     default: break; // LY (FF44) is read-only

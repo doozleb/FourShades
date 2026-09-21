@@ -32,12 +32,25 @@ void setUpTile(Ppu& ppu, u8 low, u8 high) {
     enableLcd(ppu, 0x91); // LCD on, BG on, tile data at 0x8000, map 0x9800
 }
 
+// Runs forward to `dot` of `line`. Line 0 draws four dots ahead of every
+// other line (see "line 0 starts drawing four dots earlier" below), so a case
+// about where a mid-line write lands says which line it means.
+void runTo(Ppu& ppu, int line, int dot) {
+    while (ppu.lineNumber() != line || ppu.lineDot() != dot) { ppu.tick(); }
+}
+
 // Runs one whole line and returns the dot mode 3 ended on.
 int runLine(Ppu& ppu) {
     int dots = 0;
     while (ppu.mode() != 3) { ppu.tick(); dots += 4; }
     int drawing = 0;
     while (ppu.mode() == 3) { ppu.tick(); drawing += 4; }
+    // A line's last pixels reach the frame up to PixelPipeline::kRenderLag
+    // dots after mode 3 ends - rendering trails the mode-3 window at both
+    // ends (docs/known-divergences.md, "Rendering runs seven dots behind the
+    // mode-3 window") - so let the pipeline finish before frame() is read.
+    ppu.tick();
+    ppu.tick();
     return drawing;
 }
 } // namespace
@@ -78,6 +91,91 @@ TEST_CASE("a plain line draws in 172 dots and SCX's low bits lengthen it") {
     CHECK(runLine(ppu) == 176);
     static_cast<void>(ppu.write(0xFF43, 0x05)); // SCX = 5
     CHECK(runLine(ppu) == 180); // 172 + 5 = 177 dots, reported as 180 when counted in whole M-cycles
+}
+
+TEST_CASE("rendering starts seven dots after mode 3 does") {
+    // Mealybug Tearoom's m3_bgp_change writes BGP during mode 3 and
+    // photographs the result on real DMG hardware; the reference image pins
+    // which pixel each write first colours. Its second write lands on dot 100
+    // of the line and first shows on pixel 1, so pixel 0 is emitted on dot
+    // 100 - twenty dots into a mode 3 that began on dot 80, not thirteen.
+    // Mooneye's intr_2_mode3_timing and intr_2_mode0_timing keep the mode-3
+    // window itself where it is, so the gap is real: rendering trails it.
+    Ppu ppu;
+    setUpTile(ppu, 0x00, 0x00); // every pixel colour 0
+    runTo(ppu, 1, 100); // twenty dots into line 1's mode 3
+    static_cast<void>(ppu.write(0xFF47, 0xE7)); // BGP: colour 0 now shades to 3
+    while (ppu.lineDot() < 300) { ppu.tick(); }
+    const auto* row = &ppu.frame()[Ppu::kWidth];
+    CHECK(row[0] == 0); // drawn on dot 100, before the write landed
+    CHECK(row[1] == 3); // drawn on dot 101, the first dot that sees it
+    CHECK(row[2] == 3);
+}
+
+TEST_CASE("line 0 starts drawing four dots earlier than the lines below it") {
+    // Every Mealybug Tearoom ppu test runs its handler off the mode-2 STAT
+    // interrupt and spends four extra cycles on every line except line 0
+    // (inc/utils.asm's line_0_fix, "line 0 timing is different by 4 cycles"),
+    // and in every DMG reference image line 0 then comes out identical to
+    // line 1. Mooneye's intr_1_2_timing-GS pins the interrupt itself, so it
+    // is the drawing that moves: line 0's OAM scan is 76 dots, not 80, and a
+    // write landing on the same dot of the line reaches a pixel four further
+    // to the right.
+    Ppu ppu;
+    setUpTile(ppu, 0x00, 0x00); // every pixel colour 0
+    const auto firstPixelChanged = [&ppu](int line) {
+        static_cast<void>(ppu.write(0xFF47, 0xE4)); // colour 0 -> shade 0
+        runTo(ppu, line, 100);
+        static_cast<void>(ppu.write(0xFF47, 0xE7)); // colour 0 -> shade 3
+        while (ppu.lineDot() < 300) { ppu.tick(); }
+        const std::size_t row = static_cast<std::size_t>(line) * Ppu::kWidth;
+        for (int x = 0; x < Ppu::kWidth; ++x) {
+            if (ppu.frame()[row + static_cast<std::size_t>(x)] != 0) { return x; }
+        }
+        return -1;
+    };
+    CHECK(firstPixelChanged(0) == 5);
+    CHECK(firstPixelChanged(1) == 1);
+    CHECK(firstPixelChanged(2) == 1);
+}
+
+TEST_CASE("a palette written during mode 3 reads as the old value OR the new one for one dot") {
+    // Mealybug Tearoom's m3_bgp_change, on real DMG hardware, shows one
+    // pixel of a third colour at each edge of every band it paints. On the
+    // line where the palette goes 0x46 -> 0x45, the edge pixels are shade 3,
+    // which is neither palette's colour 0 (2 and 1) but is 0x46 | 0x45 =
+    // 0x47's. The reference image shows the same one-pixel seam at every one
+    // of the six palette writes on every line, so it is the write itself, not
+    // the values: for the dot the write lands on, the palette the pixel is
+    // shaded with is the bitwise OR of the old and new values.
+    Ppu ppu;
+    setUpTile(ppu, 0x00, 0x00); // every pixel colour 0
+    static_cast<void>(ppu.write(0xFF47, 0x01)); // colour 0 -> shade 1
+    runTo(ppu, 1, 100);
+    static_cast<void>(ppu.write(0xFF47, 0x02)); // colour 0 -> shade 2
+    while (ppu.lineDot() < 300) { ppu.tick(); }
+    const auto* row = &ppu.frame()[Ppu::kWidth];
+    CHECK(row[0] == 1); // the old palette
+    CHECK(row[1] == 3); // 0x01 | 0x02 = 0x03, for this one dot only
+    CHECK(row[2] == 2); // the new palette
+    CHECK(row[3] == 2);
+}
+
+TEST_CASE("the last pixels of a line are drawn after mode 3 has ended") {
+    // The other end of the same seven dots: mode 3 ends once the fetcher has
+    // read everything the line needs, while the pixels still in the FIFO take
+    // seven more dots to reach the LCD. A palette write in those dots still
+    // colours them.
+    Ppu ppu;
+    setUpTile(ppu, 0x00, 0x00);
+    runTo(ppu, 1, 256);
+    REQUIRE(ppu.mode() == 0); // mode 3 is over: it ran dots 80 to 251
+    static_cast<void>(ppu.write(0xFF47, 0xE7));
+    while (ppu.lineDot() < 300) { ppu.tick(); }
+    const auto* row = &ppu.frame()[Ppu::kWidth];
+    CHECK(row[156] == 0); // drawn on dot 256
+    CHECK(row[157] == 3); // drawn on dot 257, after mode 0 began
+    CHECK(row[159] == 3);
 }
 
 TEST_CASE("SCX and SCY move the viewport") {
@@ -233,6 +331,31 @@ void setUpWindow(Ppu& ppu) {
     enableLcd(ppu, 0xF1); // LCD on, BG on, window on, window map 0x9C00
 }
 } // namespace
+
+TEST_CASE("a WX below 7 puts the window's first pixels off the left edge") {
+    // WX = 7 lines the window's first pixel up with screen x = 0, so WX = 4
+    // puts the first three off the left edge and screen x = 0 shows the
+    // window's fourth pixel. Mealybug Tearoom's m3_wx_4_change sets WX = 4
+    // before mode 3 and photographs the line: its DMG reference is the same
+    // picture as WX = 7 would give, moved three pixels left, with three more
+    // window pixels visible at the right-hand edge.
+    Ppu ppu;
+    setUpWindow(ppu);
+    // Window tile (index 1) row 0: colour 1 in its leftmost pixel only.
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so writes land
+    ppu.vramWrite(0x8010, 0x80);
+    ppu.vramWrite(0x8011, 0x00);
+    static_cast<void>(ppu.write(0xFF4B, 0x04)); // WX = 4
+    enableLcd(ppu, 0xF1);
+    runLine(ppu);
+    const auto& frame = ppu.frame();
+    for (int x = 0; x < 5; ++x) {
+        CHECK(frame[static_cast<std::size_t>(x)] == 0); // window pixels 3-7
+    }
+    CHECK(frame[5] == 1);  // the next window tile's first pixel
+    CHECK(frame[6] == 0);
+    CHECK(frame[13] == 1); // and the one after that
+}
 
 TEST_CASE("the window covers the background from WX-7 onwards") {
     Ppu ppu;
