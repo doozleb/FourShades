@@ -227,19 +227,20 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line, bool trial) {
         step_ = Step::Tile;
         stepDots_ = 0;
         fetcherX_ = 0;
-        // Cache the row the window is drawing on this line before advancing
-        // the PPU's counter for the next one: every fetch below reads
-        // windowLineUsed_, never ppu.windowLine() directly, so the
-        // just-bumped value doesn't leak into this line's tiles.
         // WX = 7 lines the window's first pixel up with screen x = 0, so a
         // smaller WX pushes 7 - WX of them off the left edge: the fetcher
         // still starts at the window's own column 0 and those pixels never
         // reach the LCD. Mealybug Tearoom's m3_wx_4_change and
-        // m3_wx_5_change photograph the three and two pixel versions of
-        // this. Unlike SCX's low bits they cost no dots: m3_window_timing
-        // sets WX to LY on lines 0-9 and its reference shows the window
-        // starting on the same dot on every one of them.
+        // m3_wx_5_change photograph the three and two pixel versions of it.
+        // Unlike SCX's low bits they cost no dots: m3_window_timing sets WX
+        // to LY on lines 0-9 and its reference shows the window starting on
+        // the same dot on every one of them. See docs/known-divergences.md,
+        // "A WX below 7 pushes the window's leftmost pixels off the screen".
         windowSkip_ = ppu.wx() < 7 ? 7 - static_cast<int>(ppu.wx()) : 0;
+        // Cache the row the window is drawing on this line before advancing
+        // the PPU's counter for the next one: every fetch below reads
+        // windowLineUsed_, never ppu.windowLine() directly, so the
+        // just-bumped value doesn't leak into this line's tiles.
         windowLineUsed_ = ppu.windowLine();
         // The window's line counter only advances on lines that drew it.
         if (!trial) {
