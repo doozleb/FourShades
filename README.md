@@ -6,7 +6,7 @@ and measured, honestly, against the public test ROMs.
 <!-- scoreboard:start -->
 ```
 cpu instructions  ███████████████░   499 / 500
-test roms         █████████░░░░░░░   101 / 165
+test roms         █████████░░░░░░░   102 / 165
 ```
 <!-- scoreboard:end -->
 
@@ -55,7 +55,7 @@ The test-ROM line, group by group, with the first test each group fails:
 | timer | 13 / 13 |  |
 | mbc1 | 12 / 13 | `mooneye/emulator-only/mbc1/multicart_rom_8Mb.gb`: failure bytes (0x42) over serial |
 | mbc2 / mbc5 | 0 / 15 | `mooneye/emulator-only/mbc2/bits_ramg.gb`: cartridge: unsupported cartridge type 0x06 |
-| screen | 3 / 30 | `mealybug-tearoom-tests/ppu/m3_bgp_change.gb (DMG)`: differs from the reference in 5084 pixels |
+| screen | 4 / 30 | `mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG)`: differs from the reference in 3076 pixels |
 | mbc3 / rtc | 0 / 3 | `cpp/rtc-invalid-banks-test.gb`: cartridge: unsupported cartridge type 0x10 |
 
 Not counted (informational in the Shootout, no pass condition): `acid/which.gb (DMG)`, `daid/rom_and_ram.gb`.
