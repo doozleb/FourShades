@@ -62,7 +62,12 @@ private:
     std::array<ObjectPixel, 8> objects_{}; // pixels waiting, index 0 is next
     int objectDots_ = 0;      // dots of penalty still owed for a fetch
     unsigned drawn_ = 0;      // bitmask of line objects already fetched
-    int lastPenaltyTile_ = -1; // background tile that already paid its share
+    // Background tile that already paid its share. Tile numbers can be
+    // negative (an object off the left edge), so the "none yet" case needs
+    // its own flag rather than a sentinel value.
+    int lastPenaltyTile_ = 0;
+    bool lastPenaltyTileValid_ = false;
+    bool objectPenaltyStarted_ = false; // an object has been fetched this line
 };
 
 } // namespace fourshades

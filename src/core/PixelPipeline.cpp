@@ -21,7 +21,9 @@ void PixelPipeline::startLine(Ppu& ppu) {
     objects_ = {};
     objectDots_ = 0;
     drawn_ = 0;
-    lastPenaltyTile_ = -1;
+    lastPenaltyTile_ = 0;
+    lastPenaltyTileValid_ = false;
+    objectPenaltyStarted_ = false;
 }
 
 u16 PixelPipeline::tileRowAddress(const Ppu& ppu) const {
@@ -138,31 +140,47 @@ void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
         }
     }
 
-    // Pan Docs "OBJ penalty algorithm": a flat six dots, plus the wait for the
-    // background fetch of the tile the object's leftmost pixel falls in, the
-    // first time an object lands in that tile. X = 0 always costs eleven,
-    // which is exactly the flat six plus the full tile term, so this object
-    // has effectively already paid for the tile at pixelX_ (always tile 0 of
-    // the discard-adjusted grid, since X = 0 only ever triggers at pixelX_ ==
-    // 0): record that before returning, or a second object triggering at
-    // pixelX_ == 0 would pay the tile term again.
-    if (object.x == 0) {
-        objectDots_ = 11;
-        lastPenaltyTile_ = (ppu.scx() + pixelX_) / 8;
-        return;
-    }
+    // Pan Docs "OBJ Penalty Algorithm", applied to The Pixel - the object's
+    // leftmost pixel, at screen X = OAM X - 8, which is off the left edge for
+    // an OAM X below 8 but still picks a tile and still costs dots:
+    //   - the tile The Pixel is within, and the count of that tile's pixels
+    //     strictly to its right minus 2 (zero if negative), the first time an
+    //     object lands in that tile;
+    //   - a flat six dots for fetching the object's own tile.
+    // Both terms are taken in background coordinates, SCX included, so an
+    // object off the left edge uses its true negative position rather than
+    // the clamped pixelX_ it happens to trigger on: hardware charges objects
+    // at OAM X = 0-7 exactly what their own X mod 8 says, and charges an
+    // object at OAM X = 0 and one at OAM X = 8 two separate tile terms.
+    //
+    // Hardware then charges three dots less per line than that sum, once, for
+    // the first object fetched on the line. Both findings come from the
+    // hardware-verified object timing ROM; see docs/known-divergences.md,
+    // "OBJ penalty: hardware charges three dots fewer per scanline".
+    const int backgroundX = static_cast<int>(ppu.scx()) + static_cast<int>(object.x) - 8;
     objectDots_ = 6;
-    // NOTE: this tile index is in background coordinates (SCX + pixelX_).
-    // Once the window is drawing, tile boundaries actually follow WX - 7
-    // instead, so on a line with both a window and an object this term can
-    // be wrong by up to 5 dots. Left for the hardware timing tests in a
-    // later task to arbitrate; see docs/known-divergences.md conventions
-    // for how to record the resolution once they do.
-    const int tileOfPixel = (ppu.scx() + pixelX_) / 8;
-    if (tileOfPixel != lastPenaltyTile_) {
-        lastPenaltyTile_ = tileOfPixel;
-        const int toTheRight = 7 - ((ppu.scx() + pixelX_) & 7);
-        objectDots_ += toTheRight > 2 ? toTheRight - 2 : 0;
+    const int penaltyTile = backgroundX >> 3;
+    if (!lastPenaltyTileValid_ || penaltyTile != lastPenaltyTile_) {
+        lastPenaltyTile_ = penaltyTile;
+        lastPenaltyTileValid_ = true;
+        if (object.x == 0) {
+            // Pan Docs: "an OBJ with an OAM X position of 0 always incurs a
+            // 11-dot penalty, regardless of SCX". It is the tile term that
+            // the exception replaces, not the whole penalty: ten objects at
+            // OAM X = 0 cost 11 + 9 x 6, not 10 x 11, because the second one
+            // onwards finds its tile already considered. At SCX = 0 the
+            // general rule below gives 11 anyway, and no hardware measurement
+            // available here reaches an OAM X = 0 object at a non-zero SCX,
+            // so Pan Docs stands.
+            objectDots_ = 11;
+        } else {
+            const int toTheRight = 7 - (backgroundX & 7);
+            objectDots_ += toTheRight > 2 ? toTheRight - 2 : 0;
+        }
+    }
+    if (!objectPenaltyStarted_) {
+        objectPenaltyStarted_ = true;
+        objectDots_ -= 3;
     }
 }
 

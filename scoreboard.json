@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 93,
+    "passing": 101,
     "total": 165,
     "groups": [
       {
@@ -21,11 +21,11 @@
       },
       {
         "group": "oam bug",
-        "passing": 2,
+        "passing": 3,
         "total": 7,
         "first_failure": {
-          "test": "blargg/oam_bug/1-lcd_sync.gb",
-          "reason": "Failed #3"
+          "test": "blargg/oam_bug/2-causes.gb",
+          "reason": "Failed #2"
         }
       },
       {
@@ -63,12 +63,9 @@
       },
       {
         "group": "ppu timing",
-        "passing": 6,
+        "passing": 12,
         "total": 12,
-        "first_failure": {
-          "test": "mooneye/acceptance/ppu/hblank_ly_scx_timing-GS.gb",
-          "reason": "failure bytes (0x42) over serial"
-        }
+        "first_failure": null
       },
       {
         "group": "serial",
@@ -102,11 +99,11 @@
       },
       {
         "group": "screen",
-        "passing": 2,
+        "passing": 3,
         "total": 30,
         "first_failure": {
-          "test": "mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb (DMG)",
-          "reason": "differs from the reference in 18060 pixels"
+          "test": "mealybug-tearoom-tests/ppu/m3_bgp_change.gb (DMG)",
+          "reason": "differs from the reference in 5084 pixels"
         }
       },
       {

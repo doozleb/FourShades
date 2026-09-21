@@ -162,6 +162,60 @@ mode.
   An earlier version of this entry claimed they did; that was wrong.
 - **Checked:** 2026-09-14.
 
+## OBJ penalty: hardware charges three dots fewer per scanline than Pan Docs' algorithm (2026-09-21)
+
+- **Test:** Mooneye `acceptance/ppu/intr_2_mode0_timing_sprites` ("verified:
+  DMG, MGB, SGB, SGB2, CGB, AGB, AGS"). Its 104 cases each place 1-10 objects
+  on one scanline at chosen OAM X coordinates, then tune a `nops` count so
+  that the first STAT poll after the mode 0 interrupt is exactly the M-cycle
+  mode 0 begins; the case's "extra cycles" figure is how many M-cycles later
+  than a bare line that is.
+- **Pan Docs, [Rendering: OBJ Penalty
+  Algorithm](https://gbdev.io/pandocs/Rendering.html):** for each object,
+  "Determine the tile (background or window) that The Pixel is within. If that
+  tile has not been considered by a previous OBJ yet: Count how many of that
+  tile's pixels are strictly to the right of The Pixel. Subtract 2. Incur this
+  many dots of penalty, or zero if negative." and "Incur a flat, 6-dot penalty
+  (from fetching the OBJ's tile)."
+- **What the test measures:** that sum, minus three dots, once per scanline.
+  A single object whose tile term is zero (OAM X mod 8 of 5, 6 or 7) costs
+  Pan Docs' flat 6, but the test only allows it one extra M-cycle, so the
+  line can have grown by at most 4 dots. Ten objects in one tile at OAM X = 0
+  cost Pan Docs' 11 + 9 x 6 = 65 but are allowed 16 extra M-cycles, i.e. 61
+  to 64 dots. Ten objects in ten tiles at OAM X = 0, 8, ... 72 cost 110 and
+  are allowed 27, i.e. 105 to 108 dots. Solving all 104 cases at once leaves
+  exactly one constant: Pan Docs' sum minus 3, charged against the first
+  object fetched on the line. No other single constant fits, and no
+  per-object or per-tile adjustment fits either (a per-tile -3 would put the
+  ten-tile case at 20 extra M-cycles instead of 27).
+- **Decision (2026-09-21):** the hardware-verified test outranks the Pan Docs
+  formula, per the rule at the top of this file. `PixelPipeline::startObject`
+  computes Pan Docs' two terms and then takes three dots off the first object
+  of each scanline. Test-ROM score: 100 -> 101 of 165
+  (`intr_2_mode0_timing_sprites` gained; nothing lost).
+- **What is not settled:** why the three dots. The likeliest reading is that
+  Pan Docs' "flat 6" describes the fetch in isolation, while on the real
+  pipeline the first object fetch of a line overlaps three dots the background
+  fetcher would have spent stalled anyway - but nothing in the test
+  distinguishes that from the constant belonging somewhere else, so the code
+  says only what was measured.
+- **Two details the same test settles, which Pan Docs states loosely:**
+  - "The Pixel" is the object's leftmost pixel at screen X = OAM X - 8, and
+    that is used even when it is off the left edge. Objects at OAM X = 0-7 are
+    charged by their own X mod 8 (X = 5 pays no tile term at all), and an
+    object at OAM X = 0 and one at OAM X = 8 pay two separate tile terms even
+    though both are fetched on the dot the pixel counter is still 0. Taking
+    the term at the clamped pixel counter instead, as FourShades did before,
+    charged every one of them as if it sat at X mod 8 = 0.
+  - Pan Docs' exception, "an OBJ with an OAM X position of 0 always incurs a
+    11-dot penalty, regardless of SCX", replaces the *tile term*, not the
+    whole penalty: ten objects at OAM X = 0 cost 11 + 9 x 6, not 10 x 11,
+    because the second onwards finds the tile already considered. At SCX = 0
+    the general rule gives 11 for such an object anyway, and no ROM in the 165
+    reaches one at a non-zero SCX, so the exception is kept as Pan Docs states
+    it.
+- **Checked:** 2026-09-21.
+
 ## Timing model (not a divergence: where Pan Docs is silent)
 
 Pan Docs gives cycle counts but not every within-M-cycle order. These are the
@@ -242,5 +296,62 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   disables it...` in `tests/test_pixel_pipeline.cpp`) gets restructured to
   match — the implementation is not to be bent to keep that test passing.
   Checked 2026-09-14.
+- **STAT's mode field, and the STAT interrupt sources, trail the PPU's own
+  mode by one M-cycle; the VRAM and OAM locks do not.** Pan Docs describes
+  STAT bits 1-0 only as "Indicates the PPU's current status"
+  ([STAT](https://gbdev.io/pandocs/STAT.html)) and says nothing about when
+  within a mode change that becomes readable. `lcdon_timing-GS` and
+  `lcdon_write_timing-GS` (DMG, MGB, SGB, SGB2) read LY, STAT, OAM and VRAM at
+  24 and 19 fixed cycle offsets across lines 0, 1 and 2 and pin all of it: LY
+  increments and OAM locks one M-cycle before STAT reports mode 2; VRAM locks
+  one M-cycle before STAT reports mode 3; both unlock on the M-cycle STAT
+  reports mode 0; an OAM *write* still gets through on the M-cycle the PPU has
+  left mode 2 for mode 3, and a VRAM write is refused only while STAT reports
+  mode 3. `Ppu` keeps the PPU's own `mode_` and the CPU-visible `visibleMode_`
+  side by side for exactly this. The same one-M-cycle trail is what makes
+  `hblank_ly_scx_timing-GS` come out right: the mode 0 interrupt lands 50
+  M-cycles before LY increments at SCX mod 8 = 0, not 51. Checked 2026-09-21.
+- **The line the LCD is switched on for is 452 dots long and has no mode 2.**
+  Pan Docs says only "When re-enabling the LCD, the PPU will immediately start
+  drawing again, but the screen will stay blank during the first frame"
+  ([LCDC](https://gbdev.io/pandocs/LCDC.html)). `lcdon_timing-GS`'s own header
+  states what it measures - "line 0 starts with mode 0 and goes straight to
+  mode 3", "line 0 has different timings because the PPU is late by 2
+  T-cycles" - and its table fixes the rest: STAT reports mode 0 until mode 3
+  begins 80 dots in, and LY turns 1 after 452 dots, not 456. FourShades models
+  that as the PPU picking the line up one M-cycle in (`dot_ = 4`) in mode 0,
+  which reproduces every entry of the table. With no mode 2 there is no OAM
+  scan, so no objects are selected on that line. Checked 2026-09-21.
+- **The mode 2 STAT source is pulsed at the top of line 144, on the same dot
+  as the VBlank interrupt.** Pan Docs' STAT page describes the mode 2 source
+  only as "the Mode 2 condition". `vblank_stat_intr-GS` (DMG, MGB, SGB, SGB2)
+  times VBlank-to-VBlank against VBlank-to-mode-2-STAT with DIV and expects
+  the same value, which places the pulse on VBlank's own dot rather than an
+  M-cycle later with the visible mode. `Ppu::oamSourceHigh` adds that one dot;
+  `intr_1_2_timing-GS`, which starts counting after the pulse has passed, is
+  unaffected by it and still measures the distance to line 0's mode 2.
+  Checked 2026-09-21.
+- **The LY=LYC comparison reads as "no match" for the M-cycle LY changes in,
+  and stops entirely while the LCD is off.** Pan Docs says the comparison is
+  constant ("The Game Boy constantly compares the value of the LYC and LY
+  registers", [STAT](https://gbdev.io/pandocs/STAT.html)).
+  `lcdon_timing-GS`'s LYC = 1 table shows the flag turning 1 one M-cycle after
+  LY turns 1, but dropping to 0 on the same M-cycle LY turns 2 - a
+  one-M-cycle hole at each line boundary, not a delay. `stat_lyc_onoff`
+  (verified on every model) shows the flag and the STAT level line both
+  keeping their last value while the LCD is off, with writes to LYC having no
+  effect there, and being re-evaluated when it comes back on - so a result
+  that does not change across the off period produces no new interrupt, and
+  one that changes from false to true produces one. Checked 2026-09-21.
+- **A write raises the STAT level line inside its own M-cycle.** Pan Docs' DMG
+  STAT bug reads "It behaves as if $FF were written for one M-cycle, and then
+  the written value were written the next M-cycle"
+  ([STAT](https://gbdev.io/pandocs/STAT.html)); FourShades now takes that
+  literally, with the $FF M-cycle being the write's own. `Ppu::write` returns
+  the IF bits it raises and `GameBoy::writeIo` ORs them in before the
+  instruction ends. `stat_lyc_onoff`'s round 4 needs this for a different
+  register: it switches the LCD on and has `di` as the very next instruction,
+  so an interrupt raised an M-cycle later would never be taken.
+  Checked 2026-09-21.
 - **Checked:** 2026-09-11, except the WY-latch entry above, checked
-  2026-09-14.
+  2026-09-14, and the five entries above it dated 2026-09-21.
