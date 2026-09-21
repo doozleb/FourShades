@@ -36,8 +36,11 @@ public:
     u8 read(u16 address) const;      // FF40-FF4B
     // Returns the IF bits the write itself requests: on DMG a STAT write can
     // raise the STAT level line inside the writing M-cycle, and so can
-    // switching the LCD on.
-    u8 write(u16 address, u8 value); // FF40-FF4B
+    // switching the LCD on. The caller must act on these bits (there is
+    // exactly one caller in src/), so this is [[nodiscard]]; a call made only
+    // for its side effects (as tests do, to land register writes) must say so
+    // explicitly with static_cast<void>(...).
+    [[nodiscard]] u8 write(u16 address, u8 value); // FF40-FF4B
 
     // The CPU's view: VRAM is unreadable in mode 3, OAM in modes 2 and 3
     // (except through dmaWriteOam). A blocked read gives 0xFF; a blocked

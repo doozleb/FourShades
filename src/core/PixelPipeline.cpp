@@ -159,6 +159,13 @@ void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
     // "OBJ penalty: hardware charges three dots fewer per scanline".
     const int backgroundX = static_cast<int>(ppu.scx()) + static_cast<int>(object.x) - 8;
     objectDots_ = 6;
+    // NOTE: this tile index is in background coordinates (SCX + the object's
+    // own X). Once the window is drawing, tile boundaries actually follow
+    // WX - 7 instead, so on a line with both a window and an object this term
+    // can be wrong by up to 5 dots. Left for the hardware timing tests in a
+    // later task to arbitrate; see docs/known-divergences.md, "OBJ penalty:
+    // the tile term ignores the window", for the evidence and how to record
+    // the resolution once they do.
     const int penaltyTile = backgroundX >> 3;
     if (!lastPenaltyTileValid_ || penaltyTile != lastPenaltyTile_) {
         lastPenaltyTile_ = penaltyTile;

@@ -162,7 +162,7 @@ mode.
   An earlier version of this entry claimed they did; that was wrong.
 - **Checked:** 2026-09-14.
 
-## OBJ penalty: hardware charges three dots fewer per scanline than Pan Docs' algorithm (2026-09-21)
+## OBJ penalty: the first object fetched on a line gets a three-dot rebate against Pan Docs' algorithm (2026-09-21)
 
 - **Test:** Mooneye `acceptance/ppu/intr_2_mode0_timing_sprites` ("verified:
   DMG, MGB, SGB, SGB2, CGB, AGB, AGS"). Its 104 cases each place 1-10 objects
@@ -188,6 +188,20 @@ mode.
   object fetched on the line. No other single constant fits, and no
   per-object or per-tile adjustment fits either (a per-tile -3 would put the
   ten-tile case at 20 extra M-cycles instead of 27).
+  - **The stronger, more checkable version of that argument:** the OAM X = 0
+    series alone admits a rebate of either 3 or 4 - it does not pin the
+    constant by itself. What pins it to 3 is a single-object pair elsewhere
+    in the 104 cases: an object at X = 3 must report 2 extra M-cycles, and one
+    at X = 4 must report 1. A rebate of 4 puts the X = 3 case at 176 raw
+    dots, which the ROM forbids; a rebate of 2 puts an OAM X = 0 object at
+    184 raw dots, which the ROM also forbids. Only 3 survives both.
+  - **All 104 cases run at SCX = 0.** The rebate's interaction with SCX is
+    therefore entirely unmeasured. `tests/test_objects.cpp`'s "an object at
+    OAM X = 0 always costs eleven dots, unlike the general formula" checks
+    184 raw dots for such an object with SCX = 3 - that figure comes from
+    applying the model above, not from the hardware ROM (which never reaches
+    a non-zero SCX for this case), and should be read as a prediction the
+    unit test pins, not a measurement.
 - **Decision (2026-09-21):** the hardware-verified test outranks the Pan Docs
   formula, per the rule at the top of this file. `PixelPipeline::startObject`
   computes Pan Docs' two terms and then takes three dots off the first object
@@ -199,6 +213,14 @@ mode.
   fetcher would have spent stalled anyway - but nothing in the test
   distinguishes that from the constant belonging somewhere else, so the code
   says only what was measured.
+- **Known limitation: the tile term ignores the window.** The tile-index half
+  of the penalty (`PixelPipeline::startObject`'s `penaltyTile`) is computed in
+  background coordinates - SCX plus the object's own X - unconditionally.
+  Once the window is drawing, tile boundaries actually follow WX - 7 instead,
+  so on a line with both a window and an object this term can be wrong by up
+  to 5 dots. No test ROM in the 165 currently combines a window and an object
+  on the same line in a way that exposes this, so it is left for the Mealybug
+  window tests to arbitrate.
 - **Two details the same test settles, which Pan Docs states loosely:**
   - "The Pixel" is the object's leftmost pixel at screen X = OAM X - 8, and
     that is used even when it is off the left edge. Objects at OAM X = 0-7 are
@@ -320,8 +342,12 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   T-cycles" - and its table fixes the rest: STAT reports mode 0 until mode 3
   begins 80 dots in, and LY turns 1 after 452 dots, not 456. FourShades models
   that as the PPU picking the line up one M-cycle in (`dot_ = 4`) in mode 0,
-  which reproduces every entry of the table. With no mode 2 there is no OAM
-  scan, so no objects are selected on that line. Checked 2026-09-21.
+  which reproduces every entry of the table. That much is what the ROM
+  measures. That there is therefore no OAM scan, and so no objects are
+  selected on that line, is FourShades' inference from the absence of mode 2
+  - a reasonable one, but not itself something the ROM checks: no test in the
+  165 places an object so it would be selected only if this line did scan
+  OAM. Checked 2026-09-21.
 - **The mode 2 STAT source is pulsed at the top of line 144, on the same dot
   as the VBlank interrupt.** Pan Docs' STAT page describes the mode 2 source
   only as "the Mode 2 condition". `vblank_stat_intr-GS` (DMG, MGB, SGB, SGB2)
@@ -353,5 +379,33 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   register: it switches the LCD on and has `di` as the very next instruction,
   so an interrupt raised an M-cycle later would never be taken.
   Checked 2026-09-21.
+- **The STAT-write quirk and the LCD-enable level-line update are both
+  suppressed while they would fire on no evidence.** Landing the return-value
+  change above (`Ppu::write` raising `irq::Lcd` within its own M-cycle) opened
+  two paths nothing in the suite measures. First: while the LCD is off,
+  `visibleMode_` is forced to 0, which satisfies the mode-0 (HBlank) STAT
+  source unconditionally, so evaluating the $FF41 write quirk's
+  `statConditions(0x78)` there would raise `irq::Lcd` on any write to STAT
+  during the off period whenever the level line happens to be low.
+  `Ppu::write`'s `0xFF41` case now gates that evaluation on `lcdOn()`,
+  restoring what the pre-M-cycle-accurate code did (the old `tick()` reset
+  the write quirk to nothing on its very next M-cycle while off, so it never
+  actually fired then either). `stat_lyc_onoff` does not write STAT during
+  its off period, so this is evidence-neutral: the full suite (`ppu timing`
+  12/12, test roms 101/165, SingleStepTests 499/500, all doctest cases) is
+  unchanged with the gate in place, which is why it was kept. Second, the
+  same shape exists when the LCD is switched on: `Ppu::write`'s `0xFF40`
+  case re-evaluates the level line to let a fresh LY=LYC match raise
+  an interrupt inside the enabling M-cycle (needed for `stat_lyc_onoff`'s
+  round 4), but at that instant `visibleMode_` is also forced to 0, so the
+  same mode-0 source would fire immediately if it happened to be selected.
+  That evaluation now masks the mode-0 source out (`statSelect_ & 0x70`); the
+  LYC and OAM sources are unaffected, and the mode-0 source still applies from
+  the very next M-cycle onward through the normal per-tick evaluation in
+  `stepDot`. Also evidence-neutral: the same four suite results are unchanged
+  with this mask in place. No test in the 165 enables the LCD with the mode-0
+  source selected, so neither gate is proven correct by the suite - only that
+  closing an unevidenced interrupt path costs nothing that is currently
+  measured. Checked 2026-09-21.
 - **Checked:** 2026-09-11, except the WY-latch entry above, checked
-  2026-09-14, and the five entries above it dated 2026-09-21.
+  2026-09-14, and the six entries above it dated 2026-09-21.

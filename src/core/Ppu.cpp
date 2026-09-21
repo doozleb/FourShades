@@ -44,8 +44,10 @@ void Ppu::stepDot(u8& requested) {
     } else if (line_ < 144) {
         // On the line the LCD was switched on there is no mode 2: the PPU
         // reports mode 0 and goes straight to mode 3 at the usual dot, and
-        // the line is 452 dots long. With no OAM scan, no objects are
-        // selected for that line.
+        // the line is 452 dots long - that much the hardware ROM measures
+        // directly. That there is therefore no OAM scan, and so no objects
+        // are selected for that line, is this code's inference from it, not
+        // a separate measurement: see docs/known-divergences.md.
         if (dot_ == kOamScanDots && (mode_ == 2 || lcdOnLine_)) {
             setMode(3);
             lineBuffer_.fill(0);
@@ -236,8 +238,23 @@ u8 Ppu::write(u16 address, u8 value) {
             lcdOnLine_ = true;
             lycSuppressed_ = false;
             // The comparison restarts inside this M-cycle, so LY=LYC can
-            // raise the level line here, inside this same M-cycle.
-            updateStatLine(requested);
+            // raise the level line here, inside this same M-cycle - needed
+            // for stat_lyc_onoff's round 4, which switches the LCD on with
+            // `di` as the very next instruction.
+            //
+            // The mode-0 (HBlank) source is excluded from this one
+            // evaluation: visibleMode_ is forced to 0 as the PPU's real
+            // starting mode for this line, but no test measures whether
+            // enabling the LCD with the HBlank source selected raises an
+            // interrupt from it at this exact instant, so it is gated here
+            // the same way the $FF41 write quirk is gated above. The mode-0
+            // source still applies from the very next M-cycle onward, via
+            // the normal per-tick evaluation in stepDot. See
+            // docs/known-divergences.md, "Timing model".
+            if (statConditions(statSelect_ & 0x70) && !statLine_) {
+                requested = static_cast<u8>(requested | irq::Lcd);
+            }
+            statLine_ = statConditions(statSelect_ & 0x70);
         }
         break;
     }
@@ -246,15 +263,33 @@ u8 Ppu::write(u16 address, u8 value) {
         // written for one cycle, so every condition that holds right now
         // feeds the level line. It happens inside the writing M-cycle, not
         // the one after it.
-        if (statConditions(0x78) && !statLine_) {
-            requested = static_cast<u8>(requested | irq::Lcd);
+        //
+        // Gated on the LCD being on: while it is off, visibleMode_ is forced
+        // to 0, which satisfies the mode-0 (HBlank) source unconditionally,
+        // so this quirk would otherwise raise irq::Lcd on any $FF41 write
+        // during the off period whenever the level line happens to be low -
+        // a path no test reaches. See docs/known-divergences.md, "Timing
+        // model", for the evidence this restores rather than removes.
+        if (lcdOn()) {
+            if (statConditions(0x78) && !statLine_) {
+                requested = static_cast<u8>(requested | irq::Lcd);
+            }
+            statLine_ = statConditions(0x78);
         }
-        statLine_ = statConditions(0x78);
         statSelect_ = static_cast<u8>(value & 0x78);
         break;
     case 0xFF42: scy_ = value; break;
     case 0xFF43: scx_ = value; break;
-    case 0xFF45: lyc_ = value; break;
+    case 0xFF45:
+        // Unlike FF40 and FF41 above, a LYC write does not re-evaluate the
+        // STAT level line within this M-cycle: a write that creates a fresh
+        // LY=LYC match raises the interrupt one M-cycle late. This asymmetry
+        // is deliberate and unmeasured - no test in the suite writes LYC into
+        // a match either way - and is left alone because changing it risks
+        // the hardware-verified tables that pin the other two writes (see
+        // docs/known-divergences.md, "Timing model").
+        lyc_ = value;
+        break;
     case 0xFF47: bgp_ = value; break;
     case 0xFF48: obp0_ = value; break;
     case 0xFF49: obp1_ = value; break;
