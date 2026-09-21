@@ -92,8 +92,10 @@ bool GameBoy::dmaBlocks(u16 address) const {
     return address < 0x8000 || (address >= 0xA000 && address < 0xFE00); // external bus
 }
 
-u8 GameBoy::read(u16 address) {
-    tick();
+// What the CPU's data bus carries for `address` right now: the DMA's and the
+// PPU's locks both apply. The M-cycle this read belongs to has already
+// been stepped before this is called.
+u8 GameBoy::busRead(u16 address) const {
     if (dmaBlocks(address)) {
         return 0xFF;
     }
@@ -108,6 +110,11 @@ u8 GameBoy::read(u16 address) {
         return ppu_.oamBlocked() ? 0xFF : 0x00;
     }
     return peek(address);
+}
+
+u8 GameBoy::read(u16 address) {
+    tick();
+    return busRead(address);
 }
 
 void GameBoy::write(u16 address, u8 value) {
@@ -126,7 +133,9 @@ std::optional<u8> GameBoy::haltedCycle(u16 address) {
     if (pendingInterrupts() == 0) {
         return std::nullopt;
     }
-    return dmaBlocks(address) ? u8{0xFF} : peek(address);
+    // The byte the CPU latches when it leaves HALT comes off the same bus as
+    // any other read, so the PPU's VRAM and OAM locks apply to it too.
+    return busRead(address);
 }
 
 u8 GameBoy::peek(u16 address) const {
@@ -202,7 +211,10 @@ void GameBoy::writeIo(u16 address, u8 value) {
         break;
     default:
         if (address >= 0xFF40 && address <= 0xFF4B) {
-            ppu_.write(address, value);
+            // A STAT write, or switching the LCD on, can raise the STAT level
+            // line inside this very M-cycle, so the IF bit has to land now
+            // rather than on the next tick.
+            if_ = static_cast<u8>(if_ | ppu_.write(address, value));
         }
         break;
     }

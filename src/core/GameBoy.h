@@ -53,6 +53,7 @@ private:
     void tick();
     void tickDma();
     bool dmaBlocks(u16 address) const;
+    u8 busRead(u16 address) const;
     u8 readIo(u16 address) const;
     void writeIo(u16 address, u8 value);
     void writeMemory(u16 address, u8 value);

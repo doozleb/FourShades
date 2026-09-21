@@ -12,6 +12,15 @@ namespace fourshades {
 // The picture-processing unit. Stepped four dots per M-cycle by GameBoy, it
 // walks the modes of a scanline, keeps the LCD registers, owns VRAM and OAM,
 // and (from Task 4) draws the frame.
+//
+// Two mode numbers live side by side here. `mode_` is the PPU's own mode: it
+// changes on the dot the PPU actually starts scanning OAM, fetching pixels or
+// idling. `visibleMode_` is what the CPU sees - STAT's mode field, the STAT
+// interrupt sources and (mostly) the VRAM and OAM locks - and it trails
+// `mode_` by one M-cycle. The hardware-verified LCD timing ROMs pin both: LY
+// increments and OAM locks one M-cycle before STAT reports mode 2, and VRAM
+// locks one M-cycle before STAT reports mode 3. See docs/known-divergences.md,
+// "Timing model (not a divergence: where Pan Docs is silent)".
 class Ppu {
 public:
     static constexpr int kWidth = 160;
@@ -24,12 +33,16 @@ public:
     // One M-cycle (4 dots). Returns the IF bits requested during it.
     u8 tick();
 
-    u8 read(u16 address) const;        // FF40-FF4B
-    void write(u16 address, u8 value); // FF40-FF4B
+    u8 read(u16 address) const;      // FF40-FF4B
+    // Returns the IF bits the write itself requests: on DMG a STAT write can
+    // raise the STAT level line inside the writing M-cycle, and so can
+    // switching the LCD on.
+    u8 write(u16 address, u8 value); // FF40-FF4B
 
     // The CPU's view: VRAM is unreadable in mode 3, OAM in modes 2 and 3
     // (except through dmaWriteOam). A blocked read gives 0xFF; a blocked
-    // write is dropped.
+    // write is dropped. Writes and reads are not blocked over the same dots:
+    // see oamWriteBlocked/vramWriteBlocked.
     u8 vramRead(u16 address) const;
     void vramWrite(u16 address, u8 value);
     u8 oamRead(u16 address) const;
@@ -44,7 +57,9 @@ public:
 
     bool vramBlocked() const;
     bool oamBlocked() const;
-    int mode() const { return lcdOn() ? mode_ : 0; }
+    bool vramWriteBlocked() const;
+    bool oamWriteBlocked() const;
+    int mode() const { return lcdOn() ? visibleMode_ : 0; }
     u8 ly() const;
     bool lcdOn() const { return (lcdc_ & 0x80) != 0; }
 
@@ -57,6 +72,8 @@ public:
     u8 obp(int which) const { return which != 0 ? obp1_ : obp0_; }
     // The line being drawn. LY can read differently (line 153 reads 0).
     int lineNumber() const { return line_; }
+    // Dots elapsed in the current line, 0-455.
+    int lineDot() const { return dot_; }
 
     const std::array<u8, kWidth * kHeight>& frame() const { return frame_; }
     std::uint64_t frameCount() const { return frames_; }
@@ -81,6 +98,8 @@ private:
     void stepDot(u8& requested);
     void setMode(int mode);
     void updateStatLine(u8& requested);
+    bool statConditions(u8 select) const;
+    bool oamSourceHigh() const;
     bool lycMatch() const;
     void scanOam();
 
@@ -103,9 +122,12 @@ private:
 
     int line_ = 0;   // 0-153, the real line; LY reads differently on line 153
     int dot_ = 0;    // 0-455 within the line
-    int mode_ = 2;
+    int mode_ = 2;        // the PPU's own mode
+    int visibleMode_ = 2; // what the CPU sees: mode_ one M-cycle ago
+    bool lcdOnLine_ = false;  // this line began when the LCD was switched on
+    bool lycSuppressed_ = false; // the first M-cycle of a line compares as "no match"
+    bool lycFrozen_ = false;     // the comparison's last result before the LCD went off
     bool statLine_ = false;  // the level line: an interrupt fires on its rise
-    int statQuirk_ = 0;      // M-cycles left of the DMG "write acts as 0xFF" quirk
     std::uint64_t frames_ = 0;
     bool windowReached_ = false; // WY has matched LY somewhere in this frame
     int windowLine_ = 0;         // the window's own line counter

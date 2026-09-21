@@ -20,15 +20,21 @@ TEST_CASE("a drawn line is mode 2, then 3, then 0, and lasts 456 dots") {
     CHECK(ppu.mode() == 2);
     run(ppu, 76);
     CHECK(ppu.mode() == 2);
-    run(ppu, 4); // 80 dots of OAM scan
+    run(ppu, 4);            // 80 dots: the OAM scan is over ...
+    CHECK(ppu.mode() == 2); // ... but STAT reports mode 2 for one more M-cycle
+    CHECK(ppu.vramBlocked()); // the fetcher already has the bus, though
+    run(ppu, 4);
     CHECK(ppu.mode() == 3);
     run(ppu, 168);
     CHECK(ppu.mode() == 3);
-    run(ppu, 4); // 172 dots of drawing
+    run(ppu, 4); // 172 dots of drawing, reported from dot 84 to dot 256
     CHECK(ppu.mode() == 0);
     CHECK(ppu.ly() == 0);
-    run(ppu, 204); // the rest of the line
+    run(ppu, 200); // the rest of the line
     CHECK(ppu.ly() == 1);
+    CHECK(ppu.mode() == 0);  // LY leads STAT's mode 2 by one M-cycle ...
+    CHECK(ppu.oamBlocked()); // ... but the scan has already claimed OAM
+    run(ppu, 4);
     CHECK(ppu.mode() == 2);
 }
 
@@ -36,9 +42,11 @@ TEST_CASE("VBlank starts at line 144 and asks for its interrupt once") {
     Ppu ppu;
     const u8 seen = run(ppu, 144 * Ppu::kDotsPerLine);
     CHECK(ppu.ly() == 144);
-    CHECK(ppu.mode() == 1);
+    CHECK(ppu.mode() == 0); // STAT catches up with mode 1 an M-cycle later
     CHECK((seen & 0x01) != 0);
-    const u8 rest = run(ppu, 9 * Ppu::kDotsPerLine);
+    run(ppu, 4);
+    CHECK(ppu.mode() == 1);
+    const u8 rest = run(ppu, 9 * Ppu::kDotsPerLine - 4);
     CHECK((rest & 0x01) == 0); // only once per frame
     CHECK(ppu.frameCount() == 1);
     run(ppu, Ppu::kDotsPerLine);
@@ -56,10 +64,11 @@ TEST_CASE("line 153 reports as line 0 after its first few dots") {
 
 TEST_CASE("the STAT interrupt fires on a rising edge, not while the line stays high") {
     Ppu ppu;
-    ppu.write(0xFF41, 0x20); // mode 2 source only
-    ppu.tick();              // the DMG write quirk's own interrupt (tested below)
+    // mode 2 source only; the DMG write quirk's own interrupt (tested below)
+    // comes straight back out of the write.
+    CHECK((ppu.write(0xFF41, 0x20) & 0x02) != 0);
     u8 seen = 0;
-    for (int i = 0; i < 15; ++i) {
+    for (int i = 0; i < 16; ++i) {
         seen = static_cast<u8>(seen | ppu.tick()); // still inside mode 2
     }
     CHECK((seen & 0x02) == 0); // the line stayed high: no second interrupt
@@ -77,11 +86,17 @@ TEST_CASE("LY=LYC sets the flag and can request an interrupt") {
     CHECK((seen & 0x02) != 0);
 }
 
-TEST_CASE("writing STAT on DMG can request a spurious interrupt") {
-    Ppu ppu;               // power-on: mode 2, no sources selected
-    run(ppu, 200);         // now in mode 0 of line 0
-    ppu.write(0xFF41, 0x00); // selects nothing, but acts as 0xFF for one M-cycle
-    CHECK((ppu.tick() & 0x02) != 0);
+TEST_CASE("writing STAT on DMG requests its spurious interrupt in the writing cycle") {
+    Ppu ppu;       // power-on: mode 2, no sources selected
+    run(ppu, 256); // now in mode 0 of line 0
+    CHECK(ppu.mode() == 0);
+    // The write selects nothing, but acts as if 0xFF had been written for one
+    // cycle, and mode 0 is among the conditions that raises the level line.
+    // Hardware does that inside the writing M-cycle, not the one after it:
+    // stat_lyc_onoff's round 4 only passes because switching the LCD on
+    // raises the line in time for the very next instruction boundary.
+    CHECK((ppu.write(0xFF41, 0x00) & 0x02) != 0);
+    CHECK((ppu.tick() & 0x02) == 0); // and only once
 }
 
 TEST_CASE("turning the LCD off blanks the screen and holds LY at 0") {
@@ -94,8 +109,13 @@ TEST_CASE("turning the LCD off blanks the screen and holds LY at 0") {
     CHECK(run(ppu, 10 * Ppu::kDotsPerLine) == 0); // no interrupts while off
     CHECK(ppu.ly() == 0);
     ppu.write(0xFF40, 0x91); // back on: drawing starts again
+    // The line the LCD comes on for has no mode 2 at all: it reports mode 0
+    // and goes straight to mode 3 eighty dots in.
     run(ppu, 4);
-    CHECK(ppu.mode() == 2);
+    CHECK(ppu.mode() == 0);
+    CHECK_FALSE(ppu.oamBlocked());
+    run(ppu, 76);
+    CHECK(ppu.mode() == 3);
 }
 
 TEST_CASE("VRAM and OAM keep their own storage, and LY is read-only") {
@@ -119,7 +139,15 @@ TEST_CASE("VRAM is blocked in mode 3, OAM in modes 2 and 3") {
     CHECK(ppu.vramRead(0x8000) == 0x11);
     CHECK(ppu.oamRead(0xFE00) == 0x22);
 
-    ppu.write(0xFF40, 0x91); // on: line 0 starts in mode 2
+    ppu.write(0xFF40, 0x91); // on, but the first line has no mode 2 ...
+    while (ppu.lineNumber() != Ppu::kLines - 1) { ppu.tick(); }
+    while (ppu.lineNumber() == Ppu::kLines - 1) { ppu.tick(); } // ... so use the next line 0
+    CHECK(ppu.lineNumber() == 0);
+    CHECK(ppu.mode() == 1);  // STAT still reports VBlank for one more M-cycle
+    CHECK(ppu.oamBlocked()); // even though line 0's scan already owns OAM
+    CHECK_FALSE(ppu.vramBlocked());
+
+    run(ppu, 4);
     CHECK(ppu.mode() == 2);
     CHECK_FALSE(ppu.vramBlocked());
     CHECK(ppu.oamBlocked());
@@ -128,10 +156,22 @@ TEST_CASE("VRAM is blocked in mode 3, OAM in modes 2 and 3") {
     ppu.oamWrite(0xFE00, 0x33); // dropped
     CHECK(ppu.peekOam(0xFE00) == 0x22);
 
-    run(ppu, Ppu::kOamScanDots); // into mode 3
+    run(ppu, Ppu::kOamScanDots - 4); // dot 80: the fetcher has taken VRAM ...
+    CHECK(ppu.mode() == 2);          // ... while STAT still reports mode 2
+    CHECK(ppu.vramBlocked());
+    CHECK(ppu.oamBlocked());
+    // Writes are not refused over the same dots as reads: this one M-cycle,
+    // where the PPU has left mode 2 but STAT has not caught up, lets an OAM
+    // write through (Mooneye acceptance/ppu/lcdon_write_timing-GS).
+    CHECK_FALSE(ppu.oamWriteBlocked());
+    CHECK_FALSE(ppu.vramWriteBlocked());
+
+    run(ppu, 4);
     CHECK(ppu.mode() == 3);
     CHECK(ppu.vramBlocked());
     CHECK(ppu.oamBlocked());
+    CHECK(ppu.vramWriteBlocked());
+    CHECK(ppu.oamWriteBlocked());
     CHECK(ppu.vramRead(0x8000) == 0xFF);
     ppu.vramWrite(0x8000, 0x44); // dropped
     CHECK(ppu.peekVram(0x8000) == 0x11);

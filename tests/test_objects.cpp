@@ -2,9 +2,22 @@
 
 #include "core/Ppu.h"
 
+#include <cstdint>
+
 using namespace fourshades;
 
 namespace {
+// Switching the LCD on starts a line that has no mode 2 at all: it reports
+// mode 0, goes straight to mode 3, selects no objects and is 452 dots long
+// (Mooneye acceptance/ppu/lcdon_timing-GS, pinned in tests/test_stat.cpp).
+// Every case below wants an ordinary line, so run the odd one out plus the
+// rest of the frame and come back to a line 0 that behaves like any other.
+void enableLcd(Ppu& ppu, u8 lcdc) {
+    ppu.write(0xFF40, lcdc);
+    while (ppu.lineNumber() != Ppu::kLines - 1) { ppu.tick(); }
+    while (ppu.lineNumber() == Ppu::kLines - 1) { ppu.tick(); }
+}
+
 // Background tile 0 = colour 1; object tile 1 = colour 3 (left half) and
 // colour 0 (right half), so transparency is visible.
 void setUpObjects(Ppu& ppu) {
@@ -24,21 +37,18 @@ void setUpObjects(Ppu& ppu) {
     ppu.write(0xFF47, 0xE4); // BGP straight through
     ppu.write(0xFF48, 0xE4); // OBP0 straight through
     ppu.write(0xFF49, 0x1B); // OBP1 reversed
-    ppu.write(0xFF40, 0x93); // LCD on, BG on, objects on, 8x8
+    enableLcd(ppu, 0x93); // LCD on, BG on, objects on, 8x8
 }
 
 void putObject(Ppu& ppu, int index, u8 y, u8 x, u8 tile, u8 flags) {
-    const u16 base = static_cast<u16>(0xFE00 + index * 4);
-    // Brief bug: hardcoding the re-enable to 0x93 clobbers LCDC bits a test
-    // set before calling putObject (e.g. bit 2 for 8x16 objects). Save and
-    // restore whatever LCDC was in effect instead.
-    const u8 previousLcdc = ppu.read(0xFF40);
-    ppu.write(0xFF40, 0x11); // LCD off so OAM is writable
-    ppu.oamWrite(base, y);
-    ppu.oamWrite(static_cast<u16>(base + 1), x);
-    ppu.oamWrite(static_cast<u16>(base + 2), tile);
-    ppu.oamWrite(static_cast<u16>(base + 3), flags);
-    ppu.write(0xFF40, previousLcdc);
+    // Written the way OAM DMA writes it: never blocked, and - unlike the
+    // LCD-off/LCD-on pair this used to use - it neither clobbers LCDC bits a
+    // test set beforehand nor restarts the PPU on the special line that
+    // switching the LCD on produces.
+    ppu.dmaWriteOam(index * 4 + 0, y);
+    ppu.dmaWriteOam(index * 4 + 1, x);
+    ppu.dmaWriteOam(index * 4 + 2, tile);
+    ppu.dmaWriteOam(index * 4 + 3, flags);
 }
 
 int runLineObjects(Ppu& ppu) {
@@ -91,9 +101,11 @@ TEST_CASE("objects can be flipped in both directions") {
     ppu.write(0xFF40, 0x11);
     ppu.vramWrite(0x801E, 0x00);
     ppu.vramWrite(0x801F, 0x00);
-    ppu.write(0xFF40, 0x93);
+    enableLcd(ppu, 0x93);
     putObject(ppu, 0, 16, 8 + 16, 1, 0x40); // Y flip: row 0 shows row 7
-    while (ppu.frameCount() == 0) { ppu.tick(); }
+    for (const std::uint64_t frame = ppu.frameCount(); ppu.frameCount() == frame;) {
+        ppu.tick(); // to the end of the frame that is being drawn now
+    }
     CHECK(ppu.frame()[16] == 1); // row 7 of the tile is empty, so background
 }
 
@@ -197,14 +209,55 @@ TEST_CASE("each object lengthens mode 3") {
     CHECK(plain == 172);
     putObject(ppu, 0, 16, 8 + 16, 1, 0x00); // screen x = 16, SCX = 0
     const int withOne = runLineObjects(ppu);
-    // Pan Docs' "OBJ penalty algorithm": a flat 6 dots plus a tile term the
+    // Pan Docs' "OBJ Penalty Algorithm": a flat 6 dots plus a tile term the
     // first time an object's leftmost pixel falls in a new tile. Screen
     // x = 16 with SCX = 0 is tile (0 + 16) / 8 = 2, and the object's pixel
     // sits 7 - (16 & 7) = 7 pixels short of that tile's right edge; since
-    // 7 > 2, the tile term is 7 - 2 = 5. So the penalty is the flat 6 plus
-    // 5 = 11 raw dots on top of the plain line's 172 raw dots: 183 raw,
-    // which runLineObjects (counting whole 4-dot M-cycles) reports as 184.
-    CHECK(withOne == 184);
+    // 7 > 2, the tile term is 7 - 2 = 5, for 11 dots in all. Hardware then
+    // charges three fewer dots for the first object fetched on a line
+    // (Mooneye acceptance/ppu/intr_2_mode0_timing_sprites; see
+    // docs/known-divergences.md), so this line costs 8 raw dots on top of
+    // the plain line's 172: 180, which is already a whole number of
+    // M-cycles and is reported as 180.
+    CHECK(withOne == 180);
+    // A second object in the same tile pays only the flat 6, and the
+    // three-dot rebate is spent: 180 + 6 = 186 raw, reported as 188.
+    putObject(ppu, 1, 16, 8 + 17, 1, 0x00); // screen x = 17: same tile 2
+    CHECK(runLineObjects(ppu) == 188);
+    // A third one in a different tile pays 6 plus its own tile term:
+    // screen x = 24 is tile 3, 7 - (24 & 7) = 7, so 5 again: 186 + 11 = 197
+    // raw, reported as 200.
+    putObject(ppu, 2, 16, 8 + 24, 1, 0x00);
+    CHECK(runLineObjects(ppu) == 200);
+}
+
+TEST_CASE("an object off the left edge is charged for its own tile, not for pixel 0's") {
+    // Mooneye acceptance/ppu/intr_2_mode0_timing_sprites measures objects at
+    // OAM X = 0-7 - entirely or mostly off the left edge - costing exactly
+    // what their own X mod 8 says, and an object at OAM X = 0 and one at
+    // OAM X = 8 paying two separate tile terms even though both are fetched
+    // on the dot pixelX_ is still 0. The penalty therefore has to be taken
+    // in background coordinates (SCX + OAM X - 8), which goes negative for
+    // these, rather than at the clamped pixelX_ they trigger on.
+    Ppu ppu;
+    setUpObjects(ppu);
+    CHECK(runLineObjects(ppu) == 172);
+
+    // OAM X = 5: background x = -3, so (-3) & 7 = 5 and the tile term is
+    // 7 - 5 = 2, which is not greater than 2 and so costs nothing. 6 dots,
+    // less the line's three, is 3: 175 raw, reported as 176.
+    putObject(ppu, 0, 16, 5, 1, 0x00);
+    CHECK(runLineObjects(ppu) == 176);
+    // Taken at pixelX_ == 0 instead, the term would have been 7 - 0 - 2 = 5
+    // and the line would have come to 180.
+
+    // OAM X = 0 (background tile -1) and OAM X = 8 (background tile 0) are
+    // two different tiles, so both pay a tile term: 11 + 11 - 3 = 19 on top
+    // of 172, which is 191 raw and is reported as 192.
+    setUpObjects(ppu);
+    putObject(ppu, 0, 16, 0, 1, 0x00);
+    putObject(ppu, 1, 16, 8, 1, 0x00);
+    CHECK(runLineObjects(ppu) == 192);
 }
 
 TEST_CASE("an object at OAM X = 0 always costs eleven dots, unlike the general formula") {
@@ -214,38 +267,28 @@ TEST_CASE("an object at OAM X = 0 always costs eleven dots, unlike the general f
     CHECK(plain == 172);
     putObject(ppu, 0, 16, 0, 1, 0x00); // OAM X = 0
     const int withOne = runLineObjects(ppu);
-    // X = 0 is the special case that always costs the flat 6 plus the full
-    // 5-dot tile term -- 11 dots flat, no tile lookup at all -- so unlike
-    // the general case above it can't vary with pixelX_ or SCX. 172 + 11 =
-    // 183 raw dots, reported as 184: the same number as the x = 16 case
-    // above, but for a different reason (a hardcoded 11, not a computed
-    // one). At SCX = 0 this coincidentally is also what the general formula
-    // would produce (tile 0, toTheRight = 7, 7 - 2 = 5, plus the flat 6 =
-    // 11), so on its own this assertion cannot tell the special case apart
-    // from falling through to the general path. The SCX = 3 assertion below
-    // is what actually separates them.
-    CHECK(withOne == 184);
+    // Pan Docs: "an OBJ with an OAM X position of 0 always incurs a 11-dot
+    // penalty, regardless of SCX". Less the line's three-dot rebate that is
+    // 8 raw dots on top of 172, reported as 180. At SCX = 0 the general
+    // formula happens to give 11 too (background x = -8, (-8) & 7 = 0,
+    // 7 - 0 - 2 = 5, plus the flat 6), so on its own this assertion cannot
+    // tell the special case apart from falling through to the general path.
+    // The SCX = 3 assertion below is what separates them.
+    CHECK(withOne == 180);
 
-    // SCX = 3: the object still triggers at pixelX_ == 0 (it is off-screen,
-    // so it uses the "screenX < 0 && pixelX_ == 0" trigger, not the normal
-    // one), so raw dots are 172 (plain) + 3 (SCX's discard, SCX % 8) + 11
-    // (the flat X = 0 cost) = 186, reported as 188 (rounded up to the next
-    // multiple of 4).
+    // SCX = 3: background x = 3 - 8 = -5, still tile -1 and still the first
+    // object on the line. Raw dots are 172 (plain) + 3 (SCX's discard) + 11
+    // (the flat X = 0 cost) - 3 (the line's rebate) = 183, reported as 184.
     //
     // If the X = 0 special case were deleted and execution fell through to
-    // the general formula instead: tile = (SCX + pixelX_) / 8 = 3 / 8 = 0;
-    // no earlier object used tile 0, so the tile term applies:
-    // toTheRight = 7 - ((3 + 0) & 7) = 7 - 3 = 4; 4 > 2, so the term is
-    // 4 - 2 = 2; penalty = flat 6 + 2 = 8. Raw dots would be
-    // 172 + 3 + 8 = 183, reported as 184 -- a different number from the
-    // correct 188, so unlike the SCX = 0 case above, this assertion does
-    // fail if the special case is removed (confirmed by temporarily
-    // deleting the `object.x == 0` branch in PixelPipeline.cpp: the
-    // rebuilt test failed with 184, exactly as predicted here, then passed
-    // again at 188 once the branch was restored).
+    // the general formula: (-5) & 7 = 3, so the term is 7 - 3 - 2 = 2 and
+    // the penalty is 6 + 2 = 8; raw dots would be 172 + 3 + 8 - 3 = 180,
+    // reported as 180 -- a different number from the correct 184, so unlike
+    // the SCX = 0 case above this assertion does fail if the special case is
+    // removed.
     ppu.write(0xFF43, 0x03); // SCX = 3
     const int withOneScrolled = runLineObjects(ppu);
-    CHECK(withOneScrolled == 188);
+    CHECK(withOneScrolled == 184);
 }
 
 TEST_CASE("clearing LCDC bit 1 hides objects") {

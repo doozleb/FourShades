@@ -2,9 +2,22 @@
 
 #include "core/Ppu.h"
 
+#include <cstdint>
+
 using namespace fourshades;
 
 namespace {
+// Switching the LCD on starts a line that has no mode 2 at all: it reports
+// mode 0, goes straight to mode 3, selects no objects and is 452 dots long
+// (Mooneye acceptance/ppu/lcdon_timing-GS, pinned in tests/test_stat.cpp).
+// Every case below wants an ordinary line, so run the odd one out plus the
+// rest of the frame and come back to a line 0 that behaves like any other.
+void enableLcd(Ppu& ppu, u8 lcdc) {
+    ppu.write(0xFF40, lcdc);
+    while (ppu.lineNumber() != Ppu::kLines - 1) { ppu.tick(); }
+    while (ppu.lineNumber() == Ppu::kLines - 1) { ppu.tick(); }
+}
+
 // Fills tile 0 with a row pattern and points the whole map at it.
 void setUpTile(Ppu& ppu, u8 low, u8 high) {
     ppu.write(0xFF40, 0x11); // LCD off so writes land
@@ -16,7 +29,7 @@ void setUpTile(Ppu& ppu, u8 low, u8 high) {
         ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00);
     }
     ppu.write(0xFF47, 0xE4); // BGP: colour 0->0, 1->1, 2->2, 3->3
-    ppu.write(0xFF40, 0x91); // LCD on, BG on, tile data at 0x8000, map 0x9800
+    enableLcd(ppu, 0x91); // LCD on, BG on, tile data at 0x8000, map 0x9800
 }
 
 // Runs one whole line and returns the dot mode 3 ended on.
@@ -82,7 +95,7 @@ TEST_CASE("SCX and SCY move the viewport") {
     }
     ppu.vramWrite(0x9801, 0x01); // the second tile of the first row
     ppu.write(0xFF47, 0xE4);
-    ppu.write(0xFF40, 0x91);
+    enableLcd(ppu, 0x91);
     runLine(ppu);
     CHECK(ppu.frame()[7] == 0);
     CHECK(ppu.frame()[8] == 3); // tile 1 starts at x = 8
@@ -120,7 +133,7 @@ TEST_CASE("LCDC bit 4 clear selects signed tile addressing from 0x9000") {
     }
     ppu.vramWrite(0x9801, 0xFF); // the second map entry -> tile 0xFF
     ppu.write(0xFF47, 0xE4);
-    ppu.write(0xFF40, 0x81); // LCD on, BG on, LCDC bit 4 CLEAR: signed addressing, map at 0x9800
+    enableLcd(ppu, 0x81); // LCD on, BG on, LCDC bit 4 CLEAR: signed addressing, map at 0x9800
     runLine(ppu);
     const auto& frame = ppu.frame();
     for (int x = 0; x < 8; ++x) {
@@ -146,7 +159,7 @@ TEST_CASE("LCDC bit 3 selects the background map at 0x9C00 instead of 0x9800") {
         ppu.vramWrite(static_cast<u16>(0x9C00 + i), 0x02); // whole 0x9C00 map -> tile 2
     }
     ppu.write(0xFF47, 0xE4);
-    ppu.write(0xFF40, 0x91); // LCDC bit 3 CLEAR: map at 0x9800
+    enableLcd(ppu, 0x91); // LCDC bit 3 CLEAR: map at 0x9800
     runLine(ppu);
     CHECK(ppu.frame()[0] == 1);
 
@@ -168,7 +181,7 @@ TEST_CASE("SCY's low bits pick the tile row drawn on a line (fine scroll)") {
     }
     ppu.write(0xFF47, 0xE4);
     ppu.write(0xFF42, 0x01); // SCY = 1
-    ppu.write(0xFF40, 0x91);
+    enableLcd(ppu, 0x91);
     // Line 0 reads y = line(0) + scy(1) = 1, so row 1 (colour 0) is drawn, not
     // row 0 (colour 3).
     runLine(ppu);
@@ -194,7 +207,7 @@ TEST_CASE("SCY's high bits pick the tile-map row a line is fetched from (map scr
     }
     ppu.write(0xFF47, 0xE4);
     ppu.write(0xFF42, 0x08); // SCY = 8: y / 8 == 1 on line 0, so map row 1 is used
-    ppu.write(0xFF40, 0x91);
+    enableLcd(ppu, 0x91);
     runLine(ppu);
     CHECK(ppu.frame()[0] == 2); // tile 1's colour, proving map row 1 was fetched, not row 0
 }
@@ -217,7 +230,7 @@ void setUpWindow(Ppu& ppu) {
     ppu.write(0xFF47, 0xE4);
     ppu.write(0xFF4A, 0x00); // WY = 0
     ppu.write(0xFF4B, 0x27); // WX = 39, so the window starts at x = 32
-    ppu.write(0xFF40, 0xF1); // LCD on, BG on, window on, window map 0x9C00
+    enableLcd(ppu, 0xF1); // LCD on, BG on, window on, window map 0x9C00
 }
 } // namespace
 
@@ -247,8 +260,8 @@ TEST_CASE("the window does not draw above WY") {
     Ppu ppu;
     setUpWindow(ppu);
     ppu.write(0xFF4A, 0x02); // WY = 2
-    while (ppu.frameCount() == 0) {
-        ppu.tick();
+    for (const std::uint64_t frame = ppu.frameCount(); ppu.frameCount() == frame;) {
+        ppu.tick(); // to the end of the frame that is being drawn now
     }
     CHECK(ppu.frame()[static_cast<std::size_t>(1) * Ppu::kWidth + 40] == 1); // line 1: background
     CHECK(ppu.frame()[static_cast<std::size_t>(2) * Ppu::kWidth + 40] == 3); // line 2: window
@@ -268,9 +281,9 @@ TEST_CASE("consecutive lines draw consecutive window rows when the window is ena
     ppu.write(0xFF40, 0x11);
     ppu.vramWrite(0x8012, 0x00);
     ppu.vramWrite(0x8013, 0x00);
-    ppu.write(0xFF40, 0xF1);
-    while (ppu.frameCount() == 0) {
-        ppu.tick();
+    enableLcd(ppu, 0xF1);
+    for (const std::uint64_t frame = ppu.frameCount(); ppu.frameCount() == frame;) {
+        ppu.tick(); // to the end of the frame that is being drawn now
     }
     CHECK(ppu.frame()[static_cast<std::size_t>(0) * Ppu::kWidth + 40] == 3); // window row 0
     CHECK(ppu.frame()[static_cast<std::size_t>(1) * Ppu::kWidth + 40] == 0); // window row 1
@@ -298,7 +311,7 @@ TEST_CASE("the window's counter does not advance on lines LCDC disables it, so a
     }
     // 0xD1 is 0xF1 with LCDC bit 5 (window enable) cleared: window disabled
     // for lines 0 and 1.
-    ppu.write(0xFF40, 0xD1);
+    enableLcd(ppu, 0xD1);
     runLine(ppu); // line 0: window disabled, background only
     runLine(ppu); // line 1: window disabled, background only
     ppu.write(0xFF40, 0xF1); // window enabled from line 2 onward
@@ -324,9 +337,9 @@ TEST_CASE("a whole frame is drawn line by line") {
         ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00);
     }
     ppu.write(0xFF47, 0xE4);
-    ppu.write(0xFF40, 0x91);
-    while (ppu.frameCount() == 0) {
-        ppu.tick();
+    enableLcd(ppu, 0x91);
+    for (const std::uint64_t frame = ppu.frameCount(); ppu.frameCount() == frame;) {
+        ppu.tick(); // to the end of the frame that is being drawn now
     }
     for (int y = 0; y < Ppu::kHeight; ++y) {
         CHECK(ppu.frame()[static_cast<std::size_t>(y) * Ppu::kWidth] == 1);
