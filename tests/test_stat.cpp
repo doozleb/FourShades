@@ -137,7 +137,7 @@ TEST_CASE("the mode 2 STAT source is pulsed at line 144, on VBlank's own dot") {
     // mode-2-selected STAT interrupt at line 144 as simultaneous: it resets
     // DIV at a fixed point on line 143 and finds the same DIV value at both.
     Ppu ppu;
-    ppu.write(0xFF41, 0x20); // mode 2 source only
+    static_cast<void>(ppu.write(0xFF41, 0x20)); // mode 2 source only
     int vblankTick = -1;
     int statTick = -1;
     for (int tick = 0; tick < 145 * Ppu::kDotsPerLine / 4; ++tick) {
@@ -160,16 +160,16 @@ TEST_CASE("the LY=LYC comparison stops with the PPU and keeps its last result") 
     // acceptance/ppu/stat_lyc_onoff, round by round (verified on every model).
     SUBCASE("round 1: the flag survives the PPU being switched off") {
         Ppu ppu;
-        ppu.write(0xFF41, 0x40); // LYC source
-        ppu.write(0xFF45, 0x90); // LYC = 144
+        static_cast<void>(ppu.write(0xFF41, 0x40)); // LYC source
+        static_cast<void>(ppu.write(0xFF45, 0x90)); // LYC = 144
         while (ppu.ly() != 144) {
             ppu.tick();
         }
         ppu.tick();
         CHECK((ppu.read(0xFF41) & 0x04) != 0); // LY = LYC = 144
-        ppu.write(0xFF40, 0x11);               // LCD off: STAT now reports mode 0
+        static_cast<void>(ppu.write(0xFF40, 0x11));               // LCD off: STAT now reports mode 0
         CHECK(ppu.read(0xFF41) == 0xC4);
-        ppu.write(0xFF45, 0x01); // the comparison clock is not running
+        static_cast<void>(ppu.write(0xFF45, 0x01)); // the comparison clock is not running
         CHECK(ppu.read(0xFF41) == 0xC4);
         // Switching the PPU on restarts it: LY = 0 against LYC = 1 is no
         // match, and a falling flag asks for no interrupt.
@@ -178,14 +178,14 @@ TEST_CASE("the LY=LYC comparison stops with the PPU and keeps its last result") 
     }
     SUBCASE("round 2: an unchanged result produces no new interrupt") {
         Ppu ppu;
-        ppu.write(0xFF41, 0x40);
-        ppu.write(0xFF45, 0x90);
+        static_cast<void>(ppu.write(0xFF41, 0x40));
+        static_cast<void>(ppu.write(0xFF45, 0x90));
         while (ppu.ly() != 144) {
             ppu.tick();
         }
         ppu.tick();
-        ppu.write(0xFF40, 0x11);
-        ppu.write(0xFF45, 0x00); // no effect while the PPU is off
+        static_cast<void>(ppu.write(0xFF40, 0x11));
+        static_cast<void>(ppu.write(0xFF45, 0x00)); // no effect while the PPU is off
         CHECK(ppu.read(0xFF41) == 0xC4);
         // LY = 144 vs LYC = $90 becomes LY = 0 vs LYC = 0: still a match, so
         // the level line never falls and never rises again.
@@ -195,28 +195,28 @@ TEST_CASE("the LY=LYC comparison stops with the PPU and keeps its last result") 
     }
     SUBCASE("round 3: a false result survives too") {
         Ppu ppu;
-        ppu.write(0xFF41, 0x40);
-        ppu.write(0xFF45, 0x00);
+        static_cast<void>(ppu.write(0xFF41, 0x40));
+        static_cast<void>(ppu.write(0xFF45, 0x00));
         while (ppu.ly() != 144) {
             ppu.tick();
         }
         ppu.tick();
-        ppu.write(0xFF40, 0x11);
+        static_cast<void>(ppu.write(0xFF40, 0x11));
         CHECK(ppu.read(0xFF41) == 0xC0);
-        ppu.write(0xFF45, 0x01);
+        static_cast<void>(ppu.write(0xFF45, 0x01));
         CHECK(ppu.read(0xFF41) == 0xC0);
         CHECK((ppu.write(0xFF40, 0x80) & 0x02) == 0); // LY = 0 vs LYC = 1
         CHECK(ppu.read(0xFF41) == 0xC0);
     }
     SUBCASE("round 4: switching the PPU on can raise the line inside that cycle") {
         Ppu ppu;
-        ppu.write(0xFF41, 0x40);
-        ppu.write(0xFF45, 0x00);
+        static_cast<void>(ppu.write(0xFF41, 0x40));
+        static_cast<void>(ppu.write(0xFF45, 0x00));
         while (ppu.ly() != 144) {
             ppu.tick();
         }
         ppu.tick();
-        ppu.write(0xFF40, 0x11);
+        static_cast<void>(ppu.write(0xFF40, 0x11));
         CHECK(ppu.read(0xFF41) == 0xC0);
         // LY = 0 against LYC = 0 is a match the moment the comparison
         // restarts. The ROM has a `di` as the very next instruction, so an
@@ -235,8 +235,8 @@ TEST_CASE("LY leads the mode 0 STAT interrupt by 50 M-cycles, fewer as SCX grows
     for (int scx = 0; scx <= 8; ++scx) {
         CAPTURE(scx);
         Ppu ppu;
-        ppu.write(0xFF43, static_cast<u8>(scx));
-        ppu.write(0xFF41, 0x08); // mode 0 source
+        static_cast<void>(ppu.write(0xFF43, static_cast<u8>(scx)));
+        static_cast<void>(ppu.write(0xFF41, 0x08)); // mode 0 source
         while (ppu.lineNumber() != 2) {
             ppu.tick();
         }
@@ -285,14 +285,14 @@ TEST_CASE("mode 3 lengthens by the object penalty intr_2_mode0_timing_sprites me
         CAPTURE(c.x.size());
         CAPTURE(static_cast<int>(c.x.front()));
         Ppu ppu;
-        ppu.write(0xFF40, 0x11); // LCD off
+        static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off
         for (std::size_t i = 0; i < c.x.size(); ++i) {
             ppu.dmaWriteOam(static_cast<int>(i) * 4 + 0, 0x52); // every object on line 0x42
             ppu.dmaWriteOam(static_cast<int>(i) * 4 + 1, c.x[i]);
             ppu.dmaWriteOam(static_cast<int>(i) * 4 + 2, static_cast<u8>(0x30 + i));
             ppu.dmaWriteOam(static_cast<int>(i) * 4 + 3, 0x00);
         }
-        ppu.write(0xFF40, 0x93); // LCD on, background and objects enabled
+        static_cast<void>(ppu.write(0xFF40, 0x93)); // LCD on, background and objects enabled
         while (ppu.lineNumber() != 0x42) {
             ppu.tick();
         }

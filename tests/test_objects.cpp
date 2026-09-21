@@ -13,7 +13,7 @@ namespace {
 // Every case below wants an ordinary line, so run the odd one out plus the
 // rest of the frame and come back to a line 0 that behaves like any other.
 void enableLcd(Ppu& ppu, u8 lcdc) {
-    ppu.write(0xFF40, lcdc);
+    static_cast<void>(ppu.write(0xFF40, lcdc));
     while (ppu.lineNumber() != Ppu::kLines - 1) { ppu.tick(); }
     while (ppu.lineNumber() == Ppu::kLines - 1) { ppu.tick(); }
 }
@@ -21,7 +21,7 @@ void enableLcd(Ppu& ppu, u8 lcdc) {
 // Background tile 0 = colour 1; object tile 1 = colour 3 (left half) and
 // colour 0 (right half), so transparency is visible.
 void setUpObjects(Ppu& ppu) {
-    ppu.write(0xFF40, 0x11); // LCD off
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off
     for (u16 row = 0; row < 16; row += 2) {
         ppu.vramWrite(static_cast<u16>(0x8000 + row), 0xFF); // tile 0: colour 1
         ppu.vramWrite(static_cast<u16>(0x8001 + row), 0x00);
@@ -34,9 +34,9 @@ void setUpObjects(Ppu& ppu) {
     for (u16 i = 0; i < 0xA0; ++i) {
         ppu.oamWrite(static_cast<u16>(0xFE00 + i), 0x00); // every object off-screen
     }
-    ppu.write(0xFF47, 0xE4); // BGP straight through
-    ppu.write(0xFF48, 0xE4); // OBP0 straight through
-    ppu.write(0xFF49, 0x1B); // OBP1 reversed
+    static_cast<void>(ppu.write(0xFF47, 0xE4)); // BGP straight through
+    static_cast<void>(ppu.write(0xFF48, 0xE4)); // OBP0 straight through
+    static_cast<void>(ppu.write(0xFF49, 0x1B)); // OBP1 reversed
     enableLcd(ppu, 0x93); // LCD on, BG on, objects on, 8x8
 }
 
@@ -98,7 +98,7 @@ TEST_CASE("objects can be flipped in both directions") {
     // Brief bug: it zeroed row 1 (0x8012/0x8013), but an 8-tall Y-flipped
     // object showing screen row 0 selects tile row 7 - 0 = 7
     // (0x801E/0x801F), so that is the row that must be made empty.
-    ppu.write(0xFF40, 0x11);
+    static_cast<void>(ppu.write(0xFF40, 0x11));
     ppu.vramWrite(0x801E, 0x00);
     ppu.vramWrite(0x801F, 0x00);
     enableLcd(ppu, 0x93);
@@ -112,7 +112,7 @@ TEST_CASE("objects can be flipped in both directions") {
 TEST_CASE("8x16 objects use two tiles and ignore the index's low bit") {
     Ppu ppu;
     setUpObjects(ppu);
-    ppu.write(0xFF40, 0x97); // 8x16 objects
+    static_cast<void>(ppu.write(0xFF40, 0x97)); // 8x16 objects
     putObject(ppu, 0, 16, 8 + 16, 0x01, 0x00); // index 1 -> top tile 0
     runLineObjects(ppu);
     CHECK(ppu.frame()[16] == 1); // tile 0 is colour 1, drawn through OBP0
@@ -121,7 +121,7 @@ TEST_CASE("8x16 objects use two tiles and ignore the index's low bit") {
 TEST_CASE("an 8x16 object reads tile + 1 once the screen row reaches 8") {
     Ppu ppu;
     setUpObjects(ppu);
-    ppu.write(0xFF40, 0x97); // 8x16 objects
+    static_cast<void>(ppu.write(0xFF40, 0x97)); // 8x16 objects
     // Y = 8 puts the object's own rows 0-7 off the top of the screen, so
     // line 0 (the only line runLineObjects draws) is the object's row
     // 8 - lineNumber(0) - (y(8) - 16) = 8 - the first row of its bottom
@@ -137,7 +137,7 @@ TEST_CASE("an 8x16 object reads tile + 1 once the screen row reaches 8") {
 TEST_CASE("a Y-flipped 8x16 object flips across all sixteen rows, not each half") {
     Ppu ppu;
     setUpObjects(ppu);
-    ppu.write(0xFF40, 0x97); // 8x16 objects
+    static_cast<void>(ppu.write(0xFF40, 0x97)); // 8x16 objects
     // Y = 16 (screen y = 0) puts line 0 at the object's own row 0. Y-flipped,
     // Pan Docs' rule is row = height - 1 - row = 16 - 1 - 0 = 15, which (via
     // the same contiguous-VRAM arithmetic as the test above) reads tile 1's
@@ -179,7 +179,7 @@ TEST_CASE("an object off the left edge still uses one of the ten slots") {
 TEST_CASE("an object at the left edge stays aligned with pixelX_ when SCX discards pixels") {
     Ppu ppu;
     setUpObjects(ppu);
-    ppu.write(0xFF43, 0x03); // SCX = 3: the line's first 3 background pixels are discarded
+    static_cast<void>(ppu.write(0xFF43, 0x03)); // SCX = 3: the line's first 3 background pixels are discarded
     putObject(ppu, 0, 16, 8, 1, 0x00); // OAM X = 8 -> screen X = 0
     runLineObjects(ppu);
     // The object's X is already in screen space (Pan Docs), so it belongs
@@ -286,7 +286,7 @@ TEST_CASE("an object at OAM X = 0 always costs eleven dots, unlike the general f
     // reported as 180 -- a different number from the correct 184, so unlike
     // the SCX = 0 case above this assertion does fail if the special case is
     // removed.
-    ppu.write(0xFF43, 0x03); // SCX = 3
+    static_cast<void>(ppu.write(0xFF43, 0x03)); // SCX = 3
     const int withOneScrolled = runLineObjects(ppu);
     CHECK(withOneScrolled == 184);
 }
@@ -295,7 +295,7 @@ TEST_CASE("clearing LCDC bit 1 hides objects") {
     Ppu ppu;
     setUpObjects(ppu);
     putObject(ppu, 0, 16, 8 + 16, 1, 0x00);
-    ppu.write(0xFF40, 0x91); // objects off
+    static_cast<void>(ppu.write(0xFF40, 0x91)); // objects off
     runLineObjects(ppu);
     CHECK(ppu.frame()[16] == 1);
 }

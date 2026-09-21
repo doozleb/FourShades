@@ -79,8 +79,8 @@ TEST_CASE("the STAT interrupt fires on a rising edge, not while the line stays h
 
 TEST_CASE("LY=LYC sets the flag and can request an interrupt") {
     Ppu ppu;
-    ppu.write(0xFF45, 0x02); // LYC = 2
-    ppu.write(0xFF41, 0x40); // LYC source
+    static_cast<void>(ppu.write(0xFF45, 0x02)); // LYC = 2
+    static_cast<void>(ppu.write(0xFF41, 0x40)); // LYC source
     const u8 seen = run(ppu, 2 * Ppu::kDotsPerLine + 4);
     CHECK((ppu.read(0xFF41) & 0x04) != 0);
     CHECK((seen & 0x02) != 0);
@@ -102,13 +102,13 @@ TEST_CASE("writing STAT on DMG requests its spurious interrupt in the writing cy
 TEST_CASE("turning the LCD off blanks the screen and holds LY at 0") {
     Ppu ppu;
     run(ppu, 3 * Ppu::kDotsPerLine);
-    ppu.write(0xFF40, 0x11); // LCD off
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off
     CHECK(ppu.ly() == 0);
     CHECK(ppu.mode() == 0);
     CHECK((ppu.read(0xFF41) & 0x03) == 0);
     CHECK(run(ppu, 10 * Ppu::kDotsPerLine) == 0); // no interrupts while off
     CHECK(ppu.ly() == 0);
-    ppu.write(0xFF40, 0x91); // back on: drawing starts again
+    static_cast<void>(ppu.write(0xFF40, 0x91)); // back on: drawing starts again
     // The line the LCD comes on for has no mode 2 at all: it reports mode 0
     // and goes straight to mode 3 eighty dots in.
     run(ppu, 4);
@@ -120,26 +120,26 @@ TEST_CASE("turning the LCD off blanks the screen and holds LY at 0") {
 
 TEST_CASE("VRAM and OAM keep their own storage, and LY is read-only") {
     Ppu ppu;
-    ppu.write(0xFF40, 0x11); // LCD off, so nothing is blocked
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off, so nothing is blocked
     ppu.vramWrite(0x8000, 0x3C);
     ppu.oamWrite(0xFE00, 0x42);
     CHECK(ppu.peekVram(0x8000) == 0x3C);
     CHECK(ppu.peekOam(0xFE00) == 0x42);
     ppu.dmaWriteOam(1, 0x77);
     CHECK(ppu.peekOam(0xFE01) == 0x77);
-    ppu.write(0xFF44, 0x55);
+    static_cast<void>(ppu.write(0xFF44, 0x55));
     CHECK(ppu.read(0xFF44) == 0x00);
 }
 
 TEST_CASE("VRAM is blocked in mode 3, OAM in modes 2 and 3") {
     Ppu ppu;
-    ppu.write(0xFF40, 0x11); // LCD off: nothing blocked
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off: nothing blocked
     ppu.vramWrite(0x8000, 0x11);
     ppu.oamWrite(0xFE00, 0x22);
     CHECK(ppu.vramRead(0x8000) == 0x11);
     CHECK(ppu.oamRead(0xFE00) == 0x22);
 
-    ppu.write(0xFF40, 0x91); // on, but the first line has no mode 2 ...
+    static_cast<void>(ppu.write(0xFF40, 0x91)); // on, but the first line has no mode 2 ...
     while (ppu.lineNumber() != Ppu::kLines - 1) { ppu.tick(); }
     while (ppu.lineNumber() == Ppu::kLines - 1) { ppu.tick(); } // ... so use the next line 0
     CHECK(ppu.lineNumber() == 0);
