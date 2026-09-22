@@ -1,9 +1,9 @@
 # The playable window. `screen_lib` holds the pure functions (palette and
-# integer-scaling math) and the AppController state machine so they can be
-# unit-tested without SDL or a window; `fourshades_app` is the window
-# itself. src/core links neither SDL3 nor screen_lib -- see
+# integer-scaling math), the AppController state machine and the save-file
+# code so they can be unit-tested without SDL or a window; `fourshades_app`
+# is the window itself. src/core links neither SDL3 nor screen_lib -- see
 # tools/check_core_isolation.py.
-add_library(screen_lib STATIC Screen.cpp AppController.cpp Input.cpp)
+add_library(screen_lib STATIC Screen.cpp AppController.cpp Input.cpp Save.cpp)
 target_include_directories(screen_lib PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(screen_lib PUBLIC fourshades_core)
 # Headers only, deliberately not SDL3::SDL3: Input.cpp names SDL's scancodes

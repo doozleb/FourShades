@@ -41,6 +41,13 @@ public:
     Ppu& ppu() { return ppu_; }
     const Ppu& ppu() const { return ppu_; }
 
+    // The cartridge in the slot. Whatever owns the machine needs this to
+    // restore battery-backed RAM before the game runs and to read it back
+    // afterwards; the machine itself neither knows nor cares whether anyone
+    // does.
+    Cartridge& cartridge() { return cart_; }
+    const Cartridge& cartridge() const { return cart_; }
+
     // Which buttons are held, as a mask of the fourshades::button constants.
     // Whatever drives the machine hands it the whole set once per frame; the
     // core never learns what pressed them.

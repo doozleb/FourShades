@@ -27,6 +27,21 @@ public:
     bool headerChecksumOk() const { return headerChecksumOk_; }
     u8 headerChecksum() const { return rom_[0x014D]; }
 
+    // Whether the header declares a battery behind the cartridge RAM, i.e.
+    // whether that RAM is expected to survive a power cycle. The core only
+    // reports it; what persistence means, and where it is kept, is somebody
+    // else's business entirely.
+    bool hasBattery() const { return hasBattery_; }
+
+    // Cartridge RAM, in bank order, exactly as the hardware holds it. Empty
+    // when the cartridge has none.
+    const std::vector<u8>& ram() const { return ram_; }
+
+    // Replaces cartridge RAM wholesale. Refuses, and changes nothing, unless
+    // the size matches exactly: the header decides how much RAM this
+    // cartridge has, and a caller cannot talk it into a different amount.
+    bool setRam(const std::vector<u8>& bytes);
+
 private:
     Cartridge() = default;
     std::size_t romOffset(u16 address) const;
@@ -36,6 +51,7 @@ private:
     std::vector<u8> ram_;
     Kind kind_ = Kind::RomOnly;
     bool headerChecksumOk_ = false;
+    bool hasBattery_ = false;
     std::size_t romBanks_ = 2; // 16 KiB each, always a power of two
     std::size_t ramBanks_ = 0; // 8 KiB each
     bool ramEnabled_ = false;
