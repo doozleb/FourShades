@@ -180,10 +180,11 @@ int PixelPipeline::objectPenalty(const Ppu& ppu, std::size_t index, int& lastTil
     // NOTE: this tile index is in background coordinates (SCX + the object's
     // own X). Once the window is drawing, tile boundaries actually follow
     // WX - 7 instead, so on a line with both a window and an object this term
-    // can be wrong by up to 5 dots. Left for the hardware timing tests in a
-    // later task to arbitrate; see docs/known-divergences.md, "OBJ penalty:
-    // the tile term ignores the window", for the evidence and how to record
-    // the resolution once they do.
+    // can be wrong by up to 5 dots. Left for the hardware timing tests to
+    // arbitrate; see docs/known-divergences.md, "OBJ penalty: the first
+    // object fetched on a line gets a three-dot rebate against Pan Docs'
+    // algorithm", and its "the tile term ignores the window" limitation, for
+    // the evidence and how to record the resolution once they do.
     const int penaltyTile = backgroundX >> 3;
     if (!lastTileValid || penaltyTile != lastTile) {
         lastTile = penaltyTile;
@@ -210,25 +211,63 @@ int PixelPipeline::objectPenalty(const Ppu& ppu, std::size_t index, int& lastTil
     return dots;
 }
 
+int PixelPipeline::fetchStallDots() const {
+    // Dots the fetcher still owes before its Push step runs again. Tile,
+    // DataLow and DataHigh take two dots each (stepFetcher), and Push emits
+    // its first pixel on the dot it runs, so that dot is not counted here -
+    // it is one of the per-pixel dots the caller counts.
+    int dots = 0;
+    switch (step_) {
+    case Step::Tile:
+        dots = 6 - stepDots_;
+        break;
+    case Step::DataLow:
+        dots = 4 - stepDots_;
+        break;
+    case Step::DataHigh:
+        dots = 2 - stepDots_;
+        break;
+    case Step::Push:
+        dots = 0;
+        break;
+    }
+    if (discardFetch_) {
+        dots += 6; // the line's first fetch is thrown away and run again
+    }
+    return dots;
+}
+
 int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
     // One dot per pixel still to be emitted, plus the stall the fetch in
     // progress still owes, plus the stalls the object fetches still to come
     // will owe. The SCX discard is spent in the line's first eight dots, and
     // the fetcher feeds eight pixels per six-dot fetch, so it stays ahead of
-    // the pixel counter on its own - except for a window activation still to
-    // come, which is not a "keeping up" fetch but a full restart (see
-    // kWindowRestartDots), so it is charged separately below.
+    // the pixel counter on its own - except across a window activation,
+    // which is not a "keeping up" fetch but a full restart (see
+    // kWindowRestartDots), so it is charged separately below, both while it
+    // is still to come and while it is running.
     int dots = 160 - pixelX_ + objectDots_;
+    if (queueSize_ == 0 && pixelX_ < 160) {
+        // Nothing is queued, so no pixel can be emitted until the fetcher
+        // pushes again: those dots are on top of the one-per-pixel count.
+        // This is what charges the rest of a window restart already in
+        // progress - stepDot has cleared the queue and put the fetcher back
+        // at its Tile step, and five more dots pass before the pre-empted
+        // pixel is emitted. In ordinary running the queue only empties on
+        // the dot before a Push, where this adds nothing.
+        dots += fetchStallDots();
+    }
     if (!window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached()) {
         // The window has not started on this line yet, but stepDot will
-        // clear the queue and restart the fetcher the moment pixelX_ reaches
-        // its trigger point (WX - 7, the same expression stepDot tests).
-        // When that point is still ahead of the current pixel and on this
-        // line, the dots counted above already include one dot for the
-        // pixel the restart pre-empts, so the pending activation's full
-        // fetch cost has to be added on top of it, not folded into it.
-        const int triggerX = static_cast<int>(ppu.wx()) - 7;
-        if (triggerX >= pixelX_ && triggerX < 160) {
+        // clear the queue and restart the fetcher as soon as pixelX_ is at
+        // or past its trigger point (WX - 7, the same expression stepDot
+        // tests) - on the dot the pixel counter reaches it, or on the very
+        // next dot if the counter is already past it (LCDC bit 5 set
+        // mid-line, or a WX left of the first pixel). Either way the
+        // activation is still to come and still on this line, and the dots
+        // counted above already include one dot for the pixel it pre-empts,
+        // so its full fetch cost is added on top of them, not folded in.
+        if (static_cast<int>(ppu.wx()) - 7 < 160) {
             dots += kWindowRestartDots;
         }
     }
@@ -297,15 +336,15 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
         // WX = 7 lines the window's first pixel up with screen x = 0, so a
         // smaller WX pushes 7 - WX of them off the left edge: the fetcher
         // still starts at the window's own column 0 and those pixels never
-        // reach the LCD. Mealybug Tearoom's m3_wx_4_change and
-        // m3_wx_5_change photograph the three and two pixel versions of it.
+        // reach the LCD. Two Mealybug Tearoom references, photographed from
+        // DMG hardware, show the three and two pixel versions of it.
         // Dropping them here, as the tile is pushed, makes them cost no
         // dots. That half is a tuning decision, not a measurement: the test
-        // that would arbitrate it, m3_window_timing, still fails on the very
-        // lines that measure it, and neither this placement nor charging a
-        // dot each reproduces what its reference shows. See
+        // that would arbitrate the dot cost still fails on the very lines
+        // that measure it, and neither this placement nor charging a dot
+        // each reproduces what its reference shows. See
         // docs/known-divergences.md, "A WX below 7 pushes the window's
-        // leftmost pixels off the screen".
+        // leftmost pixels off the screen", for the ROMs and the figures.
         windowSkip_ = ppu.wx() < 7 ? 7 - static_cast<int>(ppu.wx()) : 0;
         // Cache the row the window is drawing on this line before advancing
         // the PPU's counter for the next one: every fetch below reads

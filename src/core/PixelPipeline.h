@@ -24,8 +24,6 @@ public:
     // line counter, which is the dot's only effect on the PPU.
     bool stepDot(Ppu& ppu, std::array<u8, 160>& line);
 
-    int pixelX() const { return pixelX_; }
-
     // The dots that separate the pipeline from the mode-3 window it runs
     // inside: rendering starts this many dots after mode 3 begins, and the
     // last pixels of the line reach the LCD this many dots after mode 3
@@ -37,16 +35,17 @@ public:
     // LCD, read off the pipeline's state rather than simulated. Mode 3 ends
     // kRenderLag dots before that, and the count is not the pixel count
     // alone: the object fetches still owed over the pixels that are left
-    // stall them, and intr_2_mode0_timing_sprites measures objects at OAM
-    // X 160-167 doing exactly that. The fetcher itself is not counted for
-    // ordinary background pixels - a fetch takes six dots and feeds eight
-    // pixels, so it never binds over the handful of dots at the end of a
-    // line this is asked about - except when the window is about to
-    // activate: stepDot clears the queue and restarts the fetcher from its
-    // first step when the window triggers, and WX can put that trigger on
-    // the line's very last pixel, so this counts a pending activation's
-    // kWindowRestartDots too. See docs/known-divergences.md, "How the
-    // mode-0 boundary is found".
+    // stall them, and the hardware-verified object timing ROM measures
+    // objects at OAM X 160-167 doing exactly that. The fetcher itself is not
+    // counted for ordinary background pixels - a fetch takes six dots and
+    // feeds eight pixels, so it never binds over the handful of dots at the
+    // end of a line this is asked about - except across a window
+    // activation: stepDot clears the queue and restarts the fetcher from
+    // its first step when the window triggers, and WX can put that trigger
+    // on the line's last pixels, so this counts kWindowRestartDots for an
+    // activation still to come and, through fetchStallDots below, whatever
+    // is left of one already running. See docs/known-divergences.md,
+    // "Rendering runs seven dots behind the mode-3 window".
     int dotsRemaining(const Ppu& ppu) const;
 
     // The dots a window activation forces the fetcher to spend before its
@@ -64,6 +63,10 @@ private:
 
     void stepFetcher(const Ppu& ppu);
     u16 tileRowAddress(const Ppu& ppu) const;
+    // Dots the fetcher still owes before its next Push, so dotsRemaining can
+    // charge a stall the queue cannot cover. Zero when Push is next, which
+    // is where an ordinary line spends the one dot its queue is empty.
+    int fetchStallDots() const;
 
     struct ObjectPixel {
         u8 colour = 0;   // 0 is transparent

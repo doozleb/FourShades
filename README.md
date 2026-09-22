@@ -12,10 +12,11 @@ test roms         ██████████░░░░░░   106 / 165
 
 **Status: the PPU is done (piece 3 of 6).** FourShades is a Game Boy that runs
 real test ROMs headless: memory map, MBC1 cartridge, timer, interrupts,
-serial, joypad, OAM DMA, and a dot-by-dot picture-processing unit that draws
+serial, OAM DMA, and a dot-by-dot picture-processing unit that draws
 background, window and objects into a 160x144 frame in memory. It passes
-dmg-acid2. There is still no window to show the frame in and no sound; the
-SDL3 window is the next piece.
+dmg-acid2. There is still no window to show the frame in, no sound, and no
+joypad input - P1 always reports no buttons held; the SDL3 window is the next
+piece.
 
 The two lines above mean:
 
@@ -42,8 +43,9 @@ What still fails is three separate things:
   Mealybug Tearoom tests, which change LCDC, the palettes, the scroll or WX
   part-way through a scanline and measure the result pixel by pixel, plus
   `bully`, `strikethrough`, `ppu_scanline_bgp` and `stop_instr`. Each one's
-  pixel difference is in the group table below, and the decisions behind the
-  drawing are in the divergences document.
+  pixel difference is listed, test by test, in the divergences document,
+  along with the decisions behind the drawing; the group table below has one
+  row per group, not per test.
 - **`sound`, 0 of 12, and one `boot state` test.** There is no APU: the sound
   registers read $FF. `boot_hwio-dmgABCmgb` stops at the first of them,
   $FF10. Sound is piece 5.

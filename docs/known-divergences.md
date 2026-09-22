@@ -75,7 +75,7 @@ mode.
   r8`, which the page notes `halt` is the one exception to (encoding `[hl],
   [hl]` yields `halt` instead).
 
-## STAT at power-on (0xFF41): resolved (2026-09-14)
+## STAT at power-on (0xFF41): resolved (2026-09-22)
 
 - **Test:** `tests/test_gameboy.cpp`'s power-on test checks `FF41 == 0x85`,
   and `tests/test_ppu.cpp`'s "the PPU starts where the boot ROM left it"
@@ -86,13 +86,19 @@ mode.
 - **What FourShades did:** the LCD timing placeholder that stood in for the
   PPU until piece 3 (`src/core/LcdTiming`, deleted when the PPU replaced it)
   started at LY 0 in mode 2, so STAT read $86.
-- **Resolution (2026-09-14):** the PPU powers on at line 153, dot 4, in mode 1.
+- **Resolution (2026-09-22):** the PPU powers on at line 153, dot 4, in mode 1.
   LY therefore already reads 0 (the LY=153 quirk), LYC is 0 so STAT's bit 2 is
   set, and `read(0xFF41)` returns `0x80 | 0x04 | 1` = $85 with no special
   case. The whole machine starts there, so every test that assumed power-on
   was line 0 in mode 2 was given an explicit starting point instead.
-- **Test ROMs:** no ROM gained or lost (106 / 165 before and after).
-  Mooneye's `boot_hwio-dmgABCmgb` still fails, and a traced run on
+- **Test ROMs:** no ROM gained or lost (106 / 165 before and after). One
+  screenshot test's picture did change, which the original version of this
+  entry did not say: `ashiepaws/bully` went from 346 differing pixels to 290,
+  taking the `screen` group's total from 73,628 to 73,572. Measured
+  2026-09-22 by building the commit before this change and running the ROM
+  runner from it: `bully` 346, `strikethrough` 53. It is the only `screen`
+  count that moved, and it is a failing test either way, so no verdict moved
+  with it. Mooneye's `boot_hwio-dmgABCmgb` still fails, and a traced run on
   2026-09-22 puts its first mismatch at $FF10 (NR10), the first sound
   register: the ROM wants $80 and FourShades reads $FF, because there is no
   APU until piece 5. The registers it checks before that, $FF00-$FF0F, all
@@ -160,7 +166,7 @@ mode.
   overlapping a pixel, with X = 2 and X = 6 respectively, are not a tie
   under Pan Docs (X = 2 must win outright), but FourShades lets OAM order
   decide and will let the X = 6 object win if it has the lower OAM index.
-- **Decision:** shipped deliberately in Task 6 (2026-09-14) as an
+- **Decision:** shipped deliberately with the object renderer (2026-09-14) as an
   approximation, to get objects rendering without also building the exact
   priority sort. The code comment at the merge site in
   `PixelPipeline::startObject` names the documented rule, says plainly that
@@ -239,6 +245,22 @@ mode.
   to 5 dots. No test ROM in the 165 currently combines a window and an object
   on the same line in a way that exposes this, so it is left for the Mealybug
   window tests to arbitrate.
+- **Known limitation: the memo remembers one tile, not every tile.** Pan
+  Docs' condition is "If that tile has not been considered by a previous OBJ
+  yet", which is a set of every tile considered so far on the line.
+  `PixelPipeline` keeps one slot (`lastPenaltyTile_`), so an object whose
+  tile matches the one immediately before it pays no tile term, and an
+  object whose tile was considered earlier than that pays it again. The two
+  readings agree while objects arrive in non-decreasing tile order, which is
+  what a left-to-right walk of the line gives, so the 104 cases of the
+  hardware-verified object timing ROM do not tell them apart. They part
+  company off the left edge: every object at OAM X 1-8 triggers at pixel 0
+  in OAM order regardless of its own X, so the tiles can arrive out of order
+  - at SCX = 0, OAM X of 1, 8 and 2 gives tiles -1, 0, -1, and the third
+  object is charged for tile -1 a second time, up to 5 dots that Pan Docs'
+  wording does not charge. No ROM in the 165 puts two such objects either
+  side of a third in a different tile, so nothing here measures which is
+  right; it is one slot because that is what the measured cases needed.
 - **Two details the same test settles, which Pan Docs states loosely:**
   - "The Pixel" is the object's leftmost pixel at screen X = OAM X - 8, and
     that is used even when it is off the left edge. Objects at OAM X = 0-7 are
@@ -320,11 +342,42 @@ alone explains it.
   (WX up to 166), and `Ppu::stepDot` clears the queue and restarts the
   fetcher from its first step the moment the trigger fires, so that pixel
   waits a full `PixelPipeline::kWindowRestartDots` (six dots) rather than
-  one. `dotsRemaining` sees this coming - the window enabled, WY already
-  reached, no activation yet this line, and the trigger point still at or
-  ahead of the current pixel - and charges the six dots before it happens,
-  which no ROM in the suite exercises but the unit tests pin directly. Mode
-  0 is entered when the count drops to the line's lag. This replaced an
+  one. `dotsRemaining` charges those six dots twice over, in two different
+  states: while the activation is still to come (the window enabled, WY
+  already reached, no activation yet this line, and the trigger point
+  anywhere on the line), and while one is actually running, through
+  `fetchStallDots` - if the queue is empty, no pixel can be emitted until
+  the fetcher pushes again, and those dots are on top of the one-per-pixel
+  count. Mode 0 is entered when the count drops to the line's lag.
+  **The second of those was missing until 2026-09-22**, and it is a genuine
+  defect that was in the shipped code, not a tidying-up. On the dot the
+  window actually triggered, `window_` turned true and the six-dot stall
+  then in progress was counted by nothing at all: the count read five dots
+  short, so mode 3 could end up to five dots early. It bites when the trigger
+  lands at pixel 153 or later, which is where a line has only the render lag
+  left to run: five dots early at WX 160 on a bare line, one fewer per WX
+  after that, and nothing from WX 165, where the short count and the true one
+  cross the lag on the same dot. What was *measured*, on 2026-09-22, by
+  running WX 156 to 167 through both versions of the arithmetic: STAT's own
+  mode-3 length, which only changes on whole M-cycles, came out one M-cycle
+  short for WX 160, 161, 162 and 163 and identical for every other WX in
+  that range - WX 164's single dot rounds away. An object fetched late on the
+  line adds to both counts, so which WX values differ moves with it.
+  No ROM in the 165 puts a window there, so nothing scored moved when it was
+  fixed (SingleStepTests 499 / 500, test ROMs 106 / 165, the `screen` group's
+  total unchanged at 73,572); `tests/test_pixel_pipeline.cpp`'s "a window
+  trigger inside the line's last dots still lengthens mode 3 by six dots"
+  pins it at WX 160, and was watched failing first - mode 3 came out four
+  dots short of the six-dot cost, the five rounded to the M-cycle.
+  The same arithmetic had a second hole: the pending charge was made only
+  when the trigger point was at or ahead of the pixel counter, so setting
+  LCDC bit 5 mid-line with WX - 7 already behind the counter - which restarts
+  the pipeline on the very next dot - was never charged for. It is charged
+  now. Unlike the first hole, no sequence has been found where that one
+  changes the boundary the PPU picks, because such a restart can only happen
+  on a dot at or after the one the boundary was already decided on; it is
+  fixed because the predicate was wrong, not because a wrong answer was
+  observed. This replaced an
   earlier version that ran a *copy* of the pipeline seven dots forward: the
   two were run side by side over the whole 165-ROM suite and the unit tests,
   disagreed on no dot of any line, and the count is the cheaper and the
@@ -340,8 +393,10 @@ alone explains it.
   `Ppu::stepDot` therefore enters mode 0 unconditionally on the dot the line
   finishes, whatever the prediction said. This is dead code today, not just
   untested: `dotsRemaining` is exactly 0 at the dot the 160th pixel is
-  emitted (no pixels and no pending activation left to count), so the check
-  above it always sets mode 0 on that dot or an earlier one first. It stays
+  emitted - no pixels left, no pending activation left to count (one that
+  had not fired by then would have fired on that dot), and the fetcher's own
+  stall charged only while pixels remain - so the check above it always sets
+  mode 0 on that dot or an earlier one first. It stays
   in as a guard against a future regression in the formula, not because
   anything currently reaches it.
 - **What this is physically.** The natural reading is that mode 3 ends when
@@ -447,7 +502,7 @@ alone explains it.
   below) and went 13281 -> 13799.
 - **Checked:** 2026-09-21.
 
-## Screenshot tests still failing after Task 9 (2026-09-21)
+## Screenshot tests still failing once the pixel pipeline was finished (2026-09-21)
 
 Twenty-six of the thirty tests in the `screen` group still fail. Each is
 listed with the number of the 23,040 pixels that differ, what it measures and
@@ -480,7 +535,7 @@ records for `m3_lcdc_win_en_change_multiple`.
 | `m3_lcdc_obj_en_change` | 146 | mid-line LCDC bit 1 changes |
 | `m3_wx_4_change` | 229 | window re-activation |
 | `m3_lcdc_obj_size_change_scx` | 270 | mid-line LCDC bit 2 changes |
-| `ashiepaws/bully` | 346 | not diagnosed |
+| `ashiepaws/bully` | 290 | not diagnosed |
 | `m3_lcdc_obj_size_change` | 410 | mid-line LCDC bit 2 changes; 60 worse under the seven-dot shift, cause unknown (see below) |
 | `m3_obp0_change` | 432 | object pixels in the leftmost 18 columns |
 | `m3_scx_low_3_bits` | 540 | mid-line SCX changes inside the fetch |
@@ -541,11 +596,15 @@ Notes on the ones that are more than "a behaviour not written yet":
   read. Sampling the tile index, and both bitplane bytes, on the first dot of
   their two-dot fetch stages instead of the second was tried; it took this
   test from 80 to 77 but the `screen` group as a whole from 73,628 differing
-  pixels to 78,855, so it was reverted. The remaining error is under two dots
-  and is not yet pinned to a stage.
+  pixels to 78,855, so it was reverted. Those two figures are the pair as it
+  was measured, before the power-on change above moved `ashiepaws/bully` by
+  56 pixels; the group's total today, and the sum of the table above, is
+  73,572. What decided the revert is the 5,000-pixel rise, which the
+  power-on change does not touch either way. The remaining error is under two
+  dots and is not yet pinned to a stage.
 - **`m3_lcdc_obj_size_change` (410) and `m3_lcdc_obj_size_change_scx`
   (270).** These two probe the same thing - LCDC bit 2, the object height
-  bit, written during mode 3 - and Task 9's seven-dot shift moved them in
+  bit, written during mode 3 - and the seven-dot rendering lag moved them in
   opposite directions: the plain variant went from 350 differing pixels to
   410, its `_scx` sibling from 350 to 270. **Why is not known.** The count
   rose by 60 under a change that lowered the group as a whole by 22%, and
@@ -572,8 +631,8 @@ Notes on the ones that are more than "a behaviour not written yet":
   mode 3; on line 100 FourShades lands those writes on line dots 100, 108,
   116, 124 and so on and draws their seams from pixel 1, while the reference
   puts the first seam at pixel 13 - a uniform 12-dot (three M-cycle) offset
-  over the whole image, in the opposite direction to the seven-dot lag Task 9
-  added (it was a five-dot offset before).
+  over the whole image, in the opposite direction to the seven-dot lag that
+  was added with it (it was a five-dot offset before).
   - **Which reference.** `tools/roms/tests.json` lists three images for this
     ROM, which is this harness's encoding of *alternative accepted outputs*:
     `tools/roms/RomRun.cpp` passes on a match to any one of them and reports
@@ -609,9 +668,16 @@ Notes on the ones that are more than "a behaviour not written yet":
     them.
 - **`daid/stop_instr` (22739).** Out of scope for this task: it needs STOP to
   wake, which needs joypad input. See the STOP entry at the top of this file.
-- **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (346).** Not
-  diagnosed. Both were failing before this task with the same counts, so
-  nothing here moved them either way.
+- **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (290).** Neither is
+  diagnosed, and both were failing before this task and still are. Their
+  counts did not both stand still, though, and an earlier version of this
+  entry said they did. `strikethrough` has been 53 throughout.
+  `bully` was 346 until the power-on change above (the PPU starting at line
+  153 in mode 1 rather than line 0 in mode 2) took it to 290 - measured on
+  2026-09-22 by building the commit before that change and running the ROM
+  runner from it. That commit's own entry recorded only that no ROM's
+  verdict moved, which is a narrower claim than nothing moving, and this
+  section then kept the old figure.
 
 - **Checked:** 2026-09-22. Every count in this section is from a full run of
   `rom_runner`; the per-pixel diff maps quoted above were taken from the
@@ -620,22 +686,41 @@ Notes on the ones that are more than "a behaviour not written yet":
 
 ## The OAM corruption bug: the phase Pan Docs does not give (2026-09-22)
 
-FourShades implements the bug as Pan Docs describes it
-([OAM Corruption Bug](https://gbdev.io/pandocs/OAM_Corruption_Bug.html)):
-OAM is 20 rows of 8 bytes; during mode 2 the PPU reads one row per M-cycle;
-any CPU access anywhere in $FE00-$FEFF during one of those M-cycles scrambles
-the row the PPU is reading, and the address used and the value written have no
-say in it. The 16-bit increment/decrement unit counts as an access because it
-is tied straight to the address bus, which is what `Bus::iduCycle` reports.
-All three of Pan Docs' patterns are implemented verbatim, the four-input
-"Read During Increase/Decrease" expression included. What follows is what Pan
-Docs leaves open and what decided it.
+Pan Docs describes the bug
+([OAM Corruption Bug](https://gbdev.io/pandocs/OAM_Corruption_Bug.html)) in
+terms of a read FourShades does not have: OAM is 20 rows of 8 bytes; during
+mode 2 the PPU reads one row per M-cycle; any CPU access anywhere in
+$FE00-$FEFF during one of those M-cycles scrambles the row the PPU is reading,
+and the address used and the value written have no say in it. The 16-bit
+increment/decrement unit counts as an access because it is tied straight to
+the address bus, which is what `Bus::iduCycle` reports.
 
-- **Which row an access collides with.** Pan Docs says the PPU reads one row
+**There is no per-row read here to collide with.** Mode 2 in FourShades is
+`Ppu::scanOam()`, which runs once, over all 40 objects, at dot 80, with no
+internal row pointer - `src/core/Ppu.h` says so at the declaration. What is
+implemented is the *effect*: all three of Pan Docs' patterns verbatim, the
+four-input "Read During Increase/Decrease" expression included, applied to
+the row `Ppu::oamScanRow()` names for the M-cycle the access landed in. That
+row index is a convention fitted to put the OAM-bug ROMs' corruptions where
+they measure them, not a row a PPU read is ever caught mid-flight on, and the
+rest of this entry says what fitted it.
+
+One consequence of having no per-row read, which the ROMs do not arbitrate:
+because the whole of OAM is read at dot 80, a corruption applied to a row the
+per-row model would already have passed still changes which objects that line
+selects. On hardware, scrambling a row the PPU has finished reading could not
+change the line's selection, only what a later read of OAM sees. Nothing in
+the 165 test ROMs distinguishes the two - the OAM-bug ROMs check OAM's
+contents, not the objects drawn from it - and it is recorded here rather than
+modelled.
+
+What follows is what Pan Docs leaves open and what decided it.
+
+- **Which row an access is fitted to.** Pan Docs says the PPU reads one row
   per M-cycle but not where inside the line the first of the twenty sits
   relative to a CPU access. `Ppu::oamScanRow` answers `dot_ / 4`, evaluated at
   the end of the M-cycle (`GameBoy` ticks the hardware and then performs the
-  access), so an access collides with the row whose read begins at that
+  access), so an access is fitted to the row whose read would begin at that
   boundary. Three ROMs pin it. The scanline-timing one steps a 16-bit register
   at successive offsets from a frame boundary and requires no corruption one
   M-cycle before the window, corruption at its first and last M-cycle, and
@@ -735,26 +820,41 @@ decision taken in the CPU task and left alone here. So an instruction whose
 the combined read-and-write one.
 
 **The gap includes the CB prefix's second byte, not just genuine operands.**
-`Cpu::executeCb` calls `bus_.iduCycle(regs.pc)` of its own accord, but it does
-so *before* calling `fetch8`, with no tick in between since the M-cycle that
-fetched the `CB` byte itself - so that call reports against the M-cycle
-`step()` already reported (where the write flag is already set) and changes
-nothing. The actual `fetch8` call that follows reads the CB-instruction's own
-byte on a fresh M-cycle and, like any other `fetch8` call, reports no IDU
-write for it. An earlier version of this entry said FourShades reports the
+`Cpu::executeCb` reads that byte with `fetch8`, on its own M-cycle, and like
+any other `fetch8` call it reports no IDU write for the PC increment that
+goes with it. An earlier version of this entry said FourShades reports the
 IDU for opcode fetches "including a CB prefix's second byte" - that was
 wrong; the CB byte gets exactly the plain-read shape this section describes
 as unclosed, the same as a genuine operand byte would.
+
+**`executeCb` used to make a manual `bus_.iduCycle(regs.pc)` call of its own,
+and the claim that it was a harmless no-op was wrong in exactly the case this
+section is about.** It was deleted on 2026-09-22. `Cpu::step` advances PC
+before calling `execute`, so inside `executeCb` `regs.pc` is the *CB byte's*
+address, not the prefix's, and no tick has run since the prefix was fetched:
+the call landed on the M-cycle `step()` had already reported, but named the
+wrong address. Where both addresses are inside OAM, or both outside it, that
+is genuinely a no-op - the row a corruption lands on comes from the dot, not
+from the address, and the write flag was already set. It is not a no-op for a
+prefix at $FDFF, which is one of the two addresses Pan Docs' unimplemented
+case names: `step()` reports $FDFF, outside OAM, and the manual call reported
+$FE00, inside it, so the M-cycle corrupted a row on the strength of an
+address the CPU never drove. Every other `iduCycle` call site reports the
+address the unit stepped *from*. The call was deleted rather than moved,
+because there is nothing left for it to report that `step()` has not; the
+gap this section records is unchanged by it, and closing that gap means
+changing `fetch8` for every operand byte. `tests/test_cpu_idu.cpp` states
+both halves: a CB instruction reports the prefix fetch only, and a CB prefix
+at $FDFF names no address inside OAM.
 
 **Measured against the full suite, not just `oam bug` and SingleStepTests.**
 Adding the call to `fetch8` was tried and the full 165-ROM suite was run with
 it in place: test roms 106/165, with every group unchanged, including
 `oam bug` 7/7; SingleStepTests stays 499/500. The suite is neutral on this
 gap in full, not merely on the seven `oam bug` ROMs. The change was reverted
-rather than landed on no evidence. Landing it properly would also mean
-deleting `executeCb`'s now-redundant manual `bus_.iduCycle` call (harmless
-today only because it is a no-op against an already-set write flag) and
-updating `tests/test_cpu_idu.cpp` in the same change.
+rather than landed on no evidence. Deleting the manual call above is neutral
+in the same way, measured the same way: test roms 106/165 with no group
+moved, SingleStepTests 499/500, every doctest case passing.
 
 - **Checked:** 2026-09-22, from a full `rom_runner` run over all 165 ROMs
   (`oam bug` 7/7, test roms 106/165, no group moved) and a full `sst_runner`
@@ -767,7 +867,7 @@ Pan Docs gives cycle counts but not every within-M-cycle order. These are the
 choices FourShades makes, and the hardware-verified test ROMs that pin them.
 
 - **Advance, then access.** Every bus call first advances the timer, serial
-  port, LCD timing and OAM DMA by one M-cycle, then does the CPU's read or
+  port, PPU and OAM DMA by one M-cycle, then does the CPU's read or
   write. All 13 Mooneye `timer` tests (which race TIMA, TMA, TAC and DIV
   writes against the reload and overflow cycles) pass with this order, so it
   was kept.
@@ -803,12 +903,14 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   is then locked out for the 160 M-cycles that copy bytes, the last included
   (`oam_dma_timing`, `oam_dma_restart`, `push_timing`, `rst_timing`,
   `call_timing2`, `call_cc_timing2`).
-- **The WY == LY coincidence ("Y condition") latches independently of LCDC
-  bit 5.** `Ppu::stepDot` sets `windowReached_` at the start of mode 2 on
-  every line whenever `LY == WY`, whether or not the window is enabled at
-  that instant. Bit 5 is checked separately, in `PixelPipeline::stepDot`,
+- **The WY == LY coincidence ("Y condition") latches at the beginning of
+  each scanline, and independently of LCDC bit 5.** `Ppu::latchWindowY`,
+  called from `Ppu::stepDot` on the dot a drawn line begins, sets
+  `windowReached_` whenever `LY == WY`, whether or not the window is enabled
+  at that instant. Bit 5 is checked separately, in `PixelPipeline::stepDot`,
   only once the X counter reaches WX − 7, and the window is drawn there only
-  if bit 5 is set at that moment. Pan Docs' own model keeps these two checks
+  if bit 5 is set at that moment.
+  Pan Docs' own model keeps these two checks
   apart the same way: "At the beginning of each scanline, if the value of
   `WY` is equal to `LY`, the *Y condition* becomes true (and remains so for
   subsequent scanlines)" — with no mention of LCDC bit 5 — and only the
@@ -840,7 +942,23 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   ungated latch (`the window's counter does not advance on lines LCDC
   disables it...` in `tests/test_pixel_pipeline.cpp`) gets restructured to
   match — the implementation is not to be bent to keep that test passing.
-  Checked 2026-09-14.
+  **Where in the line the latch sits was wrong here until 2026-09-22**, in
+  the code and in this entry. The latch sat at the start of mode 3, dot 80,
+  so a WY write landing during a line's OAM scan still took effect on that
+  line - which Pan Docs' "beginning of each scanline" excludes - while this
+  entry said it was at the start of mode 2, which is what Pan Docs says and
+  what the code did not do. Nothing in the 165 test ROMs measures which of
+  the two it is, so Pan Docs decides it under the rule at the top of this
+  file, and the latch moved to the beginning of the line. The line the LCD
+  is switched on for has no line boundary of its own - the PPU picks it up
+  one M-cycle in - so it latches at that pick-up, the only beginning that
+  line has. This is a change of behaviour, and it moved no score:
+  SingleStepTests 499 / 500, test ROMs 106 / 165 with every group identical,
+  and the `screen` group's differing-pixel total unchanged at 73,572. One
+  unit test (`the window does not draw above WY`) had been setting WY during
+  the OAM scan of the line it expected the write to govern, and now sets it
+  with the LCD off, before that line begins.
+  Checked 2026-09-14; the placement within the line, 2026-09-22.
 - **STAT's mode field, and the STAT interrupt sources, trail the PPU's own
   mode by one M-cycle; the VRAM and OAM locks do not.** Pan Docs describes
   STAT bits 1-0 only as "Indicates the PPU's current status"

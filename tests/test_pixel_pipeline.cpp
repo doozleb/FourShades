@@ -402,10 +402,39 @@ TEST_CASE("a window trigger on the line's last pixel still lengthens mode 3 by s
     CHECK(withWindow == plain + 8);
 }
 
+TEST_CASE("a window trigger inside the line's last dots still lengthens mode 3 by six dots") {
+    // WX = 160 puts the trigger point (WX - 7) at pixelX_ = 153, which is
+    // where a line with no window to come has exactly PixelPipeline::
+    // kRenderLag dots left and mode 0 is decided. The restart happens one
+    // dot later, so the six dots it costs have to keep being counted while
+    // the restart is actually running: the queue is empty and the fetcher is
+    // back at its first step, so no pixel moves for five more dots. A count
+    // that charges the restart only while it is still to come reads five
+    // dots short here and ends mode 3 five dots early - four, once the
+    // M-cycle sampling below rounds it. The figures are picked so both
+    // answers land on whole M-cycles: plain + 8 (correct) against plain + 4.
+    Ppu ppu;
+    setUpWindow(ppu);
+    static_cast<void>(ppu.write(0xFF40, 0xD1)); // window off for now
+    const int plain = runLine(ppu);
+    static_cast<void>(ppu.write(0xFF4B, 0xA0)); // WX = 160
+    static_cast<void>(ppu.write(0xFF40, 0xF1)); // window on
+    const int withWindow = runLine(ppu);
+    CHECK(withWindow == plain + 8);
+}
+
 TEST_CASE("the window does not draw above WY") {
     Ppu ppu;
     setUpWindow(ppu);
+    // setUpWindow leaves WY = 0 and the PPU at the top of a line, and the Y
+    // condition is latched at the beginning of each scanline (Pan Docs,
+    // "Window rendering criteria"), so WY has to be changed with no line in
+    // progress for the new value to govern the frame below. Landing the
+    // write during a line's OAM scan instead would leave the condition
+    // already latched from WY = 0, which is the behaviour, not the test.
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off
     static_cast<void>(ppu.write(0xFF4A, 0x02)); // WY = 2
+    enableLcd(ppu, 0xF1);
     for (const std::uint64_t frame = ppu.frameCount(); ppu.frameCount() == frame;) {
         ppu.tick(); // to the end of the frame that is being drawn now
     }
@@ -491,3 +520,4 @@ TEST_CASE("a whole frame is drawn line by line") {
         CHECK(ppu.frame()[static_cast<std::size_t>(y) * Ppu::kWidth] == 1);
     }
 }
+

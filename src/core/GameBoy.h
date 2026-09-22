@@ -15,8 +15,8 @@
 namespace fourshades {
 
 // The whole machine except the screen. It is the CPU's Bus: every read,
-// write or idle first advances the timer, serial port, LCD timing and OAM
-// DMA by one M-cycle, then performs the access.
+// write or idle first advances the timer, serial port, PPU and OAM DMA by one
+// M-cycle, then performs the access.
 class GameBoy final : public Bus {
 public:
     // Starts in the state a DMG (revisions A-C) boot ROM leaves behind, at
