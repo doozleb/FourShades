@@ -94,8 +94,8 @@ mode.
 - **Test ROMs:** no ROM gained or lost (106 / 165 before and after).
   Mooneye's `boot_hwio-dmgABCmgb` still fails, and a traced run on
   2026-09-22 puts its first mismatch at $FF10 (NR10), the first sound
-  register: it reads $FF here because there is no APU until piece 5, where
-  the ROM wants $80. The registers it checks before that, $FF00-$FF0F, all
+  register: the ROM wants $80 and FourShades reads $FF, because there is no
+  APU until piece 5. The registers it checks before that, $FF00-$FF0F, all
   match. The ROM stops at its first mismatch, so nothing is claimed here
   about the registers after $FF10 — STAT ($FF41) among them is never reached.
 - **Checked:** 2026-09-22.
