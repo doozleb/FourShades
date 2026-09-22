@@ -18,29 +18,30 @@ u8 shadeFor(u8 palette, u8 colour);
 class PixelPipeline {
 public:
     // Called when mode 3 begins.
-    void startLine(Ppu& ppu);
+    void startLine(const Ppu& ppu);
     // One dot of mode 3. Returns true once 160 pixels have been emitted.
-    // Non-const: starting the window advances the PPU's window line counter.
-    // That is the dot's only effect on the PPU, and `trial` suppresses it, so
-    // a copy of the pipeline can be run forward to see what it is about to do.
-    bool stepDot(Ppu& ppu, std::array<u8, 160>& line, bool trial = false);
+    // Non-const in the PPU: starting the window advances the PPU's window
+    // line counter, which is the dot's only effect on the PPU.
+    bool stepDot(Ppu& ppu, std::array<u8, 160>& line);
 
     int pixelX() const { return pixelX_; }
 
     // The dots that separate the pipeline from the mode-3 window it runs
     // inside: rendering starts this many dots after mode 3 begins, and the
     // last pixels of the line reach the LCD this many dots after mode 3
-    // ends. See finishesWithin below and docs/known-divergences.md,
+    // ends. See dotsRemaining below and docs/known-divergences.md,
     // "Rendering runs seven dots behind the mode-3 window".
     static constexpr int kRenderLag = 7;
 
-    // Whether the line would be finished within `dots` more dots, answered by
-    // running a copy of the pipeline that far forward. Mode 3 ends kRenderLag
-    // dots before the last pixel reaches the LCD, and how many dots are left
-    // is not a function of the pixel count alone: an object fetched over the
-    // last few pixels stalls them. Cheap because the only dots it is ever
-    // asked about are the handful at the very end of a line.
-    bool finishesWithin(Ppu& ppu, int dots) const;
+    // How many more dots the line needs before its last pixel reaches the
+    // LCD, read off the pipeline's state rather than simulated. Mode 3 ends
+    // kRenderLag dots before that, and the count is not the pixel count
+    // alone: the object fetches still owed over the pixels that are left
+    // stall them, and intr_2_mode0_timing_sprites measures objects at OAM
+    // X 160-167 doing exactly that. The fetcher itself is not counted - a
+    // fetch takes six dots and feeds eight pixels, so it never binds over
+    // the handful of dots at the end of a line this is asked about.
+    int dotsRemaining(const Ppu& ppu) const;
 
 private:
     enum class Step { Tile, DataLow, DataHigh, Push };
@@ -55,7 +56,13 @@ private:
     };
 
     // Fetches line object `index` and merges it into the pixels in the queue.
-    void startObject(Ppu& ppu, std::size_t index);
+    void startObject(const Ppu& ppu, std::size_t index);
+    // The dots line object `index` costs, given the running state of the
+    // per-line penalty memo. Takes that state by reference so dotsRemaining
+    // can walk the objects still to come over its own copy of it without
+    // touching the pipeline's.
+    int objectPenalty(const Ppu& ppu, std::size_t index, int& lastTile,
+                      bool& lastTileValid, bool& penaltyStarted) const;
 
     Step step_ = Step::Tile;
     int stepDots_ = 0;   // dots spent in the current step

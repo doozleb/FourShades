@@ -245,6 +245,16 @@ Not a divergence: a timing model FourShades now implements, recorded here
 because two bodies of hardware-verified evidence pin its two ends and neither
 alone explains it.
 
+- **Pan Docs:** silent on any gap between mode 3 and the pixels reaching the
+  LCD. [Rendering](https://gbdev.io/pandocs/Rendering.html) explains mode 3's
+  172-dot minimum by the fetcher's two warm-up fetches at the top of the
+  mode, and the placement this entry replaces - the fetcher starting on the
+  first dot of mode 3 - was derived from exactly that reading. The Mealybug
+  references are photographed from real DMG hardware and put pixel 0 seven
+  dots later than that placement does. Under the rule at the top of this
+  file a hardware-verified image outranks a Pan Docs sentence that turns out
+  to be a simplification, so the drawing moved and the mode boundaries, which
+  the hardware-verified timing ROMs measure, did not.
 - **What the Mealybug Tearoom images measure.** Every `m3_*` test runs its
   handler from the mode-2 STAT interrupt in a field of NOPs and writes a PPU
   register a known number of cycles later, so each reference image names the
@@ -257,26 +267,52 @@ alone explains it.
   line dot 100**, twenty dots after mode 3 begins on dot 80.
 - **What the LCD timing ROMs measure.** `intr_2_mode3_timing` and
   `intr_2_mode0_timing` ("verified: DMG, MGB, SGB, SGB2, CGB, AGB, AGS") pin
-  STAT's own view: mode 3 is reported for exactly 172 dots, from line dot 81
-  to line dot 252 inclusive, with the PPU's internal transitions an M-cycle
-  earlier. Those must not move, and don't.
+  STAT's own view on the bare lines they set up: mode 3 is reported there for
+  172 dots, from line dot 81 to line dot 252 inclusive, with the PPU's
+  internal transitions an M-cycle earlier. 172 is the minimum, not a
+  constant: SCX's low bits, the window's restart and every object fetched on
+  the line lengthen mode 3, as the OBJ-penalty entry above documents and
+  `intr_2_mode0_timing_sprites` measures directly. Those two ends must not
+  move, and don't.
 - **FourShades before this task** started the fetcher on the first dot of
   mode 3, which put pixel 0 on line dot 93 - seven dots early against the
   images, so every mid-line write landed seven pixels to the right of where
-  hardware puts it. That single number accounted for most of the failing
-  screenshot tests: `m3_bgp_change` alone went from 5084 differing pixels to
-  517 when the seven dots were added.
+  hardware puts it. Correcting it moved the `screen` group's differing-pixel
+  total from 118,088 to 91,894 - a fifth of the group's error, and the
+  largest single step found in that task - but on its own it made no test
+  pass and lost none. `m3_bgp_change` went from 5084 differing pixels to 517
+  and needed the palette seam and the line-0 entry below before it matched
+  exactly.
 - **FourShades now** runs the pipeline `PixelPipeline::kRenderLag` = 7 dots
   behind the mode-3 window at both ends. The fetcher starts on line dot 87
   and pixel 0 is emitted on dot 100; mode 3 still ends where it did, seven
   dots before the last pixel reaches the LCD, so the final seven pixels of
   every line are drawn during the first dots of HBlank. `Ppu::stepDot` keeps
-  the pipeline running after `mode_` has gone to 0 for exactly that reason,
-  and `PixelPipeline::finishesWithin` answers "will the line be done in seven
-  more dots?" by running a copy of the pipeline that far forward - a pixel
-  count alone would not do, because an object fetched over the last few
-  pixels stalls them, and `intr_2_mode0_timing_sprites` measures objects at
-  OAM X 160-167 doing exactly that.
+  the pipeline running after `mode_` has gone to 0 for exactly that reason.
+- **How the mode-0 boundary is found, seven dots early.**
+  `PixelPipeline::dotsRemaining` counts what the line still owes: one dot per
+  pixel not yet emitted, plus the stall the fetch in progress still owes,
+  plus the penalties of the object fetches still to come over those pixels.
+  A pixel count alone would not do, because an object fetched over the last
+  few pixels stalls them and `intr_2_mode0_timing_sprites` measures objects
+  at OAM X 160-167 doing exactly that; the fetcher itself is not counted,
+  because a fetch takes six dots and feeds eight pixels, so it is never the
+  binding constraint over the handful of dots at the end of a line. Mode 0
+  is entered when that count drops to the line's lag. This replaced an
+  earlier version that ran a *copy* of the pipeline seven dots forward: the
+  two were run side by side over the whole 165-ROM suite and the unit tests,
+  disagreed on no dot of any line, and the count is the cheaper and the
+  narrower of the two - it reads live state at the dot it is asked rather
+  than projecting a frozen register snapshot seven dots ahead, and it needs
+  no mutable access to the PPU. It is still a prediction: a register the CPU
+  changes *after* the boundary has been decided is not something any
+  predictor here can see, and no ROM in the suite currently pairs such a
+  change with a tail object.
+- **The backstop.** If the count were ever wrong in the direction that never
+  fires, `mode_` would sit at 3 with the pipeline already stopped, and STAT
+  would report mode 3 with VRAM locked until the next line's mode 2.
+  `Ppu::stepDot` therefore enters mode 0 unconditionally on the dot the line
+  finishes, whatever the prediction said. Nothing in the suite reaches it.
 - **What this is physically.** The natural reading is that mode 3 ends when
   the PPU has finished reading VRAM for the line while pixels are still
   shifting out of the FIFO, which is also why the fetcher can start a little
@@ -309,7 +345,13 @@ alone explains it.
   value is used. $FF47-$FF49 always read back the value written.
 - **Effect:** with this and the seven-dot lag above, `m3_bgp_change` matches
   its reference in all 23,040 pixels.
-- **Checked:** 2026-09-21.
+- **The object half is unconfirmed.** Every measurement above is BGP's.
+  Extending the same one-dot short to OBP0 and OBP1 assumes the three palette
+  registers behave alike; nothing here measures that. `m3_obp0_change`, the
+  test that would show it, still fails (432 differing pixels) for a reason
+  that has not been separated from this one, so the object half is neither
+  confirmed nor refuted.
+- **Checked:** 2026-09-21, extended 2026-09-22.
 
 ## Line 0 starts drawing four dots early (2026-09-21)
 
@@ -317,9 +359,12 @@ alone explains it.
   mode-2 STAT interrupt and opens with `inc/utils.asm`'s `line_0_fix` macro,
   whose comment reads "line 0 timing is different by 4 cycles, so jump only
   when on line 0": on every line except line 0 the handler takes a `jr` and so
-  spends four extra T-cycles before its first write. In every DMG reference
-  image line 0 then comes out identical to line 1, so on hardware something at
-  the top of a frame gives line 0 those four dots back.
+  spends four extra T-cycles before its first write. In `m3_bgp_change`'s DMG
+  reference - the one image the four dots were measured against - line 0 then
+  comes out identical to line 1, so on hardware something at the top of a
+  frame gives line 0 those four dots back. Whether that holds across all of
+  the roughly two dozen Mealybug reference images was not checked; the figure
+  comes from this one.
 - **Pan Docs:** silent. [Rendering](https://gbdev.io/pandocs/Rendering.html)
   gives one mode-2 length (80 dots) for every drawn line.
 - **What it is not.** It is not the interrupt: `intr_1_2_timing-GS`
@@ -329,11 +374,14 @@ alone explains it.
   fails that ROM and `stat_irq_blocking`.
 - **FourShades:** line 0 starts its pipeline four dots earlier than other
   lines (`Ppu::stepDot`, the `renderLag_` assignment), leaving its mode
-  boundaries alone - mode 3 still begins 80 dots in and still lasts 172.
-  Nothing in the 165 test ROMs measures line 0's mode boundaries, so moving
-  them would be an unevidenced claim; the images measure the drawing, so the
-  drawing is what moves. The line the LCD was switched on keeps the ordinary
-  lag: `lcdon_timing-GS` measures that line directly.
+  boundaries alone - mode 3 still begins 80 dots in and still lasts at least
+  172. No ROM in the 165 fails either way with the boundaries left where they
+  are, and no experiment was run to find one that arbitrates them on line 0,
+  so the placement is unarbitrated rather than established: the images
+  measure the drawing, so the drawing is what moved, and the boundaries were
+  left alone rather than moved on a claim nothing here tests. The line the
+  LCD was switched on keeps the ordinary lag: `lcdon_timing-GS` measures that
+  line directly.
 - **Effect:** line 0 was the only line of `m3_bgp_change` still wrong once the
   seven-dot lag and the palette seam were in; with this it is exact.
 - **Checked:** 2026-09-21.
@@ -349,10 +397,20 @@ alone explains it.
   and 166 are called unreliable. It does not say what WX = 1-6 draws.
 - **FourShades:** `PixelPipeline::stepDot` sets `windowSkip_` to 7 - WX when
   the window starts, and the fetcher's push drops that many pixels off the
-  front of the tile it has just fetched. They cost no dots: `m3_window_timing`
-  sets WX to LY on lines 0-9 and its reference shows the window starting on
-  the same dot on every one of them, so the clipped pixels are not
-  emitted-and-discarded the way SCX's low bits are.
+  front of the tile it has just fetched.
+- **What the clipped pixels cost in dots is not evidenced: the placement was
+  chosen by group total.** The clipping itself is pinned by the two
+  references above and stays. Its dot cost is a different question, and the
+  test that would arbitrate it is `m3_window_timing`, which sets WX to LY on
+  lines 0-9 - and FourShades gets lines 0-8 of that test, precisely the lines
+  where WX is below 7, wrong. Both placements were built and measured:
+  dropping the clipped pixels at the output, which costs a dot each, leaves
+  `m3_window_timing` differing in 24 pixels and `m3_window_timing_wx_0` in
+  692; dropping them at the push, which costs none, leaves 28 and 584.
+  Neither reproduces the constant the reference shows (see the
+  `m3_window_timing` note further down). The free version shipped because
+  the group total is lower with it, which is a tuning decision, not a
+  measurement, and is recorded here as one.
 - **Effect:** `m3_wx_4_change` 10138 differing pixels -> 229,
   `m3_wx_5_change` 9521 -> 638. `m3_wx_6_change` is not a shift at all (see
   below) and went 13281 -> 13799.
@@ -392,7 +450,7 @@ records for `m3_lcdc_win_en_change_multiple`.
 | `m3_wx_4_change` | 229 | window re-activation |
 | `m3_lcdc_obj_size_change_scx` | 270 | mid-line LCDC bit 2 changes |
 | `ashiepaws/bully` | 346 | not diagnosed |
-| `m3_lcdc_obj_size_change` | 410 | mid-line LCDC bit 2 changes |
+| `m3_lcdc_obj_size_change` | 410 | mid-line LCDC bit 2 changes; 60 worse under the seven-dot shift, cause unknown (see below) |
 | `m3_obp0_change` | 432 | object pixels in the leftmost 18 columns |
 | `m3_scx_low_3_bits` | 540 | mid-line SCX changes inside the fetch |
 | `m3_lcdc_obj_en_change_variant` | 578 | mid-line LCDC bit 1 changes |
@@ -454,28 +512,80 @@ Notes on the ones that are more than "a behaviour not written yet":
   test from 80 to 77 but the `screen` group as a whole from 73,628 differing
   pixels to 78,855, so it was reverted. The remaining error is under two dots
   and is not yet pinned to a stage.
+- **`m3_lcdc_obj_size_change` (410) and `m3_lcdc_obj_size_change_scx`
+  (270).** These two probe the same thing - LCDC bit 2, the object height
+  bit, written during mode 3 - and Task 9's seven-dot shift moved them in
+  opposite directions: the plain variant went from 350 differing pixels to
+  410, its `_scx` sibling from 350 to 270. **Why is not known.** The count
+  rose by 60 under a change that lowered the group as a whole by 22%, and
+  nothing here explains the sign.
+  - What the diff map does show, comparing the produced frame with the
+    reference pixel by pixel: the errors are not spread over the image. They
+    sit in two narrow column clusters per 16-line block, each two to five
+    pixels wide - one around x = 27-39 and one around x = 3-22 - which is
+    where object edges fall, and every differing pixel carries a shade an
+    object palette produces. In the plain variant both clusters march one
+    pixel to the right every 16 lines and every block is affected; in the
+    `_scx` variant the clusters do not move at all and two whole blocks
+    (lines 32-65) come out exact.
+  - That is consistent with the general shape of every other mid-line entry
+    here - a register write landing on the wrong side of the fetch that
+    reads it - and with the fact that SCX shifts when an object's fetch
+    happens, both through the pixel discard and through the SCX term in the
+    object penalty above, so the same write can fall on the other side of
+    the fetch in one ROM and not the other. That is a description of the
+    two ROMs' difference, not a demonstration of the cause; no experiment
+    here isolates it, and the 60 pixels are recorded as unexplained.
 - **`daid/ppu_scanline_bgp` (7187).** This one disagrees with the Mealybug
   references rather than with a behaviour. It writes BGP repeatedly during
   mode 3; on line 100 FourShades lands those writes on line dots 100, 108,
   116, 124 and so on and draws their seams from pixel 1, while the reference
   puts the first seam at pixel 13 - a uniform 12-dot (three M-cycle) offset
-  over the whole image, in the opposite direction to the seven-dot lag this
-  task added (it was a five-dot offset before). One of its three reference
-  images, `ppu_scanline_bgp_1.dmg.png`, shows the one-pixel palette seam
-  described above and the other two do not, so the three are not all from the
-  same machine. The Mealybug references are photographed from real DMG
-  hardware, are unanimous, and `m3_bgp_change` now matches its own to the
-  pixel across 144 lines and six writes per line, so FourShades follows them.
-  What remains is a difference in where this ROM thinks a line starts - a
-  question about the ROM's synchronisation, not about the pipeline - and it
-  has not been diagnosed. The count is worse than before this task (3410)
-  purely because the seven dots moved in the direction the Mealybug images
-  require and this reference wants the opposite.
+  over the whole image, in the opposite direction to the seven-dot lag Task 9
+  added (it was a five-dot offset before).
+  - **Which reference.** `tools/roms/tests.json` lists three images for this
+    ROM, which is this harness's encoding of *alternative accepted outputs*:
+    `tools/roms/RomRun.cpp` passes on a match to any one of them and reports
+    the smallest difference. That the three differ is how the test list is
+    built, not a discovery about them. The reported 7187 and the 12 dots are
+    measured against `ppu_scanline_bgp_2.dmg.png`, the closest of the three;
+    the other two come out at 7741 (`_0`) and 7640 (`_1`) against the same
+    frame, and on line 100 they put the first band edge at pixel 14 and
+    pixel 13 where `_2` puts it at 13, so the 12 dots are not an artefact of
+    which one was picked. (`_1` is also the only one of the three whose image
+    contains a fourth shade, which is where the one-pixel palette seam above
+    shows up; the other two have three. That is a difference between the
+    images, and no more than that - nothing here establishes where any of
+    them came from.)
+  - **Why FourShades follows Mealybug anyway.** Mealybug's references are
+    photographed from real DMG hardware, its `m3_*` images agree with each
+    other about where a mid-line write lands, and `m3_bgp_change` now matches
+    its own to the pixel across 144 lines and six writes per line. The
+    hardware-verified rule at the top of this file puts that above an image
+    whose provenance is not stated. What remains is a difference in where
+    this ROM thinks a line starts - a question about the ROM's
+    synchronisation, not about the pipeline - and it has not been diagnosed.
+  - **What would overturn this.** Any of: a DMG photograph of
+    `ppu_scanline_bgp` with a stated provenance that agrees with its own
+    references, which would make the two bodies of evidence equally
+    hardware-backed and force the 12 dots to be explained rather than
+    attributed to the ROM; a Mealybug `m3_*` reference shown to disagree
+    with `m3_bgp_change` about where a write lands, which would break the
+    unanimity the seven dots rest on; or a decoding of this ROM's own
+    synchronisation showing it starts its line 12 dots from where FourShades
+    puts it, which would move the seven dots rather than this entry. Until
+    one of those exists the seven dots stand as `m3_bgp_change` measures
+    them.
 - **`daid/stop_instr` (22739).** Out of scope for this task: it needs STOP to
   wake, which needs joypad input. See the STOP entry at the top of this file.
 - **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (346).** Not
   diagnosed. Both were failing before this task with the same counts, so
   nothing here moved them either way.
+
+- **Checked:** 2026-09-22. Every count in this section is from a full run of
+  `rom_runner`; the per-pixel diff maps quoted above were taken from the
+  frames it writes into `build/frames` and the reference images
+  `tools/roms/tests.json` names.
 
 ## Timing model (not a divergence: where Pan Docs is silent)
 
