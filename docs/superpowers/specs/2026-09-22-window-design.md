@@ -2,7 +2,10 @@
 
 **Status:** implemented 2026-09-22. SingleStepTests stayed at 499 / 500 and
 the test ROMs at 106 / 165 throughout, as this piece intended. Five
-deviations are recorded under "Deviations from the spec" below.
+deviations were recorded under "Deviations from the spec" below; two of them
+-- the opening window size and the unmeasured, untested frame pacing -- have
+since been closed, and the measurement the "Frame loop" section asked for is
+under "Frame pacing, measured" below.
 
 ## What this is
 
@@ -51,7 +54,9 @@ the core never depends on the app.
 **The frame loop.** Run the machine 70,224 dots, then present. Pace to the DMG's
 real 59.727 Hz rather than the monitor's 60, so audio in piece 5 does not
 inherit a drift. Use vsync where the display cooperates and a sleep otherwise;
-the choice is measured, not assumed, and recorded.
+the choice is measured, not assumed, and recorded. (Measured: see "Frame
+pacing, measured" below. The sleep holds the rate to 0.002%, vsync on this
+display would be locked to 60.000 Hz and so 0.456% fast, and the sleep won.)
 
 **Presentation.** One streaming texture, 160x144, nearest-neighbour, drawn at
 the largest integer scale that fits the window, letterboxed with a neutral
@@ -84,7 +89,8 @@ gets tested is everything underneath it:
 - STOP waking on a button press, which is a core behaviour with a hardware
   document behind it.
 - The shade-to-colour mapping for both palettes, as a pure function.
-- The frame-pacing arithmetic, as a pure function of elapsed time.
+- The frame-pacing arithmetic, as a pure function of elapsed time
+  (`tests/test_frame_pacer.cpp`, against `app/FramePacer.h`).
 
 CI builds the app target so it cannot rot, but does not run it headless.
 
@@ -157,23 +163,80 @@ contact with a user.
   it only ever adds a chance for the save to survive, since the write is the
   same atomic one used at exit.
 
-- **The window opens at 3x, not the 4x under "Presentation".** 480x432
-  rather than 640x576. It is resizable and the integer-scaling rule is
-  exactly as specified; only the opening size differs. This shipped in
-  `05c56a2` without a note, and is recorded here rather than changed, since
-  nothing depends on the number.
+- ~~**The window opens at 3x, not the 4x under "Presentation".**~~ **Closed:
+  the code now matches the spec.** 3x (480x432) shipped in `05c56a2` without
+  a note and was recorded here rather than changed. Leaving the code and the
+  spec disagreeing was the wrong call for a project whose credibility is its
+  record, and 4x is the better number anyway: 640x576 is a quarter of the
+  1920x1080 desktop it opens on, so the picture is large enough to see the
+  dither patterns the screen tests are judged on without covering the
+  screen. The window is `Ppu::kWidth * 4` by `Ppu::kHeight * 4` again;
+  resizing and the integer-scaling rule never changed.
 
-- **Frame pacing is a sleep, never vsync, and is not unit-tested.** The
-  "Frame loop" section asks for vsync where the display cooperates, a sleep
-  otherwise, and for the choice to be measured and recorded. What shipped is
-  the sleep alone: `SDL_DelayNS` to the DMG's own 59.727 Hz frame period,
-  with no vsync path written and no measurement of one taken. The reason for
-  the sleep is in the spec's own sentence -- vsync paces to the monitor's
-  60 Hz, which is the drift piece 5's audio would inherit -- but the
-  comparison the spec asked for was not made, so that clause is unmet rather
-  than satisfied. The "Testing" section's "frame-pacing arithmetic, as a pure
-  function of elapsed time" is likewise unmet: the arithmetic is four lines
-  inline in `main.cpp`'s loop and has no test. Both are open, and cheap to
-  close if the pacing is ever revisited.
+- ~~**Frame pacing is a sleep, never vsync, and is not unit-tested.**~~
+  **Closed: measured, decided on the numbers, and tested.** What shipped was
+  the sleep alone -- `SDL_DelayNS` to the DMG's frame period, no vsync path,
+  no measurement -- with the pacing arithmetic four lines inline in
+  `main.cpp`'s loop and no test on it. The measurement the "Frame loop"
+  section asked for is now recorded under "Frame pacing, measured" below; the
+  arithmetic is `app::paceFrame` and `app::framePeriodNs` in
+  `app/FramePacer.h`, with `tests/test_frame_pacer.cpp` on both. The sleep
+  stayed, on evidence rather than on the argument the spec made for it.
 
-- Recorded 2026-09-22.
+- Recorded 2026-09-22; the window size and frame pacing entries closed
+  2026-09-22.
+
+## Frame pacing, measured
+
+The "Frame loop" section asked for the choice between waiting on vsync and
+sleeping to be measured rather than assumed. These are the numbers it was
+decided on. The method is repeatable: build the release app, set
+`FOURSHADES_PACE_LOG` to anything, run it with a ROM, and it prints on exit
+what the loop actually achieved -- frame count, mean rate, standard
+deviation and extremes of the frame-to-frame interval, measured with
+`SDL_GetTicksNS` at each present. Each run below was 75 seconds (about 4,555
+frames) on a GeForce GTX 1660 driving one 1920x1080 display, closed by
+posting `WM_CLOSE` to the window.
+
+**What the sleep achieves.** Target 59.727500 Hz (4,194,304 / 70,224):
+
+| run | ROM | mean | error | sd | min | max |
+| --- | --- | --- | --- | --- | --- | --- |
+| before | dmg-acid2 | 59.7277 Hz | +0.00034% | 0.641 ms | 3.87 ms | 30.13 ms |
+| before | blargg 09-op_r,r | 59.7277 Hz | +0.00034% | 0.566 ms | 12.25 ms | 21.73 ms |
+| after | dmg-acid2 | 59.7285 Hz | +0.00171% | 0.652 ms | 4.01 ms | 29.95 ms |
+| after | blargg 09-op_r,r | 59.7288 Hz | +0.00221% | 0.568 ms | 13.25 ms | 21.19 ms |
+
+The run-to-run difference is under 1.4 ms of total time across 76 seconds --
+one scheduling hiccup's worth, not a drift. The mean holds the DMG's rate to
+within 2 parts in 100,000 in every run.
+
+**What vsync would achieve.** SDL reports this display as exactly 60.000 Hz
+(`refresh_rate_numerator` 60, `refresh_rate_denominator` 1), so vsync is
+locked to 60.000 Hz by construction: **+0.456%**, or 7.9 cents sharp. For
+piece 5 that is not a subtlety. An emulator generating 44,100 Hz audio one
+frame at a time against a 0.456%-fast clock produces 44,301 samples for
+every second the sound card consumes 44,100 -- 201 samples of surplus per
+second, which overruns a 4,096-sample buffer roughly every twenty seconds,
+for as long as the game runs. The sleep's 0.002% produces less than one
+surplus sample per second.
+
+**Decision: sleep, and no vsync path.** 0.002% against 0.456% is not a close
+call, and it is the number the spec's own sentence predicted -- now measured
+rather than asserted. The cost accepted is that presents are not
+synchronised to the display, so a tear line is possible; a 160x144 picture
+of mostly static tiles makes that hard to see, and paying 0.456% of pitch
+error to remove it would be the wrong trade for an emulator. If a variable
+refresh display ever makes vsync cheap at the right rate, the pacing lives
+behind one pure function and the loop reads `step.sleepNs` from it, so it is
+a small change.
+
+**Jitter, recorded rather than fixed.** The spread is about 0.6 ms of
+standard deviation, with a handful of frames per minute reaching 30 ms while
+the machine itself needs 4-12 ms per frame on this host. The excursions come
+from the host, not the pacer: `paceFrame` keeps the deadlines on a fixed
+grid, so a late frame is repaid out of the next frame's sleep and the mean
+does not move. Narrowing the spread would need the present taken off the
+frame loop's thread, which is not this piece's business. Audio in piece 5
+will need a buffer of at least two frames to ride over it, which is the
+normal arrangement anyway.
