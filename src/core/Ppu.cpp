@@ -109,7 +109,13 @@ void Ppu::stepDot(u8& requested) {
                     // whatever the prediction above said. Without this, a
                     // prediction that never came true would leave mode_ at 3
                     // with the pipeline stopped - STAT reporting mode 3 and
-                    // VRAM locked until the next line's mode 2.
+                    // VRAM locked until the next line's mode 2. No path
+                    // reaches it today: dotsRemaining() is exactly 0 at the
+                    // dot the 160th pixel is emitted (pixelX_ has caught up
+                    // to 160 and no activation is still pending), so the
+                    // check above already fires on this dot or an earlier
+                    // one. Kept as a guard against a future regression in
+                    // that formula, not because anything currently needs it.
                     if (mode_ == 3) {
                         setMode(0);
                     }

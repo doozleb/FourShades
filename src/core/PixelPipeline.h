@@ -38,10 +38,26 @@ public:
     // kRenderLag dots before that, and the count is not the pixel count
     // alone: the object fetches still owed over the pixels that are left
     // stall them, and intr_2_mode0_timing_sprites measures objects at OAM
-    // X 160-167 doing exactly that. The fetcher itself is not counted - a
-    // fetch takes six dots and feeds eight pixels, so it never binds over
-    // the handful of dots at the end of a line this is asked about.
+    // X 160-167 doing exactly that. The fetcher itself is not counted for
+    // ordinary background pixels - a fetch takes six dots and feeds eight
+    // pixels, so it never binds over the handful of dots at the end of a
+    // line this is asked about - except when the window is about to
+    // activate: stepDot clears the queue and restarts the fetcher from its
+    // first step when the window triggers, and WX can put that trigger on
+    // the line's very last pixel, so this counts a pending activation's
+    // kWindowRestartDots too. See docs/known-divergences.md, "How the
+    // mode-0 boundary is found".
     int dotsRemaining(const Ppu& ppu) const;
+
+    // The dots a window activation forces the fetcher to spend before its
+    // first pixel reaches the queue: stepDot resets the fetcher to its Tile
+    // step and clears the queue when the window triggers, so
+    // Tile+DataLow+DataHigh (2 dots each, see stepFetcher) run once more
+    // with nothing pushed before Push can run again. dotsRemaining charges
+    // exactly this much for an activation it sees coming but that has not
+    // happened yet, so the two must be kept in agreement if stepDot's
+    // restart cost ever changes.
+    static constexpr int kWindowRestartDots = 6;
 
 private:
     enum class Step { Tile, DataLow, DataHigh, Push };
