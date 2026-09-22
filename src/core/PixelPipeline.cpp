@@ -8,7 +8,7 @@ u8 shadeFor(u8 palette, u8 colour) {
     return static_cast<u8>((palette >> (colour * 2)) & 0x03);
 }
 
-void PixelPipeline::startLine(Ppu& ppu) {
+void PixelPipeline::startLine(const Ppu& ppu) {
     step_ = Step::Tile;
     stepDots_ = 0;
     fetcherX_ = 0;
@@ -105,7 +105,7 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
     }
 }
 
-void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
+void PixelPipeline::startObject(const Ppu& ppu, std::size_t index) {
     // PixelPipeline.h only forward-declares Ppu, so the object is reached
     // through the index rather than named in the header.
     const Ppu::Object& object = ppu.lineObjects()[index];
@@ -150,6 +150,13 @@ void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
         }
     }
 
+    objectDots_ = objectPenalty(ppu, index, lastPenaltyTile_, lastPenaltyTileValid_,
+                                objectPenaltyStarted_);
+}
+
+int PixelPipeline::objectPenalty(const Ppu& ppu, std::size_t index, int& lastTile,
+                                 bool& lastTileValid, bool& penaltyStarted) const {
+    const Ppu::Object& object = ppu.lineObjects()[index];
     // Pan Docs "OBJ Penalty Algorithm", applied to The Pixel - the object's
     // leftmost pixel, at screen X = OAM X - 8, which is off the left edge for
     // an OAM X below 8 but still picks a tile and still costs dots:
@@ -169,7 +176,7 @@ void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
     // "OBJ penalty: the first object fetched on a line gets a three-dot
     // rebate against Pan Docs' algorithm".
     const int backgroundX = static_cast<int>(ppu.scx()) + static_cast<int>(object.x) - 8;
-    objectDots_ = 6;
+    int dots = 6;
     // NOTE: this tile index is in background coordinates (SCX + the object's
     // own X). Once the window is drawing, tile boundaries actually follow
     // WX - 7 instead, so on a line with both a window and an object this term
@@ -178,9 +185,9 @@ void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
     // the tile term ignores the window", for the evidence and how to record
     // the resolution once they do.
     const int penaltyTile = backgroundX >> 3;
-    if (!lastPenaltyTileValid_ || penaltyTile != lastPenaltyTile_) {
-        lastPenaltyTile_ = penaltyTile;
-        lastPenaltyTileValid_ = true;
+    if (!lastTileValid || penaltyTile != lastTile) {
+        lastTile = penaltyTile;
+        lastTileValid = true;
         if (object.x == 0) {
             // Pan Docs: "an OBJ with an OAM X position of 0 always incurs a
             // 11-dot penalty, regardless of SCX". It is the tile term that
@@ -190,33 +197,78 @@ void PixelPipeline::startObject(Ppu& ppu, std::size_t index) {
             // general rule below gives 11 anyway, and no hardware measurement
             // available here reaches an OAM X = 0 object at a non-zero SCX,
             // so Pan Docs stands.
-            objectDots_ = 11;
+            dots = 11;
         } else {
             const int toTheRight = 7 - (backgroundX & 7);
-            objectDots_ += toTheRight > 2 ? toTheRight - 2 : 0;
+            dots += toTheRight > 2 ? toTheRight - 2 : 0;
         }
     }
-    if (!objectPenaltyStarted_) {
-        objectPenaltyStarted_ = true;
-        objectDots_ -= 3;
+    if (!penaltyStarted) {
+        penaltyStarted = true;
+        dots -= 3;
     }
+    return dots;
 }
 
-bool PixelPipeline::finishesWithin(Ppu& ppu, int dots) const {
-    if (pixelX_ + dots < 160) {
-        return false; // more pixels are left than there are dots to emit them
+int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
+    // One dot per pixel still to be emitted, plus the stall the fetch in
+    // progress still owes, plus the stalls the object fetches still to come
+    // will owe. Nothing else can hold a pixel up over the end of a line: the
+    // SCX discard is spent in the line's first eight dots, and the fetcher
+    // feeds eight pixels per six-dot fetch, so it is always ahead by then.
+    int dots = 160 - pixelX_ + objectDots_;
+    if ((ppu.lcdc() & 0x02) == 0) {
+        return dots; // objects disabled: none of them will be fetched
     }
-    PixelPipeline trial = *this;
-    std::array<u8, 160> scratch{};
-    for (int i = 0; i < dots; ++i) {
-        if (trial.stepDot(ppu, scratch, true)) {
-            return true;
+
+    // Objects are fetched in the order the pixel counter reaches them, with
+    // ties broken by OAM order (the order lineObjects() is in), and one
+    // object's penalty depends on the tile the objects before it claimed -
+    // so they have to be walked in that order, over a copy of the memo.
+    struct Pending {
+        int triggerX = 0;
+        std::size_t index = 0;
+    };
+    std::array<Pending, 10> pending{};
+    std::size_t count = 0;
+    const auto& list = ppu.lineObjects();
+    for (std::size_t i = 0; i < list.size() && count < pending.size(); ++i) {
+        if ((drawn_ & (1u << i)) != 0) {
+            continue; // already fetched
+        }
+        // stepDot triggers an object when the pixel counter reaches its
+        // screen X, and triggers every object left of the screen edge at
+        // pixel 0; one that is already behind the counter never triggers.
+        const int screenX = static_cast<int>(list[i].x) - 8;
+        const int triggerX = screenX < 0 ? 0 : screenX;
+        if (triggerX < pixelX_ || triggerX >= 160) {
+            continue;
+        }
+        pending[count++] = Pending{triggerX, i};
+    }
+    for (std::size_t i = 1; i < count; ++i) { // insertion sort, stable
+        const Pending key = pending[i];
+        std::size_t j = i;
+        while (j > 0 && pending[j - 1].triggerX > key.triggerX) {
+            pending[j] = pending[j - 1];
+            --j;
+        }
+        pending[j] = key;
+    }
+
+    int tile = lastPenaltyTile_;
+    bool tileValid = lastPenaltyTileValid_;
+    bool started = objectPenaltyStarted_;
+    for (std::size_t i = 0; i < count; ++i) {
+        const int penalty = objectPenalty(ppu, pending[i].index, tile, tileValid, started);
+        if (penalty > 0) {
+            dots += penalty;
         }
     }
-    return false;
+    return dots;
 }
 
-bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line, bool trial) {
+bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
     if (!window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached() &&
         discard_ == 0 && pixelX_ >= static_cast<int>(ppu.wx()) - 7) {
         // Pan Docs: the background queue is cleared and the fetcher restarts,
@@ -232,10 +284,13 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line, bool trial) {
         // still starts at the window's own column 0 and those pixels never
         // reach the LCD. Mealybug Tearoom's m3_wx_4_change and
         // m3_wx_5_change photograph the three and two pixel versions of it.
-        // Unlike SCX's low bits they cost no dots: m3_window_timing sets WX
-        // to LY on lines 0-9 and its reference shows the window starting on
-        // the same dot on every one of them. See docs/known-divergences.md,
-        // "A WX below 7 pushes the window's leftmost pixels off the screen".
+        // Dropping them here, as the tile is pushed, makes them cost no
+        // dots. That half is a tuning decision, not a measurement: the test
+        // that would arbitrate it, m3_window_timing, still fails on the very
+        // lines that measure it, and neither this placement nor charging a
+        // dot each reproduces what its reference shows. See
+        // docs/known-divergences.md, "A WX below 7 pushes the window's
+        // leftmost pixels off the screen".
         windowSkip_ = ppu.wx() < 7 ? 7 - static_cast<int>(ppu.wx()) : 0;
         // Cache the row the window is drawing on this line before advancing
         // the PPU's counter for the next one: every fetch below reads
@@ -243,9 +298,7 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line, bool trial) {
         // just-bumped value doesn't leak into this line's tiles.
         windowLineUsed_ = ppu.windowLine();
         // The window's line counter only advances on lines that drew it.
-        if (!trial) {
-            ppu.advanceWindowLine();
-        }
+        ppu.advanceWindowLine();
     }
 
     if (objectDots_ > 0) {

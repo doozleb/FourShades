@@ -55,12 +55,14 @@ int runLineObjects(Ppu& ppu) {
     while (ppu.mode() != 3) { ppu.tick(); }
     int drawing = 0;
     while (ppu.mode() == 3) { ppu.tick(); drawing += 4; }
-    // A line's last pixels reach the frame up to PixelPipeline::kRenderLag
-    // dots after mode 3 ends - rendering trails the mode-3 window at both
-    // ends (docs/known-divergences.md, "Rendering runs seven dots behind the
-    // mode-3 window") - so let the pipeline finish before frame() is read.
-    ppu.tick();
-    ppu.tick();
+    // A line's last pixels reach the frame after mode 3 ends - rendering
+    // trails the mode-3 window at both ends (docs/known-divergences.md,
+    // "Rendering runs seven dots behind the mode-3 window") - so let the
+    // pipeline finish before frame() is read. Running to the end of the line
+    // rather than a fixed number of M-cycles keeps this correct whatever the
+    // lag becomes: the line is always drawn by the time the next one starts.
+    const int drawnLine = ppu.lineNumber();
+    while (ppu.lineNumber() == drawnLine) { ppu.tick(); }
     return drawing;
 }
 } // namespace

@@ -79,14 +79,17 @@ void Ppu::stepDot(u8& requested) {
             // runs its handler off the mode-2 STAT interrupt and spends four
             // extra cycles on every line except line 0 (inc/utils.asm's
             // line_0_fix, "line 0 timing is different by 4 cycles"), and in
-            // every DMG reference image line 0 then comes out identical to
+            // m3_bgp_change's DMG reference - the one image the four dots
+            // were measured against - line 0 then comes out identical to
             // line 1. The interrupt is not what moves: the hardware-verified
             // intr_1_2_timing-GS times the gap from the VBlank STAT interrupt
-            // to this one and pins it. Nothing measured here says line 0's
-            // mode boundaries move either, so only the drawing does - mode 3
-            // still begins 80 dots in and still lasts 172. The line the LCD
-            // was switched on is ordinary in this respect; lcdon_timing-GS
-            // measures that one directly. See docs/known-divergences.md,
+            // to this one and pins it. No ROM in the 165 fails either way
+            // with line 0's mode boundaries left where they are, and none
+            // was found that arbitrates them, so they are left alone and
+            // only the drawing moves - mode 3 still begins 80 dots in and
+            // still lasts at least 172. The line the LCD was switched on is
+            // ordinary in this respect; lcdon_timing-GS measures that one
+            // directly. See docs/known-divergences.md,
             // "Line 0 starts drawing four dots early".
             renderLag_ = PixelPipeline::kRenderLag - (line_ == 0 && !lcdOnLine_ ? 4 : 0);
             lineRenderLag_ = renderLag_;
@@ -98,10 +101,18 @@ void Ppu::stepDot(u8& requested) {
                 }
             } else {
                 const bool lineDrawn = pipeline_.stepDot(*this, lineBuffer_);
-                if (mode_ == 3 && pipeline_.finishesWithin(*this, lineRenderLag_)) {
+                if (mode_ == 3 && pipeline_.dotsRemaining(*this) <= lineRenderLag_) {
                     setMode(0); // the last pixels are still on their way out
                 }
                 if (lineDrawn) {
+                    // Backstop: the line is finished, so HBlank has begun
+                    // whatever the prediction above said. Without this, a
+                    // prediction that never came true would leave mode_ at 3
+                    // with the pipeline stopped - STAT reporting mode 3 and
+                    // VRAM locked until the next line's mode 2.
+                    if (mode_ == 3) {
+                        setMode(0);
+                    }
                     std::copy(lineBuffer_.begin(), lineBuffer_.end(),
                               frame_.begin() + static_cast<std::size_t>(line_) * kWidth);
                     rendering_ = false;
@@ -265,6 +276,11 @@ u8 Ppu::write(u16 address, u8 value) {
             lcdOnLine_ = false;
             lycSuppressed_ = false;
             rendering_ = false;
+            // A palette write arms a one-dot short (see $FF47 below) that
+            // only the next drawn dot disarms. With the LCD off no dot runs,
+            // so clear it here rather than leave it armed across the whole
+            // off period.
+            paletteGlitch_ = 0x00;
             frame_.fill(0);
             windowReached_ = false;
             windowLine_ = 0;

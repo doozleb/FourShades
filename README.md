@@ -72,6 +72,14 @@ counts the 165 that do (the two informational ones are listed under the group
 table). Both lines are generated from a real test run, and CI fails any
 commit whose scoreboard doesn't match what the code actually scores.
 
+**Correction (22 September 2026):** the commit message for `7ab9eae`, "put
+rendering where the hardware images measure it", gives the screenshot group's
+before-total as 120,110 differing pixels. That figure was wrong: the 27
+failing tests in the group summed to 118,088 before that commit and 73,628
+after it, so the fall is 38%, not the 39% the message claims. The commit is
+pushed and is not being rewritten, so the correction lives here, in the same
+spirit as the one above it.
+
 ---
 
 ## Why this exists
