@@ -96,9 +96,9 @@ mode.
   entry did not say: `ashiepaws/bully` went from 346 differing pixels to 290,
   taking the `screen` group's total from 73,628 to 73,572. Measured
   2026-09-22 by building the commit before this change and running the ROM
-  runner from it: `bully` 346, `strikethrough` 53. It is the only `screen`
-  count that moved, and it is a failing test either way, so no verdict moved
-  with it. Mooneye's `boot_hwio-dmgABCmgb` still fails, and a traced run on
+  runner from it: `bully` 346, `strikethrough` 53. It is the only count in
+  the screenshot table below that differs between that run and one made
+  today, and it is a failing test either way, so no verdict moved with it. Mooneye's `boot_hwio-dmgABCmgb` still fails, and a traced run on
   2026-09-22 puts its first mismatch at $FF10 (NR10), the first sound
   register: the ROM wants $80 and FourShades reads $FF, because there is no
   APU until piece 5. The registers it checks before that, $FF00-$FF0F, all
@@ -251,16 +251,19 @@ mode.
   `PixelPipeline` keeps one slot (`lastPenaltyTile_`), so an object whose
   tile matches the one immediately before it pays no tile term, and an
   object whose tile was considered earlier than that pays it again. The two
-  readings agree while objects arrive in non-decreasing tile order, which is
-  what a left-to-right walk of the line gives, so the 104 cases of the
-  hardware-verified object timing ROM do not tell them apart. They part
-  company off the left edge: every object at OAM X 1-8 triggers at pixel 0
-  in OAM order regardless of its own X, so the tiles can arrive out of order
-  - at SCX = 0, OAM X of 1, 8 and 2 gives tiles -1, 0, -1, and the third
-  object is charged for tile -1 a second time, up to 5 dots that Pan Docs'
-  wording does not charge. No ROM in the 165 puts two such objects either
-  side of a third in a different tile, so nothing here measures which is
-  right; it is one slot because that is what the measured cases needed.
+  readings agree whenever objects arrive in non-decreasing tile order, which
+  is what a left-to-right walk of the line gives. They part company off the
+  left edge: every object at OAM X 1-8 triggers at pixel 0 in OAM order
+  regardless of its own X, so the tiles can arrive out of order - at SCX = 0,
+  OAM X of 1, 8 and 2 gives tiles -1, 0, -1, and the third object is charged
+  for tile -1 a second time, up to 5 dots that Pan Docs' wording does not
+  charge. What is known is only that the one-slot version passes what the
+  suite has: `ppu timing` 12 / 12, the hardware-verified object timing ROM
+  included. Whether any of its 104 cases, or any other ROM in the 165,
+  reaches the out-of-order arrangement has not been checked, and the set
+  version has not been built and measured, so nothing here says which
+  reading is right - only that one slot is what the cases that were solved
+  needed. Recorded 2026-09-22.
 - **Two details the same test settles, which Pan Docs states loosely:**
   - "The Pixel" is the object's leftmost pixel at screen X = OAM X - 8, and
     that is used even when it is off the left edge. Objects at OAM X = 0-7 are
@@ -363,9 +366,10 @@ alone explains it.
   short for WX 160, 161, 162 and 163 and identical for every other WX in
   that range - WX 164's single dot rounds away. An object fetched late on the
   line adds to both counts, so which WX values differ moves with it.
-  No ROM in the 165 puts a window there, so nothing scored moved when it was
-  fixed (SingleStepTests 499 / 500, test ROMs 106 / 165, the `screen` group's
-  total unchanged at 73,572); `tests/test_pixel_pipeline.cpp`'s "a window
+  Nothing scored moved when it was fixed - SingleStepTests 499 / 500, test
+  ROMs 106 / 165, the `screen` group's total unchanged at 73,572 - which is
+  all the suite has to say about it: no verdict and no pixel count in it
+  depends on a window trigger in that band. `tests/test_pixel_pipeline.cpp`'s "a window
   trigger inside the line's last dots still lengthens mode 3 by six dots"
   pins it at WX 160, and was watched failing first - mode 3 came out four
   dots short of the six-dot cost, the five rounded to the M-cycle.
@@ -708,8 +712,9 @@ rest of this entry says what fitted it.
 One consequence of having no per-row read, which the ROMs do not arbitrate:
 because the whole of OAM is read at dot 80, a corruption applied to a row the
 per-row model would already have passed still changes which objects that line
-selects. On hardware, scrambling a row the PPU has finished reading could not
-change the line's selection, only what a later read of OAM sees. Nothing in
+selects. Under the model Pan Docs describes, scrambling a row the PPU has
+finished reading could not change that line's selection, only what a later
+read of OAM sees. Nothing in
 the 165 test ROMs distinguishes the two - the OAM-bug ROMs check OAM's
 contents, not the objects drawn from it - and it is recorded here rather than
 modelled.
