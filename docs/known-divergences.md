@@ -30,35 +30,57 @@ decision and its date.
   FourShades skips it without a bus cycle and keeps the test's `r-m`, `---`,
   `---` pattern. Pan Docs also doesn't say at which cycle the PC increment
   becomes visible while the CPU sits in STOP mode.
-- **Still missing after piece 2** (the timer, joypad and interrupts now exist,
-  but STOP doesn't use them yet):
-  - STOP never wakes. Pan Docs' way out of STOP mode is a button press, and
-    there is no joypad input yet (P1 always reads "no buttons pressed").
-    The "window" this line used to point at was the PPU's window layer, which
-    piece 3 delivered without any joypad input; joypad input arrives with the
-    SDL3 window in the next piece, and STOP's wake-up with it. (Corrected
-    2026-09-22.)
+- **The wake-up: done 2026-09-22.** P1 has real state from this date, so the
+  branch that was impossible is now implemented. Pan Docs' way out is "STOP
+  is terminated by one of the P10 to P13 lines going low"
+  ([Reducing Power Consumption: Using the STOP Instruction](https://gbdev.io/pandocs/Reducing_Power_Consumption.html#using-the-stop-instruction)),
+  so the CPU leaves STOP mode when any line the program selected reads low.
+  Two things about that:
+  - It is not an interrupt. IME and IE have no part in it, and the CPU
+    resumes at the instruction after STOP rather than at a vector. Pan Docs
+    describes the exit as the line, not the interrupt, and the same page tells
+    a program to write $00, $10 or $20 to P1 before STOP "depending on which
+    buttons you want to terminate the STOP on" — so with $30 written, no line
+    can fall and nothing ends STOP mode.
+  - **A decision, not a documented behaviour:** FourShades watches the line's
+    *level*, not its falling edge, so a STOP executed with a selected line
+    already low ends immediately. Pan Docs gives no behaviour for that case
+    inside STOP mode — its flowchart branches away from STOP mode before
+    entering it when a button is held (see the button-held branch below,
+    which is still not implemented) — so there is no documented answer to
+    match. Waking immediately was chosen over waiting forever for an edge
+    that had already happened. No scored test reaches it: SingleStepTests
+    runs one instruction per case, so it never steps a stopped CPU, and the
+    165 test ROMs were run before and after the change on 2026-09-22 with
+    every verdict, failure reason and serial byte identical.
+- **Still missing** (the joypad now exists; these no longer wait on it, they
+  are simply not written):
   - STOP doesn't reset DIV. That is to be done with the planned
     centralisation of the system counter's edge handling (so a reset's
     falling edges reach the timer, and later the sound chip, from one place),
     before piece 5.
   - The interrupt-pending branch, where Pan Docs makes STOP a 1-byte opcode,
-    isn't implemented: STOP is always 2 bytes. It waits, with the
-    button-held branches, on joypad input, which the SDL3 window brings in
-    the next piece — not on piece 3, which built the PPU. (Corrected
-    2026-09-22.)
+    isn't implemented: STOP is always 2 bytes.
+  - The button-held branch, where Pan Docs' flowchart never enters STOP mode
+    at all, isn't implemented either: STOP always enters STOP mode, and then
+    leaves it again on the first step, as the level rule above says.
+    (Rewritten 2026-09-22, when the wake-up landed.)
 - **Scored test affected:** `daid/stop_instr.gb (DMG)` is one of the 165
   scored test ROMs (screen group). It is a screenshot test; with the PPU
   built (piece 3) it still fails, its image differing from the reference in
   22,739 of 23,040 pixels as of 2026-09-22 — a whole-screen difference, so
-  what it says about STOP itself is still not being read. (Updated
-  2026-09-22; it previously said the PPU was missing.)
+  what it says about STOP itself is still not being read. The wake-up landing
+  on 2026-09-22 did not move that number by a single pixel, which is all that
+  is known about why it fails: it is not the wake-up alone. (Updated
+  2026-09-22; it previously said the PPU was missing, and before that that
+  the wake-up was what it needed.)
 - **Also noted by Pan Docs itself:** "stop is often considered a two-byte
   instruction, though the second byte is not always ignored.",
   [CPU Instruction Set](https://gbdev.io/pandocs/CPU_Instruction_Set.html#stop).
   "Not always" refers to the button-held and interrupt-pending branches, where
   STOP behaves differently — the branches listed as still missing above.
-- **Checked:** 2026-09-11.
+- **Checked:** 2026-09-11; the wake-up re-checked against Pan Docs and
+  implemented 2026-09-22.
 
 ## HALT (0x76): matches Pan Docs
 
@@ -557,7 +579,7 @@ records for `m3_lcdc_win_en_change_multiple`.
 | `daid/ppu_scanline_bgp` | 7187 | disagrees with the Mealybug references by 12 dots |
 | `m3_lcdc_win_en_change_multiple` | 8316 | window re-activation (LCDC bit 5) |
 | `m3_wx_6_change` | 13799 | WX = 6 is not a one-pixel shift of WX = 7 |
-| `daid/stop_instr` | 22739 | needs STOP's wake-up, which needs joypad input |
+| `daid/stop_instr` | 22739 | undiagnosed; the wake-up landed 2026-09-22 and the count did not move |
 
 The mid-line LCDC, SCX and SCY entries above are all the same shape: the
 register is read live, at the dot the fetcher needs it, but which of a fetch's
@@ -670,8 +692,11 @@ Notes on the ones that are more than "a behaviour not written yet":
     puts it, which would move the seven dots rather than this entry. Until
     one of those exists the seven dots stand as `m3_bgp_change` measures
     them.
-- **`daid/stop_instr` (22739).** Out of scope for this task: it needs STOP to
-  wake, which needs joypad input. See the STOP entry at the top of this file.
+- **`daid/stop_instr` (22739).** Out of scope for this task, which built the
+  PPU. It was recorded here as needing STOP's wake-up; the wake-up landed on
+  2026-09-22 and the count stayed at 22,739 exactly, so that was not the
+  whole story and the failure is undiagnosed. See the STOP entry at the top
+  of this file.
 - **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (290).** Neither is
   diagnosed, and both were failing before this task and still are. Their
   counts did not both stand still, though, and an earlier version of this

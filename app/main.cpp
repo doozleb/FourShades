@@ -1,7 +1,8 @@
-// The playable window. Loads a ROM, runs it, and presents each frame Ppu
-// produces, paced to the DMG's own 59.727 Hz rather than the monitor's 60
-// Hz: piece 5's audio will be clocked off the same real-time pacing this
-// loop establishes, and any drift here would become audible drift there.
+// The playable window. Loads a ROM, runs it, presents each frame Ppu
+// produces and feeds it the keyboard, paced to the DMG's own 59.727 Hz
+// rather than the monitor's 60 Hz: piece 5's audio will be clocked off the
+// same real-time pacing this loop establishes, and any drift here would
+// become audible drift there.
 //
 // With a ROM path on the command line, this behaves exactly as a script
 // expects: load it, run it, or fail loudly and exit non-zero. With no
@@ -11,6 +12,7 @@
 // Cartridge::load's message and returns to waiting rather than closing the
 // window.
 #include "app/AppController.h"
+#include "app/Input.h"
 #include "app/Screen.h"
 #include "core/Ppu.h"
 
@@ -218,6 +220,15 @@ int main(int argc, char** argv) {
 
         if (controller.state() == AppState::Running) {
             GameBoy& gameBoy = controller.gameBoy();
+
+            // The whole keyboard, once per frame, just before the frame that
+            // will see it runs. SDL has already drained this frame's key
+            // events into that array above, so a press and a release inside
+            // one frame is the one case this misses -- 16.7 ms of held key,
+            // which no human produces and no game could act on anyway.
+            int numKeys = 0;
+            const bool* keys = SDL_GetKeyboardState(&numKeys);
+            gameBoy.setButtons(app::buttonMask(keys, numKeys));
 
             // Driven by the frame counter, not a fixed cycle count, so this
             // loop stays correct if the PPU's own timing is ever refined.

@@ -26,6 +26,7 @@ add_library(fourshades_core STATIC
     src/core/Cartridge.cpp
     src/core/Timer.cpp
     src/core/Serial.cpp
+    src/core/Joypad.cpp
     src/core/Ppu.cpp
     src/core/PixelPipeline.cpp
     src/core/GameBoy.cpp

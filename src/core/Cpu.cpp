@@ -3,7 +3,23 @@
 namespace fourshades {
 
 void Cpu::step() {
-    if (state_ == State::Stopped || state_ == State::Locked) {
+    if (state_ == State::Stopped) {
+        // Pan Docs: "STOP is terminated by one of the P10 to P13 lines going
+        // low" (Reducing Power Consumption: Using the STOP Instruction), so
+        // the way out is the joypad's level, not an interrupt: IME and IE
+        // have no say, and the CPU resumes at the instruction after STOP.
+        // The level is watched rather than its falling edge: a line that is
+        // already low when STOP runs is one Pan Docs' flowchart never enters
+        // STOP mode for at all, and waking on it is far closer to that than
+        // waiting forever for an edge that already happened. See
+        // docs/known-divergences.md, the STOP entry.
+        bus_.idle();
+        if (bus_.joypadLineLow()) {
+            state_ = State::Running;
+        }
+        return;
+    }
+    if (state_ == State::Locked) {
         bus_.idle();
         return;
     }
@@ -199,11 +215,12 @@ bool Cpu::executeMisc(u8 opcode) {
         // interrupt pending, "STOP is a 2-byte opcode, STOP mode is entered".
         // Pan Docs is silent on whether the second byte is read with a bus
         // cycle, so the test's observed no-read bus pattern is kept. Still
-        // missing: STOP never wakes (a button press is the way out and there
-        // is no joypad input yet); STOP doesn't reset DIV (to come with
-        // the planned centralisation of the system counter's edge handling);
-        // and the interrupt-pending branch, where STOP is a
-        // 1-byte opcode, isn't implemented. See docs/known-divergences.md.
+        // missing: STOP doesn't reset DIV (to come with the planned
+        // centralisation of the system counter's edge handling); and the
+        // interrupt-pending and button-held branches, where STOP is a 1-byte
+        // opcode or never enters STOP mode at all, aren't implemented. STOP
+        // now wakes on a joypad line going low: see step().
+        // See docs/known-divergences.md.
         regs.pc = static_cast<u16>(regs.pc + 1);
         state_ = State::Stopped;
         return true;
