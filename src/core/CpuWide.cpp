@@ -10,18 +10,25 @@ bool Cpu::executeWide(u8 opcode) {
         case 0x1: // LD rr, nn
             writeRp(p, fetch16());
             return true;
-        case 0x3: { // INC rr: the 16-bit increment costs an internal cycle
+        // The 16-bit step costs an internal M-cycle, and it is in that second
+        // M-cycle - not the opcode fetch - that the IDU drives the old value
+        // on the address bus, so the idle() comes first. Every other
+        // iduCycle() call site reports after the M-cycle it belongs to for
+        // the same reason, and the OAM corruption bug can tell the
+        // difference: it scrambles whichever OAM row the PPU is reading in
+        // exactly that M-cycle.
+        case 0x3: { // INC rr
             const u16 before = readRp(p);
             writeRp(p, static_cast<u16>(before + 1));
-            bus_.iduCycle(before);
             bus_.idle();
+            bus_.iduCycle(before);
             return true;
         }
         case 0xB: { // DEC rr
             const u16 before = readRp(p);
             writeRp(p, static_cast<u16>(before - 1));
-            bus_.iduCycle(before);
             bus_.idle();
+            bus_.iduCycle(before);
             return true;
         }
         case 0x9: // ADD HL, rr

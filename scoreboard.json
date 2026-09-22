@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 102,
+    "passing": 106,
     "total": 165,
     "groups": [
       {
@@ -21,12 +21,9 @@
       },
       {
         "group": "oam bug",
-        "passing": 3,
+        "passing": 7,
         "total": 7,
-        "first_failure": {
-          "test": "blargg/oam_bug/2-causes.gb",
-          "reason": "Failed #2"
-        }
+        "first_failure": null
       },
       {
         "group": "sound",

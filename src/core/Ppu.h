@@ -108,6 +108,36 @@ public:
     const std::vector<Object>& lineObjects() const { return lineObjects_; }
     int objectHeight() const { return (lcdc_ & 0x04) != 0 ? 16 : 8; }
 
+    // The DMG OAM corruption bug (Pan Docs, "OAM Corruption Bug"). OAM is 20
+    // rows of 8 bytes, and during mode 2 the PPU reads one row per M-cycle,
+    // row 0 first. A CPU access anywhere in FE00-FEFF during one of those
+    // M-cycles - including the one the 16-bit increment/decrement unit makes
+    // on its own, because the IDU is tied straight to the address bus -
+    // scrambles the row the PPU is reading right then. Neither the address
+    // used nor the value written has any effect on the result.
+    //
+    // Kind is what the CPU did to the bus in that M-cycle. Read and Write
+    // are Pan Docs' two patterns; ReadWrite is its "Read During
+    // Increase/Decrease", which is what `ld a,(hl+)` and an opcode fetch
+    // from OAM produce: a read and an IDU write land in the same M-cycle.
+    enum class Kind { Read, Write, ReadWrite };
+
+    // Applies a pattern to `row` at once. Rows outside 1-19 are left alone:
+    // row 0 has no preceding row to be glitched with.
+    void oamCorrupt(Kind kind, int row);
+
+    // The bug's entry points. Both record the access; the pattern is applied
+    // at the end of the M-cycle, because a read and a write in the same
+    // M-cycle together mean something other than either of them alone.
+    // oamCorruptIfScanning is what the IDU reports: the unit drives the
+    // address without asserting a read, which OAM sees as a write.
+    void oamCorruptIfScanning(u16 address) { oamBusAccess(address, Kind::Write); }
+    void oamBusAccess(u16 address, Kind kind);
+
+    // The OAM row the PPU read during the M-cycle that has just been ticked,
+    // or -1 if it read none. Only meaningful between two ticks.
+    int oamScanRow() const;
+
 private:
     void stepDot(u8& requested);
     void setMode(int mode);
@@ -116,6 +146,7 @@ private:
     bool oamSourceHigh() const;
     bool lycMatch() const;
     void scanOam();
+    void flushOamCorruption();
 
     std::array<u8, 0x2000> vram_{};
     std::array<u8, 0xA0> oam_{};
@@ -155,6 +186,11 @@ private:
     bool windowReached_ = false; // WY has matched LY somewhere in this frame
     int windowLine_ = 0;         // the window's own line counter
     std::vector<Object> lineObjects_;
+    // The OAM corruption pending for the M-cycle now in progress: the row
+    // the PPU is reading, and what the CPU did to the bus during it.
+    int corruptRow_ = -1;
+    bool corruptRead_ = false;
+    bool corruptWrite_ = false;
 };
 
 } // namespace fourshades

@@ -6,7 +6,7 @@ and measured, honestly, against the public test ROMs.
 <!-- scoreboard:start -->
 ```
 cpu instructions  ███████████████░   499 / 500
-test roms         █████████░░░░░░░   102 / 165
+test roms         ██████████░░░░░░   106 / 165
 ```
 <!-- scoreboard:end -->
 
@@ -45,7 +45,7 @@ The test-ROM line, group by group, with the first test each group fails:
 |---|---|---|
 | cpu instructions | 11 / 11 |  |
 | cpu timing | 8 / 8 |  |
-| oam bug | 3 / 7 | `blargg/oam_bug/2-causes.gb`: Failed #2 |
+| oam bug | 7 / 7 |  |
 | sound | 0 / 12 | `blargg/dmg_sound/01-registers.gb`: Failed #2 |
 | cpu & interrupts | 31 / 31 |  |
 | boot state | 2 / 3 | `mooneye/acceptance/boot_hwio-dmgABCmgb.gb`: failure bytes (0x42) over serial |
