@@ -31,6 +31,22 @@ public:
     // false.
     bool loadRom(std::vector<fourshades::u8> bytes);
 
+    // Rebuilds the machine from the cartridge this controller loaded, as a
+    // power cycle would: a brand new GameBoy over a pristine copy of the
+    // cartridge, never the running one poked back towards its starting
+    // state. Everything the machine held -- CPU registers, RAM, VRAM, the
+    // PPU's frame counter, the cartridge's bank registers -- is gone with
+    // it.
+    //
+    // The one thing that survives is battery-backed cartridge RAM, because
+    // that is what a battery is for: a DMG has no reset button, so the
+    // nearest real thing is switching it off and on again, and a saved game
+    // lives through that. RAM with no battery behind it does not, and is
+    // cleared.
+    //
+    // Does nothing and returns false when no ROM is loaded.
+    bool reset();
+
     AppState state() const { return state_; }
 
     // Cartridge::load's message, verbatim, from the most recent failed
@@ -44,6 +60,11 @@ public:
 private:
     AppState state_ = AppState::Waiting;
     std::string lastError_;
+    // The cartridge exactly as it was loaded, untouched by the machine that
+    // runs: reset() copies this rather than re-parsing the image, so a reset
+    // cannot inherit a bank register or a byte of RAM from the session it
+    // ends.
+    std::optional<fourshades::Cartridge> pristine_;
     std::optional<fourshades::GameBoy> gameBoy_;
 };
 

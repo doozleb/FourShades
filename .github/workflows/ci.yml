@@ -29,6 +29,20 @@ jobs:
       - name: Build
         run: cmake --build --preset release
 
+      # The window is part of the default target, so the step above already
+      # builds it -- but nothing said so, and nothing noticed if it stopped.
+      # This names the target and checks what it produced. It is never run:
+      # the runner has no display, and an SDL window cannot open on it.
+      - name: The app builds
+        run: |
+          cmake --build --preset release --target fourshades_app
+          if (-not (Test-Path build\release\app\fourshades_app.exe)) {
+            throw "fourshades_app.exe was not produced"
+          }
+          if (-not (Test-Path build\release\app\SDL3.dll)) {
+            throw "SDL3.dll was not copied next to fourshades_app.exe"
+          }
+
       - name: Unit tests
         run: ctest --preset release
 
