@@ -32,6 +32,13 @@ public:
     // reading IE and IF over the bus.
     virtual u8 pendingInterrupts() = 0;             // IE & IF & 0x1F
     virtual void acknowledgeInterrupt(int bit) = 0; // clears that IF bit
+
+    // True while any of the four joypad matrix lines P10-P13 reads low. It is
+    // a level on a pin rather than a bus access, so it costs no cycle, and the
+    // CPU consults it only in STOP mode, which Pan Docs ends with "one of the
+    // P10 to P13 lines going low" (Reducing Power Consumption: Using the STOP
+    // Instruction). A bus with no joypad wired to it leaves every line high.
+    virtual bool joypadLineLow() { return false; }
 };
 
 } // namespace fourshades

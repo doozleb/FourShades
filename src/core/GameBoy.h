@@ -3,6 +3,7 @@
 #include "core/Bus.h"
 #include "core/Cartridge.h"
 #include "core/Cpu.h"
+#include "core/Joypad.h"
 #include "core/Ppu.h"
 #include "core/Serial.h"
 #include "core/Timer.h"
@@ -40,6 +41,11 @@ public:
     Ppu& ppu() { return ppu_; }
     const Ppu& ppu() const { return ppu_; }
 
+    // Which buttons are held, as a mask of the fourshades::button constants.
+    // Whatever drives the machine hands it the whole set once per frame; the
+    // core never learns what pressed them.
+    void setButtons(u8 pressed);
+
     u8 read(u16 address) override;
     void write(u16 address, u8 value) override;
     void idle() override;
@@ -48,6 +54,7 @@ public:
     // with whatever access the M-cycle was already making. Its only visible
     // effect is the DMG OAM corruption bug.
     void iduCycle(u16 address) override { ppu_.oamCorruptIfScanning(address); }
+    bool joypadLineLow() override { return joypad_.anyLineLow(); }
     u8 pendingInterrupts() override { return static_cast<u8>(ie_ & if_ & 0x1F); }
     void acknowledgeInterrupt(int bit) override { if_ = static_cast<u8>(if_ & ~(1 << bit)); }
 
@@ -68,7 +75,7 @@ private:
     std::array<u8, 0x7F> hram_{};
     u8 ie_ = 0x00;
     u8 if_ = 0x01;          // bits 0-4; reads OR in 0xE0
-    u8 joypadSelect_ = 0x00; // P1 bits 4-5
+    Joypad joypad_;
     u8 dmaRegister_ = 0xFF;
     u16 dmaSource_ = 0;
     int dmaStartDelay_ = 0; // M-cycles until a requested DMA begins

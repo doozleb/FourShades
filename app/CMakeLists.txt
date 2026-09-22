@@ -3,9 +3,14 @@
 # unit-tested without SDL or a window; `fourshades_app` is the window
 # itself. src/core links neither SDL3 nor screen_lib -- see
 # tools/check_core_isolation.py.
-add_library(screen_lib STATIC Screen.cpp AppController.cpp)
+add_library(screen_lib STATIC Screen.cpp AppController.cpp Input.cpp)
 target_include_directories(screen_lib PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(screen_lib PUBLIC fourshades_core)
+# Headers only, deliberately not SDL3::SDL3: Input.cpp names SDL's scancodes
+# but calls no SDL function, so screen_lib -- and the test executable that
+# links it -- stays free of SDL3.dll while the key mapping is still written
+# in SDL's own constants rather than copies of their numbers.
+target_include_directories(screen_lib SYSTEM PUBLIC ${SDL3_INCLUDE_DIR})
 
 add_executable(fourshades_app main.cpp)
 target_link_libraries(fourshades_app PRIVATE screen_lib fourshades_core SDL3::SDL3)

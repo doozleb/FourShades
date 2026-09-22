@@ -22,6 +22,16 @@ GameBoy::GameBoy(Cartridge cartridge) : cart_(std::move(cartridge)), cpu_(*this)
     timer_.setCounter(0xABC8);
 }
 
+// A button changing state is asynchronous to the CPU: it is a pin moving, not
+// a bus cycle, so no time passes here. The interrupt is requested on the
+// high-to-low edge only (Pan Docs, INT $60), which is why Joypad reports it
+// rather than this deciding from the level.
+void GameBoy::setButtons(u8 pressed) {
+    if (joypad_.setButtons(pressed)) {
+        if_ = static_cast<u8>(if_ | irq::Joypad);
+    }
+}
+
 void GameBoy::tick() {
     ++cycles_;
     const u16 before = timer_.counter();
@@ -186,7 +196,7 @@ void GameBoy::writeMemory(u16 address, u8 value) {
 
 u8 GameBoy::readIo(u16 address) const {
     switch (address) {
-    case 0xFF00: return static_cast<u8>(0xC0 | joypadSelect_ | 0x0F); // no buttons held
+    case 0xFF00: return joypad_.read();
     case 0xFF01:
     case 0xFF02: return serial_.read(address);
     case 0xFF04:
@@ -205,7 +215,14 @@ u8 GameBoy::readIo(u16 address) const {
 
 void GameBoy::writeIo(u16 address, u8 value) {
     switch (address) {
-    case 0xFF00: joypadSelect_ = static_cast<u8>(value & 0x30); break;
+    case 0xFF00:
+        // Selecting a group that already has a button held drives its line
+        // low inside this M-cycle, so the IF bit has to land now, the same
+        // way a STAT write's does below.
+        if (joypad_.write(value)) {
+            if_ = static_cast<u8>(if_ | irq::Joypad);
+        }
+        break;
     case 0xFF01:
     case 0xFF02: serial_.write(address, value); break;
     case 0xFF04:
