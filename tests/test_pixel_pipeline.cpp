@@ -381,6 +381,27 @@ TEST_CASE("starting the window lengthens mode 3 by six dots") {
     CHECK(withWindow == plain + 8); // 6 dots, rounded up to whole M-cycles
 }
 
+TEST_CASE("a window trigger on the line's last pixel still lengthens mode 3 by six dots") {
+    // WX = 166 puts the trigger point (WX - 7) at pixelX_ = 159, the very
+    // last pixel of the line: stepDot's restart (queue cleared, fetcher back
+    // to its Tile step) has to run to completion - Tile+DataLow+DataHigh, 2
+    // dots each, then Push - before that pixel can be emitted, so it costs
+    // the same six raw dots as the mid-line trigger above, not the one dot a
+    // pixel-count-only estimate would assume is left. Mode 3's STAT-visible
+    // length is derived from that hardware rule, not read off the code: 172
+    // (plain) + 6 raw dots = 178, which the whole-M-cycle sampling below
+    // rounds up to 180, exactly the "+8" the mid-line trigger above measures
+    // - the six-dot cost is the same wherever the trigger lands.
+    Ppu ppu;
+    setUpWindow(ppu);
+    static_cast<void>(ppu.write(0xFF40, 0xD1)); // window off for now
+    const int plain = runLine(ppu);
+    static_cast<void>(ppu.write(0xFF4B, 0xA6)); // WX = 166
+    static_cast<void>(ppu.write(0xFF40, 0xF1)); // window on
+    const int withWindow = runLine(ppu);
+    CHECK(withWindow == plain + 8);
+}
+
 TEST_CASE("the window does not draw above WY") {
     Ppu ppu;
     setUpWindow(ppu);

@@ -213,10 +213,25 @@ int PixelPipeline::objectPenalty(const Ppu& ppu, std::size_t index, int& lastTil
 int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
     // One dot per pixel still to be emitted, plus the stall the fetch in
     // progress still owes, plus the stalls the object fetches still to come
-    // will owe. Nothing else can hold a pixel up over the end of a line: the
-    // SCX discard is spent in the line's first eight dots, and the fetcher
-    // feeds eight pixels per six-dot fetch, so it is always ahead by then.
+    // will owe. The SCX discard is spent in the line's first eight dots, and
+    // the fetcher feeds eight pixels per six-dot fetch, so it stays ahead of
+    // the pixel counter on its own - except for a window activation still to
+    // come, which is not a "keeping up" fetch but a full restart (see
+    // kWindowRestartDots), so it is charged separately below.
     int dots = 160 - pixelX_ + objectDots_;
+    if (!window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached()) {
+        // The window has not started on this line yet, but stepDot will
+        // clear the queue and restart the fetcher the moment pixelX_ reaches
+        // its trigger point (WX - 7, the same expression stepDot tests).
+        // When that point is still ahead of the current pixel and on this
+        // line, the dots counted above already include one dot for the
+        // pixel the restart pre-empts, so the pending activation's full
+        // fetch cost has to be added on top of it, not folded into it.
+        const int triggerX = static_cast<int>(ppu.wx()) - 7;
+        if (triggerX >= pixelX_ && triggerX < 160) {
+            dots += kWindowRestartDots;
+        }
+    }
     if ((ppu.lcdc() & 0x02) == 0) {
         return dots; // objects disabled: none of them will be fetched
     }

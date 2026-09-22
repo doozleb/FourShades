@@ -295,10 +295,19 @@ alone explains it.
   plus the penalties of the object fetches still to come over those pixels.
   A pixel count alone would not do, because an object fetched over the last
   few pixels stalls them and `intr_2_mode0_timing_sprites` measures objects
-  at OAM X 160-167 doing exactly that; the fetcher itself is not counted,
-  because a fetch takes six dots and feeds eight pixels, so it is never the
-  binding constraint over the handful of dots at the end of a line. Mode 0
-  is entered when that count drops to the line's lag. This replaced an
+  at OAM X 160-167 doing exactly that. The fetcher itself is not counted for
+  ordinary background pixels, because a fetch takes six dots and feeds eight
+  pixels, so it is never the binding constraint over the handful of dots at
+  the end of a line - except for a window activation still to come: the
+  window's trigger point (WX - 7) can land on the line's very last pixel
+  (WX up to 166), and `Ppu::stepDot` clears the queue and restarts the
+  fetcher from its first step the moment the trigger fires, so that pixel
+  waits a full `PixelPipeline::kWindowRestartDots` (six dots) rather than
+  one. `dotsRemaining` sees this coming - the window enabled, WY already
+  reached, no activation yet this line, and the trigger point still at or
+  ahead of the current pixel - and charges the six dots before it happens,
+  which no ROM in the suite exercises but the unit tests pin directly. Mode
+  0 is entered when the count drops to the line's lag. This replaced an
   earlier version that ran a *copy* of the pipeline seven dots forward: the
   two were run side by side over the whole 165-ROM suite and the unit tests,
   disagreed on no dot of any line, and the count is the cheaper and the
@@ -312,7 +321,12 @@ alone explains it.
   fires, `mode_` would sit at 3 with the pipeline already stopped, and STAT
   would report mode 3 with VRAM locked until the next line's mode 2.
   `Ppu::stepDot` therefore enters mode 0 unconditionally on the dot the line
-  finishes, whatever the prediction said. Nothing in the suite reaches it.
+  finishes, whatever the prediction said. This is dead code today, not just
+  untested: `dotsRemaining` is exactly 0 at the dot the 160th pixel is
+  emitted (no pixels and no pending activation left to count), so the check
+  above it always sets mode 0 on that dot or an earlier one first. It stays
+  in as a guard against a future regression in the formula, not because
+  anything currently reaches it.
 - **What this is physically.** The natural reading is that mode 3 ends when
   the PPU has finished reading VRAM for the line while pixels are still
   shifting out of the FIFO, which is also why the fetcher can start a little
@@ -324,7 +338,7 @@ alone explains it.
   (every `intr_2_*`), and delaying mode 3 itself by seven dots breaks eight
   of them. Both were tried and reverted; the lag is the only placement
   measured that satisfies both sets.
-- **Checked:** 2026-09-21.
+- **Checked:** 2026-09-22.
 
 ## Palette writes short the old and new values together for one dot (2026-09-21)
 
