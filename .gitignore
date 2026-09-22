@@ -3,4 +3,6 @@ out/
 .vs/
 tools/sst/data/
 tools/roms/data/
+third_party/sdl/SDL3-*/
+third_party/sdl/*.zip
 __pycache__/
