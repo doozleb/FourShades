@@ -1,0 +1,15 @@
+# The playable window. `screen_lib` holds the two pure functions (palette
+# and integer-scaling math) so they can be unit-tested without SDL or a
+# window; `fourshades_app` is the window itself. src/core links neither SDL3
+# nor screen_lib -- see tools/check_core_isolation.py.
+add_library(screen_lib STATIC Screen.cpp)
+target_include_directories(screen_lib PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(screen_lib PUBLIC fourshades_core)
+
+add_executable(fourshades_app main.cpp)
+target_link_libraries(fourshades_app PRIVATE screen_lib fourshades_core SDL3::SDL3)
+add_custom_command(TARGET fourshades_app POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${SDL3_LIB_DIR}/SDL3.dll" "$<TARGET_FILE_DIR:fourshades_app>"
+    COMMENT "Copying SDL3.dll next to fourshades_app"
+)
