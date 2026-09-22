@@ -34,6 +34,42 @@ target_include_directories(fourshades_core PUBLIC src)
 add_subdirectory(tools/sst)
 add_subdirectory(tools/roms)
 
+# ---------------------------------------------------------------------------
+# SDL3 (vendored binary, gitignored, never committed). Fetched on demand by
+# third_party/sdl/fetch_sdl.py; see third_party/sdl/README.md for the pinned
+# version and hash. src/core never includes or links this — the emulator
+# core stays free of SDL, same as it stays free of the test harness.
+#
+# Only x64 is wired in: tools\dev.cmd always sets up the x64 developer
+# environment, so that is the only architecture this build ever targets.
+# ---------------------------------------------------------------------------
+set(SDL3_VERSION 3.4.16)
+set(SDL3_ROOT ${CMAKE_SOURCE_DIR}/third_party/sdl/SDL3-${SDL3_VERSION})
+set(SDL3_INCLUDE_DIR ${SDL3_ROOT}/include)
+set(SDL3_LIB_DIR ${SDL3_ROOT}/lib/x64)
+if(NOT EXISTS ${SDL3_INCLUDE_DIR}/SDL3/SDL.h)
+    message(FATAL_ERROR
+        "SDL3 is not vendored (expected ${SDL3_INCLUDE_DIR}/SDL3/SDL.h). "
+        "Run: python third_party/sdl/fetch_sdl.py")
+endif()
+add_library(SDL3::SDL3 SHARED IMPORTED)
+set_target_properties(SDL3::SDL3 PROPERTIES
+    IMPORTED_LOCATION "${SDL3_LIB_DIR}/SDL3.dll"
+    IMPORTED_IMPLIB "${SDL3_LIB_DIR}/SDL3.lib"
+)
+# SYSTEM: MSVC compiles vendored headers with /external:W0, so SDL3's
+# warnings don't bury ours (same reasoning as the third_party include below).
+target_include_directories(SDL3::SDL3 SYSTEM INTERFACE ${SDL3_INCLUDE_DIR})
+
+# Trivial proof that SDL3 links: calls SDL_GetVersion() and prints it.
+add_executable(sdl_probe tools/sdl_probe/sdl_probe.cpp)
+target_link_libraries(sdl_probe PRIVATE SDL3::SDL3)
+add_custom_command(TARGET sdl_probe POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${SDL3_LIB_DIR}/SDL3.dll" "$<TARGET_FILE_DIR:sdl_probe>"
+    COMMENT "Copying SDL3.dll next to sdl_probe"
+)
+
 enable_testing()
 
 # ---------------------------------------------------------------------------
