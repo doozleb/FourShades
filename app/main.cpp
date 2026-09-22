@@ -15,6 +15,7 @@
 // Keys: arrows, Z, X, Enter and Backspace are the joypad; P toggles the
 // palette; Space pauses; R resets.
 #include "app/AppController.h"
+#include "app/FramePacer.h"
 #include "app/Input.h"
 #include "app/Save.h"
 #include "app/Screen.h"
@@ -39,10 +40,10 @@ using fourshades::GameBoy;
 using fourshades::Ppu;
 using fourshades::u8;
 
-// The DMG's real frame rate (4194304 Hz / 70224 dots-per-frame), not the
-// monitor's 60 Hz. See the file comment.
-constexpr double kFrameHz = 59.727;
-constexpr Uint64 kFrameNs = static_cast<Uint64>(1'000'000'000.0 / kFrameHz + 0.5);
+// The frame budget, from the DMG's real frame rate (4194304 Hz / 70224
+// dots-per-frame) rather than the monitor's 60 Hz. See the file comment and
+// app/FramePacer.h; the arithmetic lives there so it can be tested.
+const Uint64 kFrameNs = app::framePeriodNs(app::kDmgFrameHz);
 
 // SDL_RenderDebugText's font, enlarged so the waiting prompt is legible
 // rather than squinted at (see SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE).
@@ -135,6 +136,23 @@ bool loadRomFromPath(AppController& controller, const std::string& path, std::st
     session.saveStatus = restoreSession(controller, path);
     error.clear();
     return true;
+}
+
+// Prints what the frame loop actually achieved, when FOURSHADES_PACE_LOG is
+// set to anything. Opt-in rather than always on: the numbers are how the
+// pacing claim in the design spec is kept honest, so they have to be
+// reproducible by anyone, but a player closing a game does not want a
+// statistics line.
+void reportPacing(const app::FrameRateMeter& meter) {
+    if (SDL_getenv("FOURSHADES_PACE_LOG") == nullptr || meter.intervals() == 0) {
+        return;
+    }
+    std::printf("pacing: %llu frames, mean %.4f Hz (%.1f ns), sd %.1f ns, min %llu ns, max %llu ns\n",
+                static_cast<unsigned long long>(meter.intervals() + 1), meter.meanHz(),
+                meter.meanIntervalNs(), meter.stddevIntervalNs(),
+                static_cast<unsigned long long>(meter.minIntervalNs()),
+                static_cast<unsigned long long>(meter.maxIntervalNs()));
+    std::fflush(stdout);
 }
 
 void setDrawColor(SDL_Renderer* renderer, std::uint32_t rgb) {
@@ -240,7 +258,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    constexpr int kInitialScale = 3;
+    constexpr int kInitialScale = 4;
     SDL_Window* window = SDL_CreateWindow("FourShades", Ppu::kWidth * kInitialScale,
                                           Ppu::kHeight * kInitialScale, SDL_WINDOW_RESIZABLE);
     if (window == nullptr) {
@@ -279,6 +297,10 @@ int main(int argc, char** argv) {
     // the last frame it produced. Nothing about the machine changes, so
     // resuming continues the same instruction stream.
     bool paused = false;
+
+    // What the loop achieved, as opposed to what it aimed at. See
+    // reportPacing.
+    app::FrameRateMeter meter;
 
     bool running = true;
     Uint64 nextFrameDeadline = SDL_GetTicksNS() + kFrameNs;
@@ -331,6 +353,12 @@ int main(int argc, char** argv) {
         int windowH = 0;
         SDL_GetWindowSizeInPixels(window, &windowW, &windowH);
 
+        // Whether this pass round the loop actually advanced the machine by
+        // a frame. A paused or ROM-less pass still draws and still paces,
+        // but it is not a frame of emulation and must not be measured as
+        // one.
+        bool emulatedFrame = false;
+
         if (controller.state() == AppState::Running) {
             GameBoy& gameBoy = controller.gameBoy();
 
@@ -350,6 +378,7 @@ int main(int argc, char** argv) {
                 while (gameBoy.ppu().frameCount() == before) {
                     gameBoy.step();
                 }
+                emulatedFrame = true;
             }
 
             // Outside the pause: the frame is re-coloured and re-uploaded
@@ -377,17 +406,23 @@ int main(int argc, char** argv) {
         }
         SDL_RenderPresent(renderer);
 
-        // Pace to the DMG's real rate. If the host fell behind (a slow frame,
-        // a debugger pause), don't try to burst-catch-up: just resume pacing
-        // from now, one frame late, rather than spiralling.
         const Uint64 now = SDL_GetTicksNS();
-        if (now < nextFrameDeadline) {
-            SDL_DelayNS(nextFrameDeadline - now);
-            nextFrameDeadline += kFrameNs;
+        if (emulatedFrame) {
+            meter.sample(now);
         } else {
-            nextFrameDeadline = now + kFrameNs;
+            meter.gap();
         }
+
+        // Pace to the DMG's real rate. app::paceFrame owns the rule for what
+        // a late frame costs; this only reads the clock and sleeps.
+        const app::PaceStep step = app::paceFrame(now, nextFrameDeadline, kFrameNs);
+        if (step.sleepNs > 0) {
+            SDL_DelayNS(step.sleepNs);
+        }
+        nextFrameDeadline = step.nextDeadline;
     }
+
+    reportPacing(meter);
 
     // A clean exit: the window was closed, so the battery RAM goes back to
     // disk before anything is torn down.
