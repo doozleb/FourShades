@@ -18,6 +18,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      # SDL3 is vendored, gitignored and never committed, and CMakeLists.txt
+      # fails configure outright without it, so this has to come first.
+      - name: Fetch SDL3 (pinned, hash-checked)
+        run: python third_party/sdl/fetch_sdl.py
+
       - name: Configure
         run: cmake --preset release
 
