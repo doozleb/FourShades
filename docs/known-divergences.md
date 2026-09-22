@@ -601,6 +601,94 @@ Notes on the ones that are more than "a behaviour not written yet":
   frames it writes into `build/frames` and the reference images
   `tools/roms/tests.json` names.
 
+## The OAM corruption bug: the phase Pan Docs does not give (2026-09-22)
+
+FourShades implements the bug as Pan Docs describes it
+([OAM Corruption Bug](https://gbdev.io/pandocs/OAM_Corruption_Bug.html)):
+OAM is 20 rows of 8 bytes; during mode 2 the PPU reads one row per M-cycle;
+any CPU access anywhere in $FE00-$FEFF during one of those M-cycles scrambles
+the row the PPU is reading, and the address used and the value written have no
+say in it. The 16-bit increment/decrement unit counts as an access because it
+is tied straight to the address bus, which is what `Bus::iduCycle` reports.
+All three of Pan Docs' patterns are implemented verbatim, the four-input
+"Read During Increase/Decrease" expression included. What follows is what Pan
+Docs leaves open and what decided it.
+
+- **Which row an access collides with.** Pan Docs says the PPU reads one row
+  per M-cycle but not where inside the line the first of the twenty sits
+  relative to a CPU access. `Ppu::oamScanRow` answers `dot_ / 4`, evaluated at
+  the end of the M-cycle (`GameBoy` ticks the hardware and then performs the
+  access), so an access collides with the row whose read begins at that
+  boundary. Three ROMs pin it. The scanline-timing one steps a 16-bit register
+  at successive offsets from a frame boundary and requires no corruption one
+  M-cycle before the window, corruption at its first and last M-cycle, and
+  none one M-cycle after: nineteen consecutive corrupting M-cycles, which can
+  only be rows 1-19, with row 0 immune because it has no preceding row. The
+  timing-edges one repeats that at the start of the first and second visible
+  lines and at the end of the last. The no-bug one steps a register at
+  `dot_ == 0` and at `dot_ == 80` on every one of the 144 visible lines and
+  checks OAM against a CRC of the untouched fill. Taking `dot_ / 4 - 1`
+  instead - the other plausible reading of "the row being read in this
+  M-cycle" - fails the first of those at its first corrupting M-cycle and the
+  third at `dot_ == 80`, and was measured doing so.
+- **`inc rr` and `dec rr` drive the address bus in their second M-cycle.**
+  Pan Docs gives the instruction two M-cycles but does not say which of them
+  the IDU runs in. `Cpu::executeWide` now calls `bus_.idle()` before
+  `bus_.iduCycle(before)`, which puts the report after the M-cycle it belongs
+  to, as every other `iduCycle` call site already did. With the two lines the
+  other way round the `oam bug` group scores 3/7 instead of 7/7; that was
+  measured, not assumed. No cycle moves either way, and SingleStepTests stays
+  at 499/500.
+- **The pattern is applied at the end of the M-cycle, not at the access.**
+  A read and a write in the same M-cycle mean something other than either of
+  them alone, so `Ppu` records what the CPU did to the bus (`corruptRead_`,
+  `corruptWrite_`) and `flushOamCorruption` applies one pattern at the start
+  of the next `tick()`. This is invisible to software: OAM cannot be read back
+  until the scan and mode 3 are over, many M-cycles later. It is what makes
+  `ld a,(hl+)` and an opcode fetch from OAM produce Pan Docs' combined
+  pattern, and what makes `ld (hl+),a` and the middle M-cycle of a `push`
+  produce one write rather than two.
+- **Two `ReadWrite` M-cycles, not Pan Docs' "three times", for `pop`.** Pan
+  Docs says `pop` "will trigger the bug only 3 times (instead of the expected
+  4 times); one read, one glitched write, and another read without a glitched
+  write". FourShades' `pop16` instead produces a read and an IDU write in each
+  of its two M-cycles, so two combined `ReadWrite` corruptions. The
+  instruction-effect ROM checks a CRC over the whole of OAM after `pop bc`
+  from $FEF0 and passes, so the observable result is the same; removing the
+  four-input expression makes exactly that subtest fail, which is how the
+  combined pattern is known to be reached at all. The wording above is
+  therefore read as a description of the two combined corruptions rather than
+  of three separate events.
+- **Accesses the PPU's lock refuses still corrupt.** `GameBoy::read` and
+  `GameBoy::write` report the access to the PPU before `busRead`/`writeMemory`
+  decide whether it goes through, so a read that returns $FF and a write that
+  is dropped both corrupt. So does an access to the unusable $FEA0-$FEFF
+  stretch, which Pan Docs names explicitly. Removing those two reports drops
+  the instruction-effect ROM's `pop` subtest; the rest of the group still
+  passes, so they are pinned by one subtest only.
+
+### Still unimplemented: the PC increment on an operand byte
+
+Pan Docs: "If a multi-byte opcode is executed from $FDFF or $FDFE, [the] bug
+will similarly trigger twice for every read from OAM" - once for the read and
+once for the IDU write that increments PC. FourShades reports the IDU for
+opcode fetches (including a CB prefix's second byte) but not for operand
+bytes: `Cpu::fetch8` performs the read and advances PC without calling
+`bus_.iduCycle`, a decision taken in the CPU task and left alone here. So an
+instruction whose *operand* bytes lie in OAM produces a read corruption where
+hardware produces the combined read-and-write one.
+
+Nothing in the 165 ROMs measures it. Adding the call to `fetch8` was tried:
+the `oam bug` group stays 7/7 and SingleStepTests stays 499/500, so the suite
+is neutral on it, and the change as written also double-reports the CB prefix
+byte (which `executeCb` already reports by hand, precisely because `fetch8`
+serves genuine operands too). It was reverted rather than landed on no
+evidence. A future task that wants it should move the CB report into `fetch8`
+and update `tests/test_cpu_idu.cpp` in the same change.
+
+- **Checked:** 2026-09-22, from a full `rom_runner` run (`oam bug` 7/7, test
+  roms 106/165) and a full `sst_runner` run (499/500).
+
 ## Timing model (not a divergence: where Pan Docs is silent)
 
 Pan Docs gives cycle counts but not every within-M-cycle order. These are the

@@ -8,6 +8,10 @@ namespace fourshades {
 
 u8 Ppu::tick() {
     u8 requested = 0;
+    // The M-cycle that was in progress has finished; anything the CPU did to
+    // the OAM bus during it lands now, before the PPU moves on to the next
+    // row. See flushOamCorruption.
+    flushOamCorruption();
     if (!lcdOn()) {
         return requested;
     }
@@ -188,6 +192,126 @@ void Ppu::scanOam() {
                                           peekOam(static_cast<u16>(base + 2)),
                                           peekOam(static_cast<u16>(base + 3)), index});
         }
+    }
+}
+
+namespace {
+// OAM's data bus is 16 bits wide, so every step of the corruption patterns
+// works on words. `index` counts words within an 8-byte row, 0-3.
+u16 readWord(const u8* oam, int row, int index) {
+    const int offset = row * 8 + index * 2;
+    return static_cast<u16>(oam[offset] | (oam[offset + 1] << 8));
+}
+
+void writeWord(u8* oam, int row, int index, u16 value) {
+    const int offset = row * 8 + index * 2;
+    oam[offset] = static_cast<u8>(value & 0xFF);
+    oam[offset + 1] = static_cast<u8>(value >> 8);
+}
+
+constexpr int kOamRows = 20;
+} // namespace
+
+int Ppu::oamScanRow() const {
+    // Mode 2 is the first 80 dots of a drawn line, and the PPU reads one of
+    // the 20 rows in each of its 20 M-cycles. This is asked at the end of an
+    // M-cycle - GameBoy ticks the hardware and then performs the access - so
+    // dot_ stands at that M-cycle's boundary, and the row that collides with
+    // the access is dot_ / 4: the one whose read begins there.
+    //
+    // The OAM-bug test ROMs pin that window at both ends. Nineteen
+    // consecutive M-cycles corrupt, which is rows 1-19 (row 0 has no
+    // preceding row and cannot be corrupted), and the first of them is the
+    // boundary one M-cycle into the line - dot_ == 4 here. A second ROM
+    // closes both sides: it steps a 16-bit register at dot_ == 0 and at
+    // dot_ == 80 on every visible line and requires OAM to come out
+    // untouched. See docs/known-divergences.md, "The OAM corruption bug".
+    //
+    // The line the LCD was switched on has no mode 2 at all (see stepDot), so
+    // nothing is being read on it and nothing can be corrupted.
+    if (!lcdOn() || line_ >= 144 || lcdOnLine_) {
+        return -1;
+    }
+    if (dot_ >= kOamScanDots) {
+        return -1;
+    }
+    return dot_ / 4;
+}
+
+void Ppu::oamBusAccess(u16 address, Kind kind) {
+    // Pan Docs: the whole of FE00-FEFF counts, the unusable FEA0-FEFF
+    // stretch included - it sits on the same bus as OAM.
+    if (address < 0xFE00 || address >= 0xFF00) {
+        return;
+    }
+    const int row = oamScanRow();
+    if (row < 0) {
+        return;
+    }
+    corruptRow_ = row;
+    if (kind == Kind::Read) {
+        corruptRead_ = true;
+    } else {
+        corruptWrite_ = true;
+    }
+}
+
+void Ppu::flushOamCorruption() {
+    if (corruptRow_ < 0) {
+        return;
+    }
+    const int row = corruptRow_;
+    const bool read = corruptRead_;
+    const bool write = corruptWrite_;
+    corruptRow_ = -1;
+    corruptRead_ = false;
+    corruptWrite_ = false;
+    if (read && write) {
+        oamCorrupt(Kind::ReadWrite, row);
+    } else if (read) {
+        oamCorrupt(Kind::Read, row);
+    } else {
+        // Two writes in one M-cycle (ld (hl+),a, or the push whose write and
+        // implied dec sp coincide) behave just like one: Pan Docs, "Write
+        // During Increase/Decrease".
+        oamCorrupt(Kind::Write, row);
+    }
+}
+
+void Ppu::oamCorrupt(Kind kind, int row) {
+    if (row <= 0 || row >= kOamRows) {
+        return; // objects 0 and 1 are safe: row 0 has no preceding row
+    }
+    u8* oam = oam_.data();
+    if (kind == Kind::ReadWrite) {
+        // Pan Docs, "Read During Increase/Decrease": a read and a write in
+        // the same M-cycle first corrupt the *preceding* row and splash it
+        // over its two neighbours, and only then does an ordinary read
+        // corruption follow. It is skipped for the first four rows and for
+        // the last one.
+        if (row >= 4 && row < kOamRows - 1) {
+            const u16 a = readWord(oam, row - 2, 0);
+            const u16 b = readWord(oam, row - 1, 0);
+            const u16 c = readWord(oam, row, 0);
+            const u16 d = readWord(oam, row - 1, 2);
+            writeWord(oam, row - 1, 0, static_cast<u16>((b & (a | c | d)) | (a & c & d)));
+            for (int index = 0; index < 4; ++index) {
+                const u16 value = readWord(oam, row - 1, index);
+                writeWord(oam, row, index, value);
+                writeWord(oam, row - 2, index, value);
+            }
+        }
+        kind = Kind::Read;
+    }
+    const u16 a = readWord(oam, row, 0);
+    const u16 b = readWord(oam, row - 1, 0);
+    const u16 c = readWord(oam, row - 1, 2);
+    const u16 result = kind == Kind::Read
+                           ? static_cast<u16>(b | (a & c))
+                           : static_cast<u16>(((a ^ c) & (b ^ c)) ^ c);
+    writeWord(oam, row, 0, result);
+    for (int index = 1; index < 4; ++index) {
+        writeWord(oam, row, index, readWord(oam, row - 1, index));
     }
 }
 

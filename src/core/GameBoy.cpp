@@ -112,13 +112,20 @@ u8 GameBoy::busRead(u16 address) const {
     return peek(address);
 }
 
+// An access anywhere in FE00-FEFF while the PPU is scanning OAM corrupts the
+// row it is reading, whether or not the PPU's lock lets the access itself
+// through: the address and the read/write line reach OAM regardless. The PPU
+// is told about every such M-cycle, its own mode decides whether anything
+// comes of it (Ppu::oamBusAccess).
 u8 GameBoy::read(u16 address) {
     tick();
+    ppu_.oamBusAccess(address, Ppu::Kind::Read);
     return busRead(address);
 }
 
 void GameBoy::write(u16 address, u8 value) {
     tick();
+    ppu_.oamBusAccess(address, Ppu::Kind::Write);
     if (!dmaBlocks(address)) {
         writeMemory(address, value);
     }
@@ -134,7 +141,9 @@ std::optional<u8> GameBoy::haltedCycle(u16 address) {
         return std::nullopt;
     }
     // The byte the CPU latches when it leaves HALT comes off the same bus as
-    // any other read, so the PPU's VRAM and OAM locks apply to it too.
+    // any other read, so the PPU's VRAM and OAM locks apply to it too, and so
+    // does the OAM corruption bug.
+    ppu_.oamBusAccess(address, Ppu::Kind::Read);
     return busRead(address);
 }
 

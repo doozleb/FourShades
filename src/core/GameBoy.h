@@ -44,8 +44,10 @@ public:
     void write(u16 address, u8 value) override;
     void idle() override;
     std::optional<u8> haltedCycle(u16 address) override;
-    // Task 10 gives this its effect: the DMG OAM corruption bug.
-    void iduCycle(u16) override {}
+    // No cycle is spent: the increment/decrement unit shares the address bus
+    // with whatever access the M-cycle was already making. Its only visible
+    // effect is the DMG OAM corruption bug.
+    void iduCycle(u16 address) override { ppu_.oamCorruptIfScanning(address); }
     u8 pendingInterrupts() override { return static_cast<u8>(ie_ & if_ & 0x1F); }
     void acknowledgeInterrupt(int bit) override { if_ = static_cast<u8>(if_ & ~(1 << bit)); }
 
