@@ -629,16 +629,40 @@ Docs leaves open and what decided it.
   `dot_ == 0` and at `dot_ == 80` on every one of the 144 visible lines and
   checks OAM against a CRC of the untouched fill. Taking `dot_ / 4 - 1`
   instead - the other plausible reading of "the row being read in this
-  M-cycle" - fails the first of those at its first corrupting M-cycle and the
-  third at `dot_ == 80`, and was measured doing so.
+  M-cycle" - does **not** fail at `dot_ == 80`: `oamScanRow`'s bound check
+  (`if (dot_ >= kOamScanDots) return -1;`) runs before the row expression and
+  returns early there regardless of which expression follows it, so changing
+  only the expression cannot corrupt anything at that boundary, and measuring
+  it confirms `6-timing_no_bug` still passes. What the expression change does
+  do: `oamCorrupt` refuses row 0 as well as any negative row ("row 0 has no
+  preceding row"), so shifting every row down by one turns the M-cycle that
+  used to map to row 1 into one that maps to row 0 and no longer corrupts,
+  while the M-cycle that used to map to row 19 now maps to row 18 - row 19
+  becomes unreachable, and the window shrinks from nineteen consecutive
+  corrupting M-cycles to eighteen. Measured on 2026-09-22 (row expression
+  changed alone, bound left as committed): `oam bug` 4/7, not the 3/7 an
+  earlier version of this entry implied - `4-scanline_timing` fails at its
+  `Failed #3` (the M-cycle expected to be the nineteenth and last of the
+  corrupting run no longer corrupts, because row 19 is unreachable),
+  `5-timing_bug` fails at `Failed #2`, and `8-instr_effect` fails at
+  `Failed #2` (its whole-OAM CRC catches the row 19 gap directly);
+  `6-timing_no_bug` passes as the bound argument above predicts. The lower
+  3/7 the earlier version of this entry cited must have come from a variant
+  that also moved the bound, which was never written down; this entry now
+  states only the mutation actually measured; one-line change to
+  `oamScanRow`'s `return` statement, bound untouched.
 - **`inc rr` and `dec rr` drive the address bus in their second M-cycle.**
   Pan Docs gives the instruction two M-cycles but does not say which of them
-  the IDU runs in. `Cpu::executeWide` now calls `bus_.idle()` before
-  `bus_.iduCycle(before)`, which puts the report after the M-cycle it belongs
-  to, as every other `iduCycle` call site already did. With the two lines the
-  other way round the `oam bug` group scores 3/7 instead of 7/7; that was
-  measured, not assumed. No cycle moves either way, and SingleStepTests stays
-  at 499/500.
+  the IDU runs in. There is a physical account, not only a measured one: in
+  the instruction's first M-cycle the address bus is carrying PC, because
+  that M-cycle is the opcode fetch - the increment/decrement unit cannot also
+  be driving `rr` onto the same bus at the same time, so its activity has to
+  belong to the instruction's second, internal M-cycle instead. `Cpu::executeWide`
+  now calls `bus_.idle()` before `bus_.iduCycle(before)`, which puts the
+  report after the M-cycle it belongs to, as every other `iduCycle` call site
+  already did. With the two lines the other way round the `oam bug` group
+  scores 3/7 instead of 7/7; that was measured too, not only derived. No
+  cycle moves either way, and SingleStepTests stays at 499/500.
 - **The pattern is applied at the end of the M-cycle, not at the access.**
   A read and a write in the same M-cycle mean something other than either of
   them alone, so `Ppu` records what the CPU did to the bus (`corruptRead_`,
@@ -648,17 +672,31 @@ Docs leaves open and what decided it.
   `ld a,(hl+)` and an opcode fetch from OAM produce Pan Docs' combined
   pattern, and what makes `ld (hl+),a` and the middle M-cycle of a `push`
   produce one write rather than two.
-- **Two `ReadWrite` M-cycles, not Pan Docs' "three times", for `pop`.** Pan
-  Docs says `pop` "will trigger the bug only 3 times (instead of the expected
-  4 times); one read, one glitched write, and another read without a glitched
-  write". FourShades' `pop16` instead produces a read and an IDU write in each
-  of its two M-cycles, so two combined `ReadWrite` corruptions. The
-  instruction-effect ROM checks a CRC over the whole of OAM after `pop bc`
-  from $FEF0 and passes, so the observable result is the same; removing the
-  four-input expression makes exactly that subtest fail, which is how the
-  combined pattern is known to be reached at all. The wording above is
-  therefore read as a description of the two combined corruptions rather than
-  of three separate events.
+- **`pop` produces two `ReadWrite` M-cycles; Pan Docs' wording describes two
+  M-cycles of its own, one of them different.** Pan Docs says `pop` "will
+  trigger the bug only 3 times (instead of the expected 4 times); one read,
+  one glitched write, and another read without a glitched write" - which
+  already reconciles to two M-cycles on its own terms: the first a read plus
+  a glitched write (the combined pattern), the second a read with *no*
+  glitched write (a plain read). `Cpu::pop16` instead calls `bus_.iduCycle`
+  after each of its two reads, so both M-cycles get the combined `ReadWrite`
+  pattern - the sentence is a real divergence, not a description that turns
+  out to match once reworded.
+  - **Measured, not assumed, on 2026-09-22.** Suppressing the second
+    `iduCycle` call, so the second M-cycle records a plain read exactly as
+    Pan Docs describes, and running the full suite gives identical scores to
+    the committed code either way: `oam bug` 7/7, test roms 106/165 (no group
+    moved), SingleStepTests 499/500. The instruction-effect ROM's CRC over
+    the whole of OAM after `pop bc` from $FEF0 passes under both readings.
+    Both behaviours satisfy every test in the suite; nothing measured here
+    distinguishes them.
+  - **Decision:** FourShades keeps the committed two-`ReadWrite` behaviour.
+    That is a choice, not a finding - it is what falls out of `pop16` calling
+    `bus_.iduCycle` after each read the same way every other call site does,
+    with no special case carved out for `pop`'s second read to match Pan
+    Docs' wording on no evidence that it matters. The divergence from Pan
+    Docs' prose stands, unresolved by anything in the suite; a future test
+    ROM that arbitrates it should decide this properly.
 - **Accesses the PPU's lock refuses still corrupt.** `GameBoy::read` and
   `GameBoy::write` report the access to the PPU before `busRead`/`writeMemory`
   decide whether it goes through, so a read that returns $FF and a write that
@@ -667,27 +705,44 @@ Docs leaves open and what decided it.
   the instruction-effect ROM's `pop` subtest; the rest of the group still
   passes, so they are pinned by one subtest only.
 
-### Still unimplemented: the PC increment on an operand byte
+### Still unimplemented: the PC increment on an operand byte, the CB byte included
 
 Pan Docs: "If a multi-byte opcode is executed from $FDFF or $FDFE, [the] bug
 will similarly trigger twice for every read from OAM" - once for the read and
-once for the IDU write that increments PC. FourShades reports the IDU for
-opcode fetches (including a CB prefix's second byte) but not for operand
-bytes: `Cpu::fetch8` performs the read and advances PC without calling
-`bus_.iduCycle`, a decision taken in the CPU task and left alone here. So an
-instruction whose *operand* bytes lie in OAM produces a read corruption where
-hardware produces the combined read-and-write one.
+once for the IDU write that increments PC. FourShades reports the IDU for the
+first byte of every opcode fetch (`Cpu::step`, which reads and then calls
+`bus_.iduCycle` on the same M-cycle) but not for any byte `Cpu::fetch8` reads:
+`fetch8` performs the read and advances PC without calling `bus_.iduCycle`, a
+decision taken in the CPU task and left alone here. So an instruction whose
+*operand* bytes lie in OAM produces a read corruption where hardware produces
+the combined read-and-write one.
 
-Nothing in the 165 ROMs measures it. Adding the call to `fetch8` was tried:
-the `oam bug` group stays 7/7 and SingleStepTests stays 499/500, so the suite
-is neutral on it, and the change as written also double-reports the CB prefix
-byte (which `executeCb` already reports by hand, precisely because `fetch8`
-serves genuine operands too). It was reverted rather than landed on no
-evidence. A future task that wants it should move the CB report into `fetch8`
-and update `tests/test_cpu_idu.cpp` in the same change.
+**The gap includes the CB prefix's second byte, not just genuine operands.**
+`Cpu::executeCb` calls `bus_.iduCycle(regs.pc)` of its own accord, but it does
+so *before* calling `fetch8`, with no tick in between since the M-cycle that
+fetched the `CB` byte itself - so that call reports against the M-cycle
+`step()` already reported (where the write flag is already set) and changes
+nothing. The actual `fetch8` call that follows reads the CB-instruction's own
+byte on a fresh M-cycle and, like any other `fetch8` call, reports no IDU
+write for it. An earlier version of this entry said FourShades reports the
+IDU for opcode fetches "including a CB prefix's second byte" - that was
+wrong; the CB byte gets exactly the plain-read shape this section describes
+as unclosed, the same as a genuine operand byte would.
 
-- **Checked:** 2026-09-22, from a full `rom_runner` run (`oam bug` 7/7, test
-  roms 106/165) and a full `sst_runner` run (499/500).
+**Measured against the full suite, not just `oam bug` and SingleStepTests.**
+Adding the call to `fetch8` was tried and the full 165-ROM suite was run with
+it in place: test roms 106/165, with every group unchanged, including
+`oam bug` 7/7; SingleStepTests stays 499/500. The suite is neutral on this
+gap in full, not merely on the seven `oam bug` ROMs. The change was reverted
+rather than landed on no evidence. Landing it properly would also mean
+deleting `executeCb`'s now-redundant manual `bus_.iduCycle` call (harmless
+today only because it is a no-op against an already-set write flag) and
+updating `tests/test_cpu_idu.cpp` in the same change.
+
+- **Checked:** 2026-09-22, from a full `rom_runner` run over all 165 ROMs
+  (`oam bug` 7/7, test roms 106/165, no group moved) and a full `sst_runner`
+  run (499/500), with the `fetch8` change in place for the measurement and
+  reverted afterward.
 
 ## Timing model (not a divergence: where Pan Docs is silent)
 

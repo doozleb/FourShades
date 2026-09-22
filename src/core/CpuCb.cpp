@@ -5,9 +5,15 @@ namespace fourshades {
 // CB xx: x = 0 rotate/shift/swap, 1 BIT, 2 RES, 3 SET; y = operation or bit;
 // z = register (6 is (HL), which reads memory and, except for BIT, writes it back).
 void Cpu::executeCb() {
-    // The CB byte is the second byte of a two-byte opcode, not an operand, so
-    // this fetch is reported like any other opcode fetch (see step()). It is
-    // not inside fetch8() itself, which also serves genuine operand reads.
+    // The CB byte is the second byte of a two-byte opcode, not an operand,
+    // and Pan Docs' opcode-fetch IDU report is meant to apply to it too - but
+    // unlike step(), which reports its read's IDU write *after* reading, this
+    // reports *before* calling fetch8(). No tick intervenes since the prefix
+    // byte's own M-cycle, so this call lands on that M-cycle - where the
+    // write flag step() already set is still set - and is a no-op. The CB
+    // byte's own M-cycle, read by fetch8() below, gets only a plain read: see
+    // docs/known-divergences.md, "Still unimplemented: the PC increment on an
+    // operand byte, the CB byte included".
     bus_.iduCycle(regs.pc);
     const u8 opcode = fetch8();
     const int x = opcode >> 6;

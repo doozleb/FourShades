@@ -108,13 +108,20 @@ public:
     const std::vector<Object>& lineObjects() const { return lineObjects_; }
     int objectHeight() const { return (lcdc_ & 0x04) != 0 ? 16 : 8; }
 
-    // The DMG OAM corruption bug (Pan Docs, "OAM Corruption Bug"). OAM is 20
-    // rows of 8 bytes, and during mode 2 the PPU reads one row per M-cycle,
-    // row 0 first. A CPU access anywhere in FE00-FEFF during one of those
-    // M-cycles - including the one the 16-bit increment/decrement unit makes
-    // on its own, because the IDU is tied straight to the address bus -
-    // scrambles the row the PPU is reading right then. Neither the address
-    // used nor the value written has any effect on the result.
+    // The DMG OAM corruption bug (Pan Docs, "OAM Corruption Bug"). Pan Docs
+    // describes the PPU as reading one of OAM's 20 rows of 8 bytes per
+    // M-cycle during mode 2, row 0 first, and a CPU access anywhere in
+    // FE00-FEFF during one of those M-cycles - including the one the 16-bit
+    // increment/decrement unit makes on its own, because the IDU is tied
+    // straight to the address bus - as scrambling the row the PPU is reading
+    // right then. FourShades has no such per-row read to collide with: mode
+    // 2 here is `scanOam()`, which runs once, over all 40 objects, at dot 80,
+    // with no internal row pointer. What actually happens is that the access
+    // scrambles the row `oamScanRow()` names for the M-cycle it landed in - a
+    // convention fitted to place the OAM-bug ROMs' corruptions where they
+    // measure them, not a row a PPU read is ever caught mid-flight on.
+    // Neither the address used nor the value written has any effect on the
+    // result.
     //
     // Kind is what the CPU did to the bus in that M-cycle. Read and Write
     // are Pan Docs' two patterns; ReadWrite is its "Read During
@@ -134,8 +141,13 @@ public:
     void oamCorruptIfScanning(u16 address) { oamBusAccess(address, Kind::Write); }
     void oamBusAccess(u16 address, Kind kind);
 
-    // The OAM row the PPU read during the M-cycle that has just been ticked,
-    // or -1 if it read none. Only meaningful between two ticks.
+    // The row a CPU access lands on if it collides with the M-cycle that has
+    // just been ticked, or -1 if no row collides there. This names a
+    // convention fitted to where the OAM-bug ROMs place their corruptions
+    // (see docs/known-divergences.md, "The OAM corruption bug"), not a row
+    // the PPU is actually reading - there is no per-row OAM read in this
+    // model to agree or disagree with; `scanOam()` reads all 40 objects at
+    // once, at dot 80. Only meaningful between two ticks.
     int oamScanRow() const;
 
 private:
