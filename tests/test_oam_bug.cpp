@@ -185,31 +185,80 @@ TEST_CASE("an access after the last row of the scan is too late") {
 
 TEST_CASE("the CPU's address unit corrupts OAM through the bus") {
     // A DMG powers on at line 0 dot 0, in mode 2, so the scan is running from
-    // the first instruction. LD HL,nn takes three M-cycles and INC HL two,
-    // and the increment unit drives HL in the second of those - the internal
-    // one, not the opcode fetch - which is the boundary at dot 20, where the
-    // PPU is about to read row 5. The following NOP's fetch ends that
-    // M-cycle and the corruption lands.
-    auto gb = makeGameBoy({0x21, 0x20, 0xFE, 0x23, 0x00}); // LD HL,FE20 ; INC HL ; NOP
+    // the first instruction. Four leading NOPs, then LD HL,nn (three
+    // M-cycles) and INC HL (two) put the increment unit's internal M-cycle -
+    // not the opcode fetch - on the boundary at dot 36, row 9. The following
+    // NOP's fetch ends that M-cycle and the corruption lands.
+    auto gb = makeGameBoy({0x00, 0x00, 0x00, 0x00, 0x21, 0x20, 0xFE, 0x23, 0x00});
+    // NOP x4 ; LD HL,FE20 ; INC HL ; NOP
     for (int i = 0; i < 0xA0; ++i) {
-        gb->ppu().dmaWriteOam(i, static_cast<u8>(i));
+        gb->ppu().dmaWriteOam(i, fillByte(i));
     }
     REQUIRE(gb->ppu().mode() == 2);
     REQUIRE(gb->ppu().lineDot() == 0);
+    const u16 a = word(gb->ppu(), 9, 0);
+    const u16 b = word(gb->ppu(), 8, 0);
+    const u16 c = word(gb->ppu(), 8, 2);
+    const u16 writePattern = static_cast<u16>(((a ^ c) & (b ^ c)) ^ c);
+    const u16 readPattern = static_cast<u16>(b | (a & c));
+    // The two patterns must differ on this fill, or this test would pin the
+    // row and the wiring without pinning which pattern ran.
+    REQUIRE(writePattern != readPattern);
+    for (int i = 0; i < 4; ++i) {
+        gb->step(); // NOP x4
+    }
     gb->step(); // LD HL
     gb->step(); // INC HL
-    REQUIRE(gb->ppu().lineDot() == 20);
+    REQUIRE(gb->ppu().lineDot() == 36);
     gb->step(); // NOP
-    // Row 5 took the write pattern; every other row is untouched, which also
-    // says the address INC HL happened to hold had no say in which row it was.
-    CHECK(gb->ppu().peekOam(0xFE28) == 0x20);
-    CHECK(gb->ppu().peekOam(0xFE29) == 0x21);
+    // The IDU-only access is Kind::Write, so row 9 takes the write pattern;
+    // every other row is untouched, which also says the address INC HL
+    // happened to hold had no say in which row it was.
+    CHECK(word(gb->ppu(), 9, 0) == writePattern);
     for (int i = 0; i < 0xA0; ++i) {
-        if (i / 8 == 5) {
+        if (i / 8 == 9) {
             continue;
         }
-        CHECK(gb->ppu().peekOam(static_cast<u16>(0xFE00 + i)) == static_cast<u8>(i));
+        CHECK(gb->ppu().peekOam(static_cast<u16>(0xFE00 + i)) == fillByte(i));
     }
+}
+
+TEST_CASE("ld a,(hl+) drives the combined read-write pattern through a real instruction") {
+    // LD HL,nn is three M-cycles; LD A,(HL+) is two, and its second M-cycle
+    // is both the memory read and the IDU's increment of HL, landing on the
+    // same boundary as the INC HL case above - dot 20, row 5 - but this time
+    // as a genuine read plus an IDU write in one M-cycle, which
+    // flushOamCorruption applies as Kind::ReadWrite (Pan Docs' "Read During
+    // Increase/Decrease"). This is the only unit test that drives that
+    // pattern through a real instruction rather than the primitive.
+    auto gb = makeGameBoy({0x21, 0x20, 0xFE, 0x2A, 0x00}); // LD HL,FE20 ; LD A,(HL+) ; NOP
+    for (int i = 0; i < 0xA0; ++i) {
+        gb->ppu().dmaWriteOam(i, fillByte(i));
+    }
+    REQUIRE(gb->ppu().mode() == 2);
+    REQUIRE(gb->ppu().lineDot() == 0);
+    const int row = 5;
+    const u16 a = word(gb->ppu(), row - 2, 0);
+    const u16 b = word(gb->ppu(), row - 1, 0);
+    const u16 c = word(gb->ppu(), row, 0);
+    const u16 d = word(gb->ppu(), row - 1, 2);
+    const u16 glitched = static_cast<u16>((b & (a | c | d)) | (a & c & d));
+    gb->step(); // LD HL
+    gb->step(); // LD A,(HL+)
+    REQUIRE(gb->ppu().lineDot() == 20);
+    gb->step(); // NOP
+    // The preceding row's first word takes the four-input expression and its
+    // whole contents are copied to the rows on either side of it, then the
+    // ordinary read corruption that follows rewrites the accessed row.
+    CHECK(word(gb->ppu(), row - 1, 0) == glitched);
+    CHECK(word(gb->ppu(), row - 2, 0) == glitched);
+    const u16 c2 = word(gb->ppu(), row - 1, 2);
+    CHECK(word(gb->ppu(), row, 0) == static_cast<u16>(glitched | (glitched & c2)));
+    CHECK(gb->cpu().regs.hl() == 0xFE21); // HL still incremented
+    // The PPU's lock refuses the read itself during mode 2 (see the plain
+    // read/write case below), so A holds the locked-out value, not the byte
+    // that was there - same as any other OAM read while the scan is running.
+    CHECK(gb->cpu().regs.a == 0xFF);
 }
 
 TEST_CASE("a plain CPU read or write of OAM corrupts it too, each with its own pattern") {
@@ -245,12 +294,12 @@ TEST_CASE("a plain CPU read or write of OAM corrupts it too, each with its own p
 TEST_CASE("an address outside FE00-FEFF never corrupts OAM") {
     auto gb = makeGameBoy({0x21, 0x00, 0xC0, 0x23, 0x00}); // LD HL,C000 ; INC HL ; NOP
     for (int i = 0; i < 0xA0; ++i) {
-        gb->ppu().dmaWriteOam(i, static_cast<u8>(i));
+        gb->ppu().dmaWriteOam(i, fillByte(i));
     }
     gb->step();
     gb->step();
     gb->step();
     for (int i = 0; i < 0xA0; ++i) {
-        CHECK(gb->ppu().peekOam(static_cast<u16>(0xFE00 + i)) == static_cast<u8>(i));
+        CHECK(gb->ppu().peekOam(static_cast<u16>(0xFE00 + i)) == fillByte(i));
     }
 }
