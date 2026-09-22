@@ -11,6 +11,9 @@
 // dropped onto it. A ROM that fails to load, from a drop, reports
 // Cartridge::load's message and returns to waiting rather than closing the
 // window.
+//
+// Keys: arrows, Z, X, Enter and Backspace are the joypad; P toggles the
+// palette; Space pauses; R resets.
 #include "app/AppController.h"
 #include "app/Input.h"
 #include "app/Save.h"
@@ -192,6 +195,24 @@ void renderWaiting(SDL_Renderer* renderer, app::Palette palette, int windowW, in
     SDL_SetRenderScale(renderer, 1.0f, 1.0f);
 }
 
+// The pause badge: a dark plate and one word over the top of the frozen
+// frame, because a still picture with no label looks exactly like an
+// emulator that has hung.
+void renderPausedBadge(SDL_Renderer* renderer, int windowW) {
+    const std::string label = "PAUSED";
+    constexpr float kScale = 2.0f;
+    const float textW = kCharSize * static_cast<float>(label.size()) * kScale;
+    const float textH = kCharSize * kScale;
+    const SDL_FRect plate{(static_cast<float>(windowW) - textW) / 2.0f - 8.0f, 8.0f, textW + 16.0f,
+                          textH + 8.0f};
+    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderFillRect(renderer, &plate);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    drawTextLine(renderer, label, kScale, windowW, 12.0f);
+    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -254,6 +275,10 @@ int main(int argc, char** argv) {
     // The most recent drop's failure, shown under the prompt until the next
     // successful load. Empty otherwise, including at startup.
     std::string waitingMessage;
+    // Space freezes the machine where it stands; the window keeps drawing
+    // the last frame it produced. Nothing about the machine changes, so
+    // resuming continues the same instruction stream.
+    bool paused = false;
 
     bool running = true;
     Uint64 nextFrameDeadline = SDL_GetTicksNS() + kFrameNs;
@@ -265,11 +290,34 @@ int main(int argc, char** argv) {
                 running = false;
             } else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_P) {
                 palette = (palette == app::Palette::Grey) ? app::Palette::Green : app::Palette::Grey;
+            } else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+                       event.key.key == SDLK_SPACE) {
+                if (controller.state() == AppState::Running) {
+                    paused = !paused;
+                    if (paused) {
+                        // A pause is the one moment the player knows they
+                        // are safe, so it is worth making that true: the
+                        // battery RAM goes to disk here, through the same
+                        // atomic write a clean exit uses. Nothing is read
+                        // back and the machine is not touched, so this can
+                        // only ever give the save one more chance to
+                        // survive.
+                        saveSession(controller, session);
+                    }
+                }
+            } else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_R) {
+                // Rebuilt from the cartridge by AppController, never poked
+                // back into shape here. A reset always resumes: coming back
+                // from R to a still picture would look like a crash.
+                if (controller.reset()) {
+                    paused = false;
+                }
             } else if (event.type == SDL_EVENT_DROP_FILE) {
                 const std::string path = event.drop.data != nullptr ? event.drop.data : "";
                 std::string error;
                 if (loadRomFromPath(controller, path, error, session)) {
                     waitingMessage.clear();
+                    paused = false;
                 } else {
                     waitingMessage = error;
                 }
@@ -286,22 +334,26 @@ int main(int argc, char** argv) {
         if (controller.state() == AppState::Running) {
             GameBoy& gameBoy = controller.gameBoy();
 
-            // The whole keyboard, once per frame, just before the frame that
-            // will see it runs. SDL has already drained this frame's key
-            // events into that array above, so a press and a release inside
-            // one frame is the one case this misses -- 16.7 ms of held key,
-            // which no human produces and no game could act on anyway.
-            int numKeys = 0;
-            const bool* keys = SDL_GetKeyboardState(&numKeys);
-            gameBoy.setButtons(app::buttonMask(keys, numKeys));
+            if (!paused) {
+                // The whole keyboard, once per frame, just before the frame that
+                // will see it runs. SDL has already drained this frame's key
+                // events into that array above, so a press and a release inside
+                // one frame is the one case this misses -- 16.7 ms of held key,
+                // which no human produces and no game could act on anyway.
+                int numKeys = 0;
+                const bool* keys = SDL_GetKeyboardState(&numKeys);
+                gameBoy.setButtons(app::buttonMask(keys, numKeys));
 
-            // Driven by the frame counter, not a fixed cycle count, so this
-            // loop stays correct if the PPU's own timing is ever refined.
-            const std::uint64_t before = gameBoy.ppu().frameCount();
-            while (gameBoy.ppu().frameCount() == before) {
-                gameBoy.step();
+                // Driven by the frame counter, not a fixed cycle count, so this
+                // loop stays correct if the PPU's own timing is ever refined.
+                const std::uint64_t before = gameBoy.ppu().frameCount();
+                while (gameBoy.ppu().frameCount() == before) {
+                    gameBoy.step();
+                }
             }
 
+            // Outside the pause: the frame is re-coloured and re-uploaded
+            // every time round, so P still repaints a frozen picture.
             const std::array<u8, Ppu::kWidth * Ppu::kHeight>& frame = gameBoy.ppu().frame();
             for (std::size_t i = 0; i < frame.size(); ++i) {
                 pixels[i] = app::shadeToRgb(palette, frame[i]);
@@ -317,6 +369,9 @@ int main(int argc, char** argv) {
             SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255); // neutral border colour
             SDL_RenderClear(renderer);
             SDL_RenderTexture(renderer, texture, nullptr, &dst);
+            if (paused) {
+                renderPausedBadge(renderer, windowW);
+            }
         } else {
             renderWaiting(renderer, palette, windowW, windowH, waitingMessage);
         }

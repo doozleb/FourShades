@@ -1,6 +1,8 @@
 # Piece 3b: a window you can play in. Design
 
-**Status:** draft for review, 2026-09-22
+**Status:** implemented 2026-09-22. SingleStepTests stayed at 499 / 500 and
+the test ROMs at 106 / 165 throughout, as this piece intended. Five
+deviations are recorded under "Deviations from the spec" below.
 
 ## What this is
 
@@ -118,3 +120,60 @@ CI builds the app target so it cannot rot, but does not run it headless.
   core behaviours with hardware documents behind them and get their own tests.
 - CI builds the app target.
 - A game with a battery keeps its progress across a close and reopen.
+
+## Deviations from the spec
+
+Five things shipped differently from what is written above. The first is the
+one worth reading: it is a decision taken at review that did not survive
+contact with a user.
+
+- **"No ROM argument: say so and exit" (decision 2) was wrong, and is now the
+  opposite.** The reasoning at review was that a message naming what was
+  expected beats a silent failure. It does -- but only for someone who can
+  see the message. A user double-clicked `fourshades_app.exe`, which gets no
+  console to print into, saw a process appear and vanish, and reported "it
+  does not run". The app now opens the window with no ROM and invites one to
+  be dropped on it. Nothing about the command-line case changed: a bad path
+  or an unsupported cartridge given as an argument is still reported on
+  stderr and still exits non-zero, because that case has a console and a
+  script reading it. Shipped in `8fcd815`.
+
+- **Drag-and-drop arrived one task early.** Decision 2's "the window also
+  accepts a ROM dropped onto it" was planned for the last task. It moved into
+  the second one, because the waiting window above has nothing else it can
+  do: a window that invites a drop and does not accept one is worse than no
+  window. Same scope, earlier.
+
+- **Reset keeps battery-backed cartridge RAM; the spec did not say.**
+  Decision 3 says reset rebuilds the machine from the cartridge, and it does:
+  `AppController::reset` constructs a new `GameBoy` over a pristine copy of
+  the cartridge, so no CPU register, no byte of RAM and no MBC bank register
+  survives. The one thing carried across is battery-backed cartridge RAM. A
+  DMG has no reset button, so the nearest real thing is switching it off and
+  on again, and that does not empty the battery -- a reset that wiped the
+  save would lose a player's progress every time they used it. Cartridge RAM
+  with no battery behind it is not carried: nothing was holding it up.
+  Pausing also writes the save file, which the spec did not mention either;
+  it only ever adds a chance for the save to survive, since the write is the
+  same atomic one used at exit.
+
+- **The window opens at 3x, not the 4x under "Presentation".** 480x432
+  rather than 640x576. It is resizable and the integer-scaling rule is
+  exactly as specified; only the opening size differs. This shipped in
+  `05c56a2` without a note, and is recorded here rather than changed, since
+  nothing depends on the number.
+
+- **Frame pacing is a sleep, never vsync, and is not unit-tested.** The
+  "Frame loop" section asks for vsync where the display cooperates, a sleep
+  otherwise, and for the choice to be measured and recorded. What shipped is
+  the sleep alone: `SDL_DelayNS` to the DMG's own 59.727 Hz frame period,
+  with no vsync path written and no measurement of one taken. The reason for
+  the sleep is in the spec's own sentence -- vsync paces to the monitor's
+  60 Hz, which is the drift piece 5's audio would inherit -- but the
+  comparison the spec asked for was not made, so that clause is unmet rather
+  than satisfied. The "Testing" section's "frame-pacing arithmetic, as a pure
+  function of elapsed time" is likewise unmet: the arithmetic is four lines
+  inline in `main.cpp`'s loop and has no test. Both are open, and cheap to
+  close if the pacing is ever revisited.
+
+- Recorded 2026-09-22.

@@ -10,13 +10,14 @@ test roms         ██████████░░░░░░   106 / 165
 ```
 <!-- scoreboard:end -->
 
-**Status: the PPU is done (piece 3 of 6).** FourShades is a Game Boy that runs
-real test ROMs headless: memory map, MBC1 cartridge, timer, interrupts,
-serial, OAM DMA, and a dot-by-dot picture-processing unit that draws
-background, window and objects into a 160x144 frame in memory. It passes
-dmg-acid2. There is still no window to show the frame in, no sound, and no
-joypad input - P1 always reports no buttons held; the SDL3 window is the next
-piece.
+**Status: there is a window, and you can play in it (piece 3b of 6).**
+FourShades is a Game Boy that runs real test ROMs headless - memory map, MBC1
+cartridge, timer, interrupts, serial, OAM DMA, and a dot-by-dot
+picture-processing unit that draws background, window and objects into a
+160x144 frame in memory. It passes dmg-acid2. That frame now goes to an SDL3
+window at the DMG's own 59.727 Hz, the keyboard reaches the joypad register,
+and a cartridge with a battery keeps its save. There is still no sound (piece
+5) and no cartridge controller beyond MBC1 (piece 4).
 
 The two lines above mean:
 
@@ -186,11 +187,12 @@ project page is **[doozleb.com/projects/fourshades](https://doozleb.com/projects
 
 ```
 src/core/                 the emulator core: CPU, memory map, timer, serial, cartridge, PPU (no window, no files)
+app/                      the SDL3 window: presentation, keyboard, save files, and the state machine behind them
 tests/                    unit tests (doctest)
 tools/sst/                the SingleStepTests harness and pinned-data manifest
 tools/roms/               the test-ROM harness, its pinned test list and manifest
 tools/scoreboard.py       turns a test run into the scoreboard above
-third_party/              vendored doctest and nlohmann/json, hash-pinned
+third_party/              vendored doctest, nlohmann/json and SDL3, hash-pinned
 docs/superpowers/specs/   the reasoning behind each piece
 docs/superpowers/plans/   task-by-task implementation plans
 docs/known-divergences.md where a test and the hardware documentation disagree
@@ -205,6 +207,7 @@ newer for the test-data fetcher and the scoreboard scripts. Open the folder in
 Visual Studio, or from PowerShell:
 
 ```powershell
+python third_party/sdl/fetch_sdl.py        # SDL3, pinned and hash-checked; configure fails without it
 .\tools\dev.cmd cmake --preset release
 .\tools\dev.cmd cmake --build --preset release
 .\tools\dev.cmd ctest --preset release
@@ -213,6 +216,35 @@ python tools/sst/fetch_sst.py              # the test data, pinned and hash-chec
 python tools/roms/fetch_roms.py            # the test ROMs, pinned and hash-checked
 .\build\release\tools\roms\rom_runner.exe  # score the machine against the test ROMs
 ```
+
+## Playing something
+
+```powershell
+.\build\release\app\fourshades_app.exe path\to\game.gb
+```
+
+Started with no argument - double-clicked, say - it opens a window that
+invites a ROM to be dropped onto it, and a ROM dropped on a running window
+replaces the one playing. A bad path or an unsupported cartridge on the
+command line is reported on stderr and exits non-zero; a bad drop says why on
+the window and waits for another one.
+
+| key | |
+|---|---|
+| arrow keys | d-pad |
+| Z, X | A, B |
+| Enter, Backspace | Start, Select |
+| P | toggle the grey and green palettes |
+| Space | pause; also writes the save to disk |
+| R | reset: a power cycle, not a poke - the machine is rebuilt from the cartridge |
+
+A cartridge whose header declares a battery gets a `.sav` beside the ROM, in
+raw cartridge-RAM order so other emulators can read it. It is restored when
+the ROM loads and written on exit, on pause, and before a dropped ROM
+replaces the machine - always through a temporary file and a rename, so an
+interrupted write cannot destroy the save that was already there. A reset
+keeps that RAM, because that is what the battery is for; everything else
+about the machine is thrown away.
 
 ## Planned scope
 
@@ -223,13 +255,14 @@ Six pieces, each gated on the test ROMs rather than on looking right:
 | 1 | **SM83 CPU** — every opcode, cycle by cycle | done: 499 / 500 |
 | 2 | **The machine** — memory map, MBC1, timer, interrupts, serial, DMA, and the test-ROM scoreboard | done: 85 / 165 |
 | 3 | **The PPU** — background, window, sprites, and the mid-scanline behaviour that makes this hard | done: 106 / 165 |
-| 3b | **A window** — SDL3, so the frame can be seen and the buttons pressed | next |
-| 4 | **Cartridge chips** — MBC2, MBC3 with its clock, MBC5 | |
+| 3b | **A window** — SDL3, so the frame can be seen and the buttons pressed | done |
+| 4 | **Cartridge chips** — MBC2, MBC3 with its clock, MBC5 | next |
 | 5 | **Sound** | |
 | 6 | **In the browser** — the same core compiled to WebAssembly, playable on the site | |
 
-dmg-acid2 passes, so the next milestone is seeing a picture rather than
-hashing one: an SDL3 window, joypad input, and a commercial game on screen.
+The picture is on screen and the buttons work, so the next milestone is the
+cartridges: of the 59 test ROMs still failing, 19 are refused at the door for
+declaring a cartridge type this build does not support.
 
 ## Licence
 
