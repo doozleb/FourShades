@@ -70,6 +70,11 @@ add_custom_command(TARGET sdl_probe POST_BUILD
     COMMENT "Copying SDL3.dll next to sdl_probe"
 )
 
+# ---------------------------------------------------------------------------
+# The playable window (piece 3b). Never linked into src/core.
+# ---------------------------------------------------------------------------
+add_subdirectory(app)
+
 enable_testing()
 
 # ---------------------------------------------------------------------------
@@ -82,4 +87,4 @@ target_include_directories(fourshades_tests PRIVATE src tools)
 # (doctest's C5285) don't bury ours.
 target_include_directories(fourshades_tests SYSTEM PRIVATE third_party)
 add_test(NAME unit COMMAND fourshades_tests)
-target_link_libraries(fourshades_tests PRIVATE sst_harness rom_harness)
+target_link_libraries(fourshades_tests PRIVATE sst_harness rom_harness screen_lib)
