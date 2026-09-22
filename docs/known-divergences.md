@@ -34,17 +34,25 @@ decision and its date.
   but STOP doesn't use them yet):
   - STOP never wakes. Pan Docs' way out of STOP mode is a button press, and
     there is no joypad input yet (P1 always reads "no buttons pressed").
-    Joypad input arrives with the window in piece 3, and STOP's wake-up with it.
+    The "window" this line used to point at was the PPU's window layer, which
+    piece 3 delivered without any joypad input; joypad input arrives with the
+    SDL3 window in the next piece, and STOP's wake-up with it. (Corrected
+    2026-09-22.)
   - STOP doesn't reset DIV. That is to be done with the planned
     centralisation of the system counter's edge handling (so a reset's
     falling edges reach the timer, and later the sound chip, from one place),
     before piece 5.
   - The interrupt-pending branch, where Pan Docs makes STOP a 1-byte opcode,
-    isn't implemented: STOP is always 2 bytes. It is planned for piece 3,
-    together with the button-held branches, which need joypad input.
+    isn't implemented: STOP is always 2 bytes. It waits, with the
+    button-held branches, on joypad input, which the SDL3 window brings in
+    the next piece — not on piece 3, which built the PPU. (Corrected
+    2026-09-22.)
 - **Scored test affected:** `daid/stop_instr.gb (DMG)` is one of the 165
-  scored test ROMs (screen group). It is a screenshot test, so it fails for
-  now on "needs the PPU (piece 3)" before STOP's behaviour is ever checked.
+  scored test ROMs (screen group). It is a screenshot test; with the PPU
+  built (piece 3) it still fails, its image differing from the reference in
+  22,739 of 23,040 pixels as of 2026-09-22 — a whole-screen difference, so
+  what it says about STOP itself is still not being read. (Updated
+  2026-09-22; it previously said the PPU was missing.)
 - **Also noted by Pan Docs itself:** "stop is often considered a two-byte
   instruction, though the second byte is not always ignored.",
   [CPU Instruction Set](https://gbdev.io/pandocs/CPU_Instruction_Set.html#stop).
@@ -67,21 +75,30 @@ mode.
   r8`, which the page notes `halt` is the one exception to (encoding `[hl],
   [hl]` yields `halt` instead).
 
-## STAT at power-on (0xFF41): 0x86 instead of 0x85
+## STAT at power-on (0xFF41): resolved (2026-09-14)
 
-- **Test:** `tests/test_gameboy.cpp`'s power-on test checks `FF41 == 0x86`.
+- **Test:** `tests/test_gameboy.cpp`'s power-on test checks `FF41 == 0x85`,
+  and `tests/test_ppu.cpp`'s "the PPU starts where the boot ROM left it"
+  checks the PPU's own power-on state.
 - **Pan Docs:** [Power Up Sequence](https://gbdev.io/pandocs/Power_Up_Sequence.html)
   lists STAT = $85 and LY = $00 for DMG at PC = $0100 — mode 1 (VBlank) while
   LY already reads 0, i.e. the end of line 153.
-- **FourShades:** the LCD timing (`src/core/LcdTiming`) is a placeholder
-  until the PPU (piece 3) and starts at LY 0 in mode 2, so STAT reads $86.
-- **Affected:** no test ROM at present. Mooneye's `boot_hwio-dmgABCmgb` reads
-  STAT and LY only after walking $FF00-$FF3F, when the placeholder happens to
-  agree with hardware; it fails first on NR10 ($FF10 reads $FF, expected
-  $80), because sound registers arrive in piece 5. With the sound registers
-  stubbed to their power-on values in a throwaway build, it passed.
-- **Resolution:** the piece-3 PPU must reproduce the line-153 behaviour.
-- **Checked:** 2026-09-11.
+- **What FourShades did:** the LCD timing placeholder that stood in for the
+  PPU until piece 3 (`src/core/LcdTiming`, deleted when the PPU replaced it)
+  started at LY 0 in mode 2, so STAT read $86.
+- **Resolution (2026-09-14):** the PPU powers on at line 153, dot 4, in mode 1.
+  LY therefore already reads 0 (the LY=153 quirk), LYC is 0 so STAT's bit 2 is
+  set, and `read(0xFF41)` returns `0x80 | 0x04 | 1` = $85 with no special
+  case. The whole machine starts there, so every test that assumed power-on
+  was line 0 in mode 2 was given an explicit starting point instead.
+- **Test ROMs:** no ROM gained or lost (106 / 165 before and after).
+  Mooneye's `boot_hwio-dmgABCmgb` still fails, and a traced run on
+  2026-09-22 puts its first mismatch at $FF10 (NR10), the first sound
+  register: it reads $FF here because there is no APU until piece 5, where
+  the ROM wants $80. The registers it checks before that, $FF00-$FF0F, all
+  match. The ROM stops at its first mismatch, so nothing is claimed here
+  about the registers after $FF10 — STAT ($FF41) among them is never reached.
+- **Checked:** 2026-09-22.
 
 ## OAM DMA bus conflicts: resolved in favour of the hardware-verified tests (2026-09-11)
 

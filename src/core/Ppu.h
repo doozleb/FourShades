@@ -183,10 +183,14 @@ private:
     u8 obp1Glitch_ = 0x00;
     u8 paletteGlitch_ = 0x00;
 
-    int line_ = 0;   // 0-153, the real line; LY reads differently on line 153
-    int dot_ = 0;    // 0-455 within the line
-    int mode_ = 2;        // the PPU's own mode
-    int visibleMode_ = 2; // what the CPU sees: mode_ one M-cycle ago
+    // Power-on is where the boot ROM leaves the PPU. Pan Docs' Power Up
+    // Sequence gives DMG at PC = $0100 as STAT = $85, LY = $00: mode 1 with
+    // LY already reading 0, which is line 153 past its first few dots (the
+    // LY=153 quirk). STAT's bit 2 is then set because LY and LYC both read 0.
+    int line_ = 153; // 0-153, the real line; LY reads differently on line 153
+    int dot_ = 4;    // 0-455 within the line; past line 153's first dots
+    int mode_ = 1;        // the PPU's own mode: VBlank
+    int visibleMode_ = 1; // what the CPU sees: mode_ one M-cycle ago
     bool rendering_ = false;  // the pixel pipeline is running (it outlives mode 3)
     int renderLag_ = 0;       // dots still to wait before the fetcher starts
     int lineRenderLag_ = 0;   // the lag this line began with, in dots

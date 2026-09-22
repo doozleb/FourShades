@@ -13,12 +13,31 @@ u8 run(Ppu& ppu, int dots) {
     }
     return seen;
 }
+
+// Advances to the top of a frame, wherever the PPU powered on: the first
+// M-cycle boundary of line 0 at which STAT reports mode 2. STAT trails the
+// PPU's own mode by one M-cycle, so that boundary is dot 4, not dot 0 - line
+// 0 still reports mode 1 for its first M-cycle. Cases below that count dots
+// from here therefore start four dots into the line.
+void toTopOfFrame(Ppu& ppu) {
+    while (!(ppu.ly() == 0 && ppu.mode() == 2)) {
+        ppu.tick();
+    }
+}
 } // namespace
+
+TEST_CASE("the PPU starts where the boot ROM left it") {
+    Ppu ppu;
+    CHECK(ppu.mode() == 1);       // VBlank
+    CHECK(ppu.read(0xFF44) == 0); // LY reads 0 on line 153
+    CHECK(ppu.read(0xFF41) == 0x85);
+}
 
 TEST_CASE("a drawn line is mode 2, then 3, then 0, and lasts 456 dots") {
     Ppu ppu;
+    toTopOfFrame(ppu); // line 0, dot 4: the first M-cycle STAT calls mode 2
     CHECK(ppu.mode() == 2);
-    run(ppu, 76);
+    run(ppu, 72); // dot 76
     CHECK(ppu.mode() == 2);
     run(ppu, 4);            // 80 dots: the OAM scan is over ...
     CHECK(ppu.mode() == 2); // ... but STAT reports mode 2 for one more M-cycle
@@ -40,7 +59,8 @@ TEST_CASE("a drawn line is mode 2, then 3, then 0, and lasts 456 dots") {
 
 TEST_CASE("VBlank starts at line 144 and asks for its interrupt once") {
     Ppu ppu;
-    const u8 seen = run(ppu, 144 * Ppu::kDotsPerLine);
+    toTopOfFrame(ppu); // line 0, dot 4
+    const u8 seen = run(ppu, 144 * Ppu::kDotsPerLine - 4);
     CHECK(ppu.ly() == 144);
     CHECK(ppu.mode() == 0); // STAT catches up with mode 1 an M-cycle later
     CHECK((seen & 0x01) != 0);
@@ -55,7 +75,8 @@ TEST_CASE("VBlank starts at line 144 and asks for its interrupt once") {
 
 TEST_CASE("line 153 reports as line 0 after its first few dots") {
     Ppu ppu;
-    run(ppu, 153 * Ppu::kDotsPerLine);
+    toTopOfFrame(ppu); // line 0, dot 4
+    run(ppu, 153 * Ppu::kDotsPerLine - 4);
     CHECK(ppu.ly() == 153);
     run(ppu, 4);
     CHECK(ppu.ly() == 0); // still line 153 internally, but LY reads 0
@@ -64,6 +85,7 @@ TEST_CASE("line 153 reports as line 0 after its first few dots") {
 
 TEST_CASE("the STAT interrupt fires on a rising edge, not while the line stays high") {
     Ppu ppu;
+    toTopOfFrame(ppu); // line 0, dot 4: inside mode 2
     // mode 2 source only; the DMG write quirk's own interrupt (tested below)
     // comes straight back out of the write.
     CHECK((ppu.write(0xFF41, 0x20) & 0x02) != 0);
@@ -79,16 +101,18 @@ TEST_CASE("the STAT interrupt fires on a rising edge, not while the line stays h
 
 TEST_CASE("LY=LYC sets the flag and can request an interrupt") {
     Ppu ppu;
+    toTopOfFrame(ppu); // line 0, dot 4
     static_cast<void>(ppu.write(0xFF45, 0x02)); // LYC = 2
     static_cast<void>(ppu.write(0xFF41, 0x40)); // LYC source
-    const u8 seen = run(ppu, 2 * Ppu::kDotsPerLine + 4);
+    const u8 seen = run(ppu, 2 * Ppu::kDotsPerLine); // line 2, dot 4
     CHECK((ppu.read(0xFF41) & 0x04) != 0);
     CHECK((seen & 0x02) != 0);
 }
 
 TEST_CASE("writing STAT on DMG requests its spurious interrupt in the writing cycle") {
-    Ppu ppu;       // power-on: mode 2, no sources selected
-    run(ppu, 256); // now in mode 0 of line 0
+    Ppu ppu;           // no sources selected
+    toTopOfFrame(ppu); // line 0, dot 4
+    run(ppu, 252);     // now in mode 0 of line 0 (dot 256)
     CHECK(ppu.mode() == 0);
     // The write selects nothing, but acts as if 0xFF had been written for one
     // cycle, and mode 0 is among the conditions that raises the level line.
@@ -185,7 +209,8 @@ TEST_CASE("VRAM is blocked in mode 3, OAM in modes 2 and 3") {
 }
 
 TEST_CASE("DMA and peek ignore blocking") {
-    Ppu ppu; // mode 2: OAM blocked
+    Ppu ppu;
+    toTopOfFrame(ppu); // mode 2: OAM blocked
     ppu.dmaWriteOam(0, 0x5A);
     CHECK(ppu.peekOam(0xFE00) == 0x5A);
     CHECK(ppu.oamRead(0xFE00) == 0xFF);
