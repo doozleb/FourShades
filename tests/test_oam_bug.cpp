@@ -27,6 +27,21 @@ std::unique_ptr<GameBoy> makeGameBoy(std::vector<u8> program, u8 type = 0x00, u8
     return std::make_unique<GameBoy>(std::move(*cart));
 }
 
+// The PPU powers on part-way through line 153, in VBlank (Pan Docs' power-up
+// STAT = $85), so a case that wants the OAM scan running from its first
+// instruction must idle the machine to the top of a frame first. Idling
+// rather than cycling the LCD is deliberate: the line the LCD is switched on
+// for has no mode 2 at all, so nothing on it can be corrupted.
+void idleToTopOfFrame(GameBoy& gb) {
+    for (int i = 0; i < Ppu::kLines * 114 + 1; ++i) {
+        if (gb.ppu().lineNumber() == 0 && gb.ppu().lineDot() == 0) {
+            return;
+        }
+        gb.idle();
+    }
+    FAIL("the PPU never reached the top of a frame");
+}
+
 // Fills OAM with a pattern under which the bug's three formulas all give
 // different answers on most rows - a run of 0x00..0x9F does not, and would
 // let a test pass with the wrong pattern wired in. The LCD is off so the
@@ -184,17 +199,21 @@ TEST_CASE("an access after the last row of the scan is too late") {
 }
 
 TEST_CASE("the CPU's address unit corrupts OAM through the bus") {
-    // A DMG powers on at line 0 dot 0, in mode 2, so the scan is running from
-    // the first instruction. Four leading NOPs, then LD HL,nn (three
-    // M-cycles) and INC HL (two) put the increment unit's internal M-cycle -
-    // not the opcode fetch - on the boundary at dot 36, row 9. The following
-    // NOP's fetch ends that M-cycle and the corruption lands.
+    // The machine is idled to line 0 dot 0, where the OAM scan has just
+    // begun, so the scan is running from the first instruction. Four leading
+    // NOPs, then LD HL,nn (three M-cycles) and INC HL (two) put the increment
+    // unit's internal M-cycle - not the opcode fetch - on the boundary at dot
+    // 36, row 9. The following NOP's fetch ends that M-cycle and the
+    // corruption lands.
     auto gb = makeGameBoy({0x00, 0x00, 0x00, 0x00, 0x21, 0x20, 0xFE, 0x23, 0x00});
     // NOP x4 ; LD HL,FE20 ; INC HL ; NOP
+    idleToTopOfFrame(*gb);
     for (int i = 0; i < 0xA0; ++i) {
         gb->ppu().dmaWriteOam(i, fillByte(i));
     }
-    REQUIRE(gb->ppu().mode() == 2);
+    // STAT trails the PPU by an M-cycle and still says mode 1 here, so the
+    // scan itself is what this asserts: row 0's read begins on this boundary.
+    REQUIRE(gb->ppu().oamScanRow() == 0);
     REQUIRE(gb->ppu().lineDot() == 0);
     const u16 a = word(gb->ppu(), 9, 0);
     const u16 b = word(gb->ppu(), 8, 0);
@@ -232,10 +251,11 @@ TEST_CASE("ld a,(hl+) drives the combined read-write pattern through a real inst
     // Increase/Decrease"). This is the only unit test that drives that
     // pattern through a real instruction rather than the primitive.
     auto gb = makeGameBoy({0x21, 0x20, 0xFE, 0x2A, 0x00}); // LD HL,FE20 ; LD A,(HL+) ; NOP
+    idleToTopOfFrame(*gb);
     for (int i = 0; i < 0xA0; ++i) {
         gb->ppu().dmaWriteOam(i, fillByte(i));
     }
-    REQUIRE(gb->ppu().mode() == 2);
+    REQUIRE(gb->ppu().oamScanRow() == 0);
     REQUIRE(gb->ppu().lineDot() == 0);
     const int row = 5;
     const u16 a = word(gb->ppu(), row - 2, 0);
@@ -273,10 +293,11 @@ TEST_CASE("a plain CPU read or write of OAM corrupts it too, each with its own p
     };
     for (const Case& c : {Case{0xFA, false}, Case{0xEA, true}}) {
         auto gb = makeGameBoy({c.opcode, 0x20, 0xFE, 0x00});
+        idleToTopOfFrame(*gb);
         for (int i = 0; i < 0xA0; ++i) {
             gb->ppu().dmaWriteOam(i, fillByte(i));
         }
-        REQUIRE(gb->ppu().mode() == 2);
+        REQUIRE(gb->ppu().oamScanRow() == 0);
         const u16 a = word(gb->ppu(), 4, 0);
         const u16 b = word(gb->ppu(), 3, 0);
         const u16 cc = word(gb->ppu(), 3, 2);
@@ -293,9 +314,14 @@ TEST_CASE("a plain CPU read or write of OAM corrupts it too, each with its own p
 
 TEST_CASE("an address outside FE00-FEFF never corrupts OAM") {
     auto gb = makeGameBoy({0x21, 0x00, 0xC0, 0x23, 0x00}); // LD HL,C000 ; INC HL ; NOP
+    idleToTopOfFrame(*gb);
     for (int i = 0; i < 0xA0; ++i) {
         gb->ppu().dmaWriteOam(i, fillByte(i));
     }
+    // Without this the scan would not be running at all and the case would
+    // pass for the wrong reason: the same sequence at an FE00-FEFF address is
+    // what the cases above corrupt with.
+    REQUIRE(gb->ppu().oamScanRow() == 0);
     gb->step();
     gb->step();
     gb->step();

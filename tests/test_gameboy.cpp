@@ -25,6 +25,20 @@ std::unique_ptr<GameBoy> makeGameBoy(std::vector<u8> program, u8 type = 0x00, u8
     REQUIRE(cart.has_value());
     return std::make_unique<GameBoy>(std::move(*cart));
 }
+
+// The PPU powers on part-way through line 153, in VBlank (Pan Docs' power-up
+// STAT = $85), so a case that wants the OAM scan running must idle the
+// machine to the top of a frame first. Idling rather than cycling the LCD is
+// deliberate: the line the LCD is switched on for has no mode 2 at all.
+void idleToTopOfFrame(GameBoy& gb) {
+    for (int i = 0; i < Ppu::kLines * 114 + 1; ++i) {
+        if (gb.ppu().lineNumber() == 0 && gb.ppu().lineDot() == 0) {
+            return;
+        }
+        gb.idle();
+    }
+    FAIL("the PPU never reached the top of a frame");
+}
 } // namespace
 
 TEST_CASE("power-on state matches a DMG after its boot ROM") {
@@ -50,9 +64,7 @@ TEST_CASE("power-on state matches a DMG after its boot ROM") {
     CHECK(gb->peek(0xFF06) == 0x00); // TMA
     CHECK(gb->peek(0xFF44) == 0x00); // LY
     // Pan Docs: STAT = 0x85 (mode 1 with LY already 0, the end of line 153).
-    // The LCD placeholder can't model that and reads mode 2; recorded in
-    // docs/known-divergences.md until the PPU (piece 3) replaces it.
-    CHECK(gb->peek(0xFF41) == 0x86);
+    CHECK(gb->peek(0xFF41) == 0x85);
 }
 
 // Pan Docs gives DIV = $AB at PC = $0100 but not its phase. Hardware (DMG
@@ -98,7 +110,9 @@ TEST_CASE("memory regions route correctly, and echo RAM mirrors WRAM") {
 
 TEST_CASE("the CPU sees the PPU's blocking, and FEA0-FEFF follows OAM") {
     auto gb = makeGameBoy({0x00});
-    // Power-on is mode 2 on line 0: OAM blocked, VRAM readable.
+    idleToTopOfFrame(*gb); // line 0, dot 0: the OAM scan has begun
+    // Each read below is itself an M-cycle, so these land inside mode 2:
+    // OAM blocked, VRAM readable.
     CHECK(gb->read(0xFE00) == 0xFF);
     CHECK(gb->peek(0xFE00) == 0x00);  // the debugger view is never blocked
     CHECK(gb->read(0xFEA0) == 0xFF);  // the unusable area follows OAM

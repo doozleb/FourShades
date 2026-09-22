@@ -1,6 +1,7 @@
 # FourShades piece 3: the PPU
 
-**Status:** design, approved by the owner 2026-09-14
+**Status:** implemented 2026-09-14 (approved by the owner 2026-09-14).
+One interface deviation, recorded under "Deviations from the spec" below.
 **Date:** 2026-09-14
 **Piece:** 3 of 6 (foundation + CPU ✓ → machine + test-ROM scoreboard ✓ →
 **PPU** → a window (3b) → cartridge chips → sound → browser build)
@@ -175,3 +176,20 @@ ROM runner covers the rest.
 | The OAM bug's patterns are subtle | Implement per Pan Docs, arbitrated by Blargg's `oam_bug`; the two currently passing tests are a regression guard |
 | Dot-by-dot stepping is slow | Measure: the ROM suite must stay under 5 minutes in CI; optimise only with a measurement |
 | PPU work leaks into the harness or vice versa | The isolation check already forbids it; the comparator lives in `tools/roms/` |
+
+## Deviations from the spec
+
+One interface named above shipped under a different name.
+
+- **`Bus::idle(u16 address)` shipped as `Bus::iduCycle(u16 address)`.** The
+  spec's "Bus change" bullet says `virtual void idle(u16 address)` replaces
+  `idle()`. It does not replace it: `Bus` still has `idle()`, which costs an
+  M-cycle, and the new hook costs none — the 16-bit increment/decrement unit
+  shares the address bus with whatever access is already happening in that
+  M-cycle. Two methods called `idle`, one costing a cycle and one not, is a
+  trap for anyone reading or extending the CPU, so the new one was named
+  after what it is: `iduCycle`. Behaviour is exactly as specified — the CPU
+  passes the address the IDU is driving, `RecordingBus` records it, and the
+  SingleStepTests comparator still ignores addresses on idle cycles, so the
+  CPU score did not move (499 / 500 throughout).
+- Recorded 2026-09-22.

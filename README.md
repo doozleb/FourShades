@@ -10,10 +10,12 @@ test roms         ██████████░░░░░░   106 / 165
 ```
 <!-- scoreboard:end -->
 
-**Status: the machine is done (piece 2 of 6).** FourShades is now a Game Boy
-that runs real test ROMs headless: memory map, MBC1 cartridge, timer,
-interrupts, serial, joypad and OAM DMA, plus a placeholder LCD line counter
-until the PPU arrives.
+**Status: the PPU is done (piece 3 of 6).** FourShades is a Game Boy that runs
+real test ROMs headless: memory map, MBC1 cartridge, timer, interrupts,
+serial, joypad, OAM DMA, and a dot-by-dot picture-processing unit that draws
+background, window and objects into a 160x144 frame in memory. It passes
+dmg-acid2. There is still no window to show the frame in and no sound; the
+SDL3 window is the next piece.
 
 The two lines above mean:
 
@@ -27,12 +29,27 @@ The two lines above mean:
   a pass condition. A test counts only on its author's own pass signal: Blargg's
   result text, or Mooneye's registers and serial bytes.
 
-Every group that depends only on this machine is complete, including Blargg's
-`cpu_instrs` — written by someone other than SingleStepTests' author, so it is
-the independent check that the CPU wasn't fitted to one suite. The rest wait on
-hardware later pieces add: the PPU (oam bug, ppu timing, screen), the other
-cartridge chips (mbc2/mbc5, mbc3/rtc, and one mbc1 and one oam dma test) and
-the sound registers (sound, and one boot-state test).
+Every group that depends only on the CPU, the machine or the PPU's timing is
+complete: `cpu instructions` (including Blargg's `cpu_instrs` — written by
+someone other than SingleStepTests' author, so it is the independent check
+that the CPU wasn't fitted to one suite), `cpu timing`, `cpu & interrupts`,
+`serial`, `timer`, `oam bug` and `ppu timing`.
+
+What still fails is three separate things:
+
+- **`screen`, 4 of 30.** The picture is drawn, and dmg-acid2 — the best-known
+  single correctness image for a DMG — passes. The 26 that remain are 22
+  Mealybug Tearoom tests, which change LCDC, the palettes, the scroll or WX
+  part-way through a scanline and measure the result pixel by pixel, plus
+  `bully`, `strikethrough`, `ppu_scanline_bgp` and `stop_instr`. Each one's
+  pixel difference is in the group table below, and the decisions behind the
+  drawing are in the divergences document.
+- **`sound`, 0 of 12, and one `boot state` test.** There is no APU: the sound
+  registers read $FF. `boot_hwio-dmgABCmgb` stops at the first of them,
+  $FF10. Sound is piece 5.
+- **`mbc2 / mbc5` 0 of 15, `mbc3 / rtc` 0 of 3, one `mbc1` and one `oam dma`
+  test.** Those ROMs declare cartridge types this build refuses to load. The
+  other cartridge chips are piece 4.
 
 Where a test and the hardware documentation disagree, the decision and its
 evidence are in [docs/known-divergences.md](docs/known-divergences.md), along
@@ -71,6 +88,18 @@ reports them as informational, so no emulator can pass them. The line now
 counts the 165 that do (the two informational ones are listed under the group
 table). Both lines are generated from a real test run, and CI fails any
 commit whose scoreboard doesn't match what the code actually scores.
+
+**Correction (22 September 2026):** the scoreboard committed with `e3066d6`,
+"score screenshot tests against the Shootout's references", moves the total
+from 85 to 93 and the `ppu timing` group from 0 / 12 to 6 / 12. Reading the
+history, that looks like the screenshot comparator's doing. It was not. The
+scoreboard had not been regenerated since `932f73c`, so the twenty-two
+commits in between — including the whole first half of the PPU, from the mode
+machine to objects — were still scored as if they did not exist. `e3066d6` earned the
+two `screen` passes in that diff; the six `ppu timing` passes were already
+there and had simply never been published. The total was never wrong, only
+its attribution to a commit. Nothing is being rewritten; the correction lives
+here.
 
 **Correction (22 September 2026):** the commit message for `7ab9eae`, "put
 rendering where the hardware images measure it", gives the screenshot group's
@@ -154,7 +183,7 @@ project page is **[doozleb.com/projects/fourshades](https://doozleb.com/projects
 ## Repository layout
 
 ```
-src/core/                 the emulator core: CPU, memory map, timer, serial, cartridge (no window, no files)
+src/core/                 the emulator core: CPU, memory map, timer, serial, cartridge, PPU (no window, no files)
 tests/                    unit tests (doctest)
 tools/sst/                the SingleStepTests harness and pinned-data manifest
 tools/roms/               the test-ROM harness, its pinned test list and manifest
@@ -191,13 +220,14 @@ Six pieces, each gated on the test ROMs rather than on looking right:
 |---|---|---|
 | 1 | **SM83 CPU** — every opcode, cycle by cycle | done: 499 / 500 |
 | 2 | **The machine** — memory map, MBC1, timer, interrupts, serial, DMA, and the test-ROM scoreboard | done: 85 / 165 |
-| 3 | **PPU and a window** — background, window, sprites, and the mid-scanline behaviour that makes this hard | next |
+| 3 | **The PPU** — background, window, sprites, and the mid-scanline behaviour that makes this hard | done: 106 / 165 |
+| 3b | **A window** — SDL3, so the frame can be seen and the buttons pressed | next |
 | 4 | **Cartridge chips** — MBC2, MBC3 with its clock, MBC5 | |
 | 5 | **Sound** | |
 | 6 | **In the browser** — the same core compiled to WebAssembly, playable on the site | |
 
-The next milestone is the first picture: the boot logo, then dmg-acid2, then a
-commercial game.
+dmg-acid2 passes, so the next milestone is seeing a picture rather than
+hashing one: an SDL3 window, joypad input, and a commercial game on screen.
 
 ## Licence
 
