@@ -28,6 +28,17 @@ u8 Ppu::tick() {
     return requested;
 }
 
+// Pan Docs, "Window: Window rendering criteria": "At the beginning of each
+// scanline, if the value of WY is equal to LY, the Y condition becomes true
+// (and remains so for subsequent scanlines)." LY is the drawn line's own
+// number here; lines 144-153 are VBlank, where the window is not drawn and
+// where the condition is cleared for the next frame anyway.
+void Ppu::latchWindowY() {
+    if (line_ == wy_) {
+        windowReached_ = true;
+    }
+}
+
 void Ppu::stepDot(u8& requested) {
     ++dot_;
     if (dot_ >= kDotsPerLine) {
@@ -45,6 +56,20 @@ void Ppu::stepDot(u8& requested) {
             setMode(1);
         } else if (line_ < 144) {
             setMode(2);
+            // Pan Docs, "Window: Window rendering criteria": "At the
+            // beginning of each scanline, if the value of WY is equal to LY,
+            // the Y condition becomes true (and remains so for subsequent
+            // scanlines)." That is the beginning of the line, not the
+            // beginning of drawing, so a WY write landing during this line's
+            // OAM scan no longer counts for this line. Nothing in the test
+            // suite measures which of the two it is, so Pan Docs decides it,
+            // per the rule at the top of docs/known-divergences.md.
+            //
+            // The check is deliberately not gated on LCDC bit 5:
+            // PixelPipeline::stepDot tests window enable separately, when
+            // the X counter reaches WX - 7. See docs/known-divergences.md,
+            // "Timing model", for why the latch is ungated.
+            latchWindowY();
         }
     } else if (line_ < 144) {
         // On the line the LCD was switched on there is no mode 2: the PPU
@@ -56,14 +81,6 @@ void Ppu::stepDot(u8& requested) {
         if (dot_ == kOamScanDots && (mode_ == 2 || lcdOnLine_)) {
             setMode(3);
             lineBuffer_.fill(0);
-            // Ppu::windowReached() promises only that WY matched LY at some
-            // point this frame, independent of whether the window happens to
-            // be enabled at that instant; PixelPipeline::stepDot separately
-            // checks LCDC bit 5 (window enable) before it ever draws the
-            // window on a given line.
-            if (line_ == wy_) {
-                windowReached_ = true;
-            }
             if (lcdOnLine_) {
                 lineObjects_.clear();
             } else {
@@ -81,20 +98,19 @@ void Ppu::stepDot(u8& requested) {
             // Line 0 draws four dots ahead of every other line. Every
             // Mealybug Tearoom ppu test measures this from the outside: each
             // runs its handler off the mode-2 STAT interrupt and spends four
-            // extra cycles on every line except line 0 (inc/utils.asm's
-            // line_0_fix, "line 0 timing is different by 4 cycles"), and in
-            // m3_bgp_change's DMG reference - the one image the four dots
-            // were measured against - line 0 then comes out identical to
-            // line 1. The interrupt is not what moves: the hardware-verified
-            // intr_1_2_timing-GS times the gap from the VBlank STAT interrupt
-            // to this one and pins it. No ROM in the 165 fails either way
-            // with line 0's mode boundaries left where they are, and none
-            // was found that arbitrates them, so they are left alone and
-            // only the drawing moves - mode 3 still begins 80 dots in and
-            // still lasts at least 172. The line the LCD was switched on is
-            // ordinary in this respect; lcdon_timing-GS measures that one
-            // directly. See docs/known-divergences.md,
-            // "Line 0 starts drawing four dots early".
+            // extra cycles on every line except line 0, and in the one DMG
+            // reference the four dots were measured against, line 0 then
+            // comes out identical to line 1. The interrupt is not what
+            // moves: a hardware-verified timing ROM times the gap from the
+            // VBlank STAT interrupt to this one and pins it. No ROM in the
+            // 165 fails either way with line 0's mode boundaries left where
+            // they are, and none was found that arbitrates them, so they are
+            // left alone and only the drawing moves - mode 3 still begins 80
+            // dots in and still lasts at least 172. The line the LCD was
+            // switched on is ordinary in this respect; the ROM that measures
+            // that line measures it directly. See
+            // docs/known-divergences.md, "Line 0 starts drawing four dots
+            // early", for the ROMs, the macro and the evidence.
             renderLag_ = PixelPipeline::kRenderLag - (line_ == 0 && !lcdOnLine_ ? 4 : 0);
             lineRenderLag_ = renderLag_;
             rendering_ = true;
@@ -423,10 +439,17 @@ u8 Ppu::write(u16 address, u8 value) {
             visibleMode_ = 0;
             lcdOnLine_ = true;
             lycSuppressed_ = false;
+            // This line begins here, one M-cycle in, rather than at a line
+            // boundary the PPU walked through, so the Y condition is latched
+            // here: it is the only "beginning of the scanline" this line
+            // has. Switching the LCD off cleared it above.
+            latchWindowY();
             // The comparison restarts inside this M-cycle, so LY=LYC can
             // raise the level line here, inside this same M-cycle - needed
-            // for stat_lyc_onoff's round 4, which switches the LCD on with
-            // `di` as the very next instruction.
+            // by a hardware-verified LYC ROM whose fourth round switches the
+            // LCD on with `di` as the very next instruction, so an interrupt
+            // raised an M-cycle later would never be taken. See
+            // docs/known-divergences.md, "Timing model".
             //
             // The mode-0 (HBlank) source is excluded from this one
             // evaluation: visibleMode_ is forced to 0 as the PPU's real
@@ -476,11 +499,13 @@ u8 Ppu::write(u16 address, u8 value) {
         // docs/known-divergences.md, "Timing model").
         lyc_ = value;
         break;
-    // A palette write shorts the old and new values together for one dot:
-    // Mealybug Tearoom's m3_bgp_change photographs the one-pixel seam it
-    // leaves at every band edge, in a shade neither palette can produce. The
-    // register itself takes the new value at once; only what the pipeline
-    // shades with is affected, and only for the dot after the write.
+    // A palette write shorts the old and new values together for one dot: a
+    // Mealybug Tearoom reference, photographed from DMG hardware, shows the
+    // one-pixel seam it leaves at every band edge, in a shade neither
+    // palette can produce. The register itself takes the new value at once;
+    // only what the pipeline shades with is affected, and only for the dot
+    // after the write. See docs/known-divergences.md, "Palette writes short
+    // the old and new values together for one dot".
     case 0xFF47:
         bgpGlitch_ = static_cast<u8>(bgp_ | value);
         paletteGlitch_ = static_cast<u8>(paletteGlitch_ | 0x01);

@@ -11,7 +11,7 @@ namespace fourshades {
 
 // The picture-processing unit. Stepped four dots per M-cycle by GameBoy, it
 // walks the modes of a scanline, keeps the LCD registers, owns VRAM and OAM,
-// and (from Task 4) draws the frame.
+// and draws the frame.
 //
 // Two mode numbers live side by side here. `mode_` is the PPU's own mode: it
 // changes on the dot the PPU actually starts scanning OAM, fetching pixels or
@@ -70,7 +70,6 @@ public:
     u8 scx() const { return scx_; }
     u8 scy() const { return scy_; }
     u8 wx() const { return wx_; }
-    u8 wy() const { return wy_; }
     // The palette the pixel pipeline shades with. On DMG a write to a
     // palette register leaves the old and new values shorted together for
     // one dot, so the pixel drawn on the dot a write lands on is shaded with
@@ -152,6 +151,8 @@ public:
 
 private:
     void stepDot(u8& requested);
+    // Latches the window's "Y condition" for the line that is beginning.
+    void latchWindowY();
     void setMode(int mode);
     void updateStatLine(u8& requested);
     bool statConditions(u8 select) const;

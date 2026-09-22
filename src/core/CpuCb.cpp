@@ -5,16 +5,21 @@ namespace fourshades {
 // CB xx: x = 0 rotate/shift/swap, 1 BIT, 2 RES, 3 SET; y = operation or bit;
 // z = register (6 is (HL), which reads memory and, except for BIT, writes it back).
 void Cpu::executeCb() {
-    // The CB byte is the second byte of a two-byte opcode, not an operand,
-    // and Pan Docs' opcode-fetch IDU report is meant to apply to it too - but
-    // unlike step(), which reports its read's IDU write *after* reading, this
-    // reports *before* calling fetch8(). No tick intervenes since the prefix
-    // byte's own M-cycle, so this call lands on that M-cycle - where the
-    // write flag step() already set is still set - and is a no-op. The CB
-    // byte's own M-cycle, read by fetch8() below, gets only a plain read: see
-    // docs/known-divergences.md, "Still unimplemented: the PC increment on an
-    // operand byte, the CB byte included".
-    bus_.iduCycle(regs.pc);
+    // The CB byte is read here by fetch8(), on its own M-cycle, and - like
+    // every other byte fetch8() reads - it reports no IDU write for the PC
+    // increment that goes with it. That is a gap against Pan Docs, recorded
+    // in docs/known-divergences.md, "Still unimplemented: the PC increment
+    // on an operand byte, the CB byte included"; it is not closed here.
+    //
+    // What used to stand in this place was a bus_.iduCycle(regs.pc) call.
+    // step() advances PC before calling execute(), so regs.pc is the CB
+    // byte's address, not the prefix's, and no tick has run since the prefix
+    // was fetched: the call reported the wrong address against an M-cycle
+    // that had already reported the right one. Every other call site reports
+    // the address the unit stepped *from*, and for a prefix at $FDFF this
+    // one reported $FE00 instead - inside OAM, corrupting a row for an
+    // M-cycle whose own address was outside it. It was deleted rather than
+    // moved: there is nothing for it to report that step() has not already.
     const u8 opcode = fetch8();
     const int x = opcode >> 6;
     const int y = (opcode >> 3) & 7;
