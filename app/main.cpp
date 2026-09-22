@@ -13,6 +13,7 @@
 // window.
 #include "app/AppController.h"
 #include "app/Input.h"
+#include "app/Save.h"
 #include "app/Screen.h"
 #include "core/Ppu.h"
 
@@ -21,6 +22,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <string>
@@ -53,19 +55,81 @@ std::optional<std::vector<u8>> readFile(const std::string& path) {
     return std::vector<u8>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
+// The ROM that is running, and what its save file turned out to be. The
+// status is what decides whether this session is allowed to write that file
+// when it ends -- see app::mayWriteSave.
+struct Session {
+    std::string romPath;
+    app::LoadStatus saveStatus = app::LoadStatus::NoBattery;
+};
+
+// Writes the running machine's battery RAM back to disk, and says on stdout
+// that it did. Called on a clean exit and before a dropped ROM replaces the
+// machine that holds the RAM.
+void saveSession(AppController& controller, const Session& session) {
+    if (controller.state() != AppState::Running || session.romPath.empty()) {
+        return;
+    }
+    if (!app::mayWriteSave(session.saveStatus)) {
+        return;
+    }
+    const std::filesystem::path savePath = app::savePathFor(session.romPath);
+    const app::SaveResult result = app::writeSave(controller.gameBoy().cartridge(), savePath);
+    if (result.status == app::SaveStatus::Written) {
+        std::printf("saved %zu bytes to %s\n", result.bytes, savePath.string().c_str());
+        std::fflush(stdout);
+    } else if (result.status == app::SaveStatus::Failed) {
+        std::fprintf(stderr, "could not save: %s\n", result.message.c_str());
+    }
+}
+
+// Restores the freshly loaded machine's battery RAM, and reports what it
+// found. A save that cannot belong to this cartridge is left untouched on
+// disk, and the status it returns stops this session writing over it.
+app::LoadStatus restoreSession(AppController& controller, const std::string& romPath) {
+    const std::filesystem::path savePath = app::savePathFor(romPath);
+    const app::LoadResult result = app::loadSave(controller.gameBoy().cartridge(), savePath);
+    switch (result.status) {
+    case app::LoadStatus::Loaded:
+        std::printf("loaded save %s\n", savePath.string().c_str());
+        std::fflush(stdout);
+        break;
+    case app::LoadStatus::NoFile:
+        std::printf("no save yet; one will be written to %s on exit\n", savePath.string().c_str());
+        std::fflush(stdout);
+        break;
+    case app::LoadStatus::Refused:
+        std::fprintf(stderr, "%s\nthis session will not write to it: move it aside to start a new save\n",
+                     result.message.c_str());
+        break;
+    case app::LoadStatus::NoBattery:
+        break;
+    }
+    return result.status;
+}
+
 // Loads the ROM at `path` into `controller`. On failure, leaves `controller`
 // waiting and fills `error` with the text to show: either the read failure,
 // or Cartridge::load's message verbatim (via AppController::lastError()).
-bool loadRomFromPath(AppController& controller, const std::string& path, std::string& error) {
+//
+// On success the ROM's save is restored, and `session` becomes that ROM's --
+// after the machine it replaces has written its own RAM back, since loading
+// destroys it.
+bool loadRomFromPath(AppController& controller, const std::string& path, std::string& error,
+                     Session& session) {
     std::optional<std::vector<u8>> rom = readFile(path);
     if (!rom.has_value()) {
         error = "cannot read " + path;
         return false;
     }
+    saveSession(controller, session);
     if (!controller.loadRom(std::move(*rom))) {
         error = controller.lastError();
+        session = Session{};
         return false;
     }
+    session.romPath = path;
+    session.saveStatus = restoreSession(controller, path);
     error.clear();
     return true;
 }
@@ -137,13 +201,14 @@ int main(int argc, char** argv) {
     }
 
     AppController controller;
+    Session session;
     if (argc == 2) {
         // Unchanged from before: a bad path or a bad ROM on the command
         // line is a script's problem, reported and fatal -- never the
         // waiting window.
         const std::string romPath = argv[1];
         std::string error;
-        if (!loadRomFromPath(controller, romPath, error)) {
+        if (!loadRomFromPath(controller, romPath, error, session)) {
             std::fprintf(stderr, "%s\n", error.c_str());
             return 1;
         }
@@ -203,7 +268,7 @@ int main(int argc, char** argv) {
             } else if (event.type == SDL_EVENT_DROP_FILE) {
                 const std::string path = event.drop.data != nullptr ? event.drop.data : "";
                 std::string error;
-                if (loadRomFromPath(controller, path, error)) {
+                if (loadRomFromPath(controller, path, error, session)) {
                     waitingMessage.clear();
                 } else {
                     waitingMessage = error;
@@ -268,6 +333,10 @@ int main(int argc, char** argv) {
             nextFrameDeadline = now + kFrameNs;
         }
     }
+
+    // A clean exit: the window was closed, so the battery RAM goes back to
+    // disk before anything is torn down.
+    saveSession(controller, session);
 
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);

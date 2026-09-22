@@ -51,6 +51,9 @@ std::optional<Cartridge> Cartridge::load(std::vector<u8> rom, std::string* error
         cart.ramBanks_ = ramBanksFor(rom[0x0149]);
         cart.ram_.assign(cart.ramBanks_ * kRamBank, 0x00);
     }
+    // Of the types accepted above, only 0x03 (MBC1+RAM+BATTERY) declares a
+    // battery; 0x02 has the same RAM with nothing holding it up.
+    cart.hasBattery_ = type == 0x03;
     u8 sum = 0;
     for (u16 a = 0x0134; a <= 0x014C; ++a) {
         sum = static_cast<u8>(sum - rom[a] - 1);
@@ -58,6 +61,14 @@ std::optional<Cartridge> Cartridge::load(std::vector<u8> rom, std::string* error
     cart.headerChecksumOk_ = sum == rom[0x014D];
     cart.rom_ = std::move(rom);
     return cart;
+}
+
+bool Cartridge::setRam(const std::vector<u8>& bytes) {
+    if (bytes.size() != ram_.size()) {
+        return false;
+    }
+    ram_ = bytes;
+    return true;
 }
 
 std::size_t Cartridge::romOffset(u16 address) const {
