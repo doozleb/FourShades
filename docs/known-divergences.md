@@ -891,6 +891,16 @@ moved, SingleStepTests 499/500, every doctest case passing.
   run (499/500), with the `fetch8` change in place for the measurement and
   reverted afterward.
 
+## MBC5: ROM bank register initializes to 1, not 0 (2026-09-23)
+
+- **Test:** Mooneye's hardware-verified MBC5 test ROMs — all eight in `mbc5/rom_512kb.gb` and its siblings, marked "verified: DMG" against real hardware.
+- **Pan Docs:** [Memory Bank Controllers](https://gbdev.io/pandocs/MBCs.html) is silent on MBC5's reset value for the ROM bank register at 0x2000-0x3FFF. The page describes general MBC5 features but gives no power-on state for the register.
+- **What FourShades does:** `src/core/mbc/Mbc5.h` initializes `romBank_` to 1, so bank 1 is visible at 0x4000-0x7FFF at power-on, before any write to the bank register.
+- **Evidence:** In `mbc5/rom_512kb.gb`, the code at 0x0150 (entry point after boot, with no prior bank selection) calls into switchable ROM at address 0x48DB without writing the bank register. At file offset 0x08DB (bank 0's copy of that address) the byte is 0xFF, padding; at 0x48DB (bank 1's copy) it is 0x78, real code (RET). With the register defaulting to 0, all eight Mooneye MBC5 ROMs run into padding and hang; with it defaulting to 1, all eight pass. MBC5 has no remap of bank 0 — writing 0x00 to 0x2000-0x2FFF really does select bank 0 — so the reset value is the only mechanism that can route execution to bank 1 before the first write.
+- **Decision (2026-09-23):** the hardware-verified Mooneye tests outrank Pan Docs' silence, per the rule at the top of this file. Piece 4, task 2 ships with this behaviour.
+- **What would overturn it:** a measurement of MBC5's ROM bank register power-on state from real DMG or CGB hardware, or discovery of a cartridge that depends on bank 0 being mapped at power-on — which would be incompatible with this one.
+- **Checked:** 2026-09-23.
+
 ## Timing model (not a divergence: where Pan Docs is silent)
 
 Pan Docs gives cycle counts but not every within-M-cycle order. These are the
