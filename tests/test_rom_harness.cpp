@@ -280,8 +280,8 @@ TEST_CASE("blarggFailureReason still prefixes 'Failed: ' when the last line does
 
 TEST_CASE("an unsupported cartridge fails with the loader's message") {
     auto rom = romWith({0x00});
-    rom[0x0147] = 0x19; // MBC5
+    rom[0x0147] = 0x13; // MBC3, unsupported until piece 4 task 4
     const auto outcome = roms::runRomTest(testOf(roms::Method::Mooneye), rom);
     CHECK(outcome.status == roms::Verdict::Fail);
-    CHECK(outcome.reason.find("unsupported cartridge type 0x19") != std::string::npos);
+    CHECK(outcome.reason.find("unsupported cartridge type 0x13") != std::string::npos);
 }
