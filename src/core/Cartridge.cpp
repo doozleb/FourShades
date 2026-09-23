@@ -1,5 +1,11 @@
 #include "core/Cartridge.h"
 
+#include "core/mbc/Mbc.h"
+#include "core/mbc/Mbc1.h"
+#include "core/mbc/MbcNone.h"
+
+#include <utility>
+
 namespace fourshades {
 
 namespace {
@@ -22,6 +28,68 @@ std::size_t ramBanksFor(u8 code) {
 }
 
 } // namespace
+
+Cartridge::Cartridge(const Cartridge& other)
+    : rom_(other.rom_),
+      ram_(other.ram_),
+      mbc_(other.mbc_ ? other.mbc_->clone() : nullptr),
+      kind_(other.kind_),
+      headerChecksumOk_(other.headerChecksumOk_),
+      hasBattery_(other.hasBattery_),
+      romBanks_(other.romBanks_),
+      ramBanks_(other.ramBanks_) {
+    bindMbc();
+}
+
+Cartridge::Cartridge(Cartridge&& other) noexcept
+    : rom_(std::move(other.rom_)),
+      ram_(std::move(other.ram_)),
+      mbc_(std::move(other.mbc_)),
+      kind_(other.kind_),
+      headerChecksumOk_(other.headerChecksumOk_),
+      hasBattery_(other.hasBattery_),
+      romBanks_(other.romBanks_),
+      ramBanks_(other.ramBanks_) {
+    bindMbc();
+}
+
+Cartridge& Cartridge::operator=(const Cartridge& other) {
+    if (this != &other) {
+        rom_ = other.rom_;
+        ram_ = other.ram_;
+        mbc_ = other.mbc_ ? other.mbc_->clone() : nullptr;
+        kind_ = other.kind_;
+        headerChecksumOk_ = other.headerChecksumOk_;
+        hasBattery_ = other.hasBattery_;
+        romBanks_ = other.romBanks_;
+        ramBanks_ = other.ramBanks_;
+        bindMbc();
+    }
+    return *this;
+}
+
+Cartridge& Cartridge::operator=(Cartridge&& other) noexcept {
+    if (this != &other) {
+        rom_ = std::move(other.rom_);
+        ram_ = std::move(other.ram_);
+        mbc_ = std::move(other.mbc_);
+        kind_ = other.kind_;
+        headerChecksumOk_ = other.headerChecksumOk_;
+        hasBattery_ = other.hasBattery_;
+        romBanks_ = other.romBanks_;
+        ramBanks_ = other.ramBanks_;
+        bindMbc();
+    }
+    return *this;
+}
+
+Cartridge::~Cartridge() = default;
+
+void Cartridge::bindMbc() {
+    if (mbc_) {
+        mbc_->bindRam(ram_);
+    }
+}
 
 std::optional<Cartridge> Cartridge::load(std::vector<u8> rom, std::string* error) {
     const auto fail = [&](const std::string& message) -> std::optional<Cartridge> {
@@ -60,6 +128,11 @@ std::optional<Cartridge> Cartridge::load(std::vector<u8> rom, std::string* error
     }
     cart.headerChecksumOk_ = sum == rom[0x014D];
     cart.rom_ = std::move(rom);
+    switch (cart.kind_) {
+    case Kind::RomOnly: cart.mbc_ = std::make_unique<MbcNone>(); break;
+    case Kind::Mbc1: cart.mbc_ = std::make_unique<Mbc1>(cart.ramBanks_); break;
+    }
+    cart.bindMbc();
     return cart;
 }
 
@@ -71,50 +144,26 @@ bool Cartridge::setRam(const std::vector<u8>& bytes) {
     return true;
 }
 
-std::size_t Cartridge::romOffset(u16 address) const {
-    std::size_t bank = 0;
-    if (kind_ == Kind::Mbc1) {
-        if (address < 0x4000) {
-            bank = mode1_ ? std::size_t{bankHigh_} << 5 : 0;
-        } else {
-            bank = (std::size_t{bankHigh_} << 5) | (bankLow_ == 0 ? 1u : bankLow_);
-        }
-    } else if (address >= 0x4000) {
-        bank = 1;
-    }
-    bank &= romBanks_ - 1;
-    return bank * kRomBank + (address & 0x3FFF);
-}
-
-std::size_t Cartridge::ramOffset(u16 address) const {
-    const std::size_t bank = mode1_ ? (bankHigh_ & (ramBanks_ - 1)) : 0;
-    return bank * kRamBank + (address - 0xA000);
-}
-
 u8 Cartridge::read(u16 address) const {
     if (address < 0x8000) {
-        return rom_[romOffset(address)];
+        // Bank counts are powers of two, so the mask is the whole of the
+        // wrapping rule and the controller can hand back any width it likes.
+        const std::size_t bank = mbc_->romBank(address) & (romBanks_ - 1);
+        return rom_[bank * kRomBank + (address & 0x3FFF)];
     }
-    if (address >= 0xA000 && address < 0xC000 && ramEnabled_ && !ram_.empty()) {
-        return ram_[ramOffset(address)];
+    if (address >= 0xA000 && address < 0xC000) {
+        if (const std::optional<u8> value = mbc_->readRam(address)) {
+            return *value;
+        }
     }
-    return 0xFF;
+    return 0xFF; // open bus
 }
 
 void Cartridge::write(u16 address, u8 value) {
-    if (kind_ != Kind::Mbc1) {
-        return;
-    }
-    if (address < 0x2000) {
-        ramEnabled_ = (value & 0x0F) == 0x0A;
-    } else if (address < 0x4000) {
-        bankLow_ = static_cast<u8>(value & 0x1F);
-    } else if (address < 0x6000) {
-        bankHigh_ = static_cast<u8>(value & 0x03);
-    } else if (address < 0x8000) {
-        mode1_ = (value & 0x01) != 0;
-    } else if (address >= 0xA000 && address < 0xC000 && ramEnabled_ && !ram_.empty()) {
-        ram_[ramOffset(address)] = value;
+    if (address < 0x8000) {
+        mbc_->writeControl(address, value);
+    } else if (address >= 0xA000 && address < 0xC000) {
+        mbc_->writeRam(address, value);
     }
 }
 
