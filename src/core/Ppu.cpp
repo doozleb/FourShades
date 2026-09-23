@@ -12,7 +12,9 @@ u8 Ppu::tick() {
     // the OAM bus during it lands now, before the PPU moves on to the next
     // row. See flushOamCorruption.
     flushOamCorruption();
-    if (!lcdOn()) {
+    // Nothing clocks the PPU while the machine's clock is stopped, whether or
+    // not the LCD is enabled: see setClockStopped.
+    if (clockStopped_ || !lcdOn()) {
         return requested;
     }
     // STAT's mode field, the STAT interrupt sources and the memory locks the
@@ -26,6 +28,20 @@ u8 Ppu::tick() {
         stepDot(requested);
     }
     return requested;
+}
+
+// Stopping the clock blanks the panel once, on the edge, and then holds
+// everything still: no dot runs, so nothing redraws and nothing is cleared
+// again. Starting it draws over the blank frame from wherever the PPU stood.
+// The reasoning and the documentation behind it are in the header.
+void Ppu::setClockStopped(bool stopped) {
+    if (stopped == clockStopped_) {
+        return;
+    }
+    clockStopped_ = stopped;
+    if (stopped) {
+        frame_.fill(0);
+    }
 }
 
 // Pan Docs, "Window: Window rendering criteria": "At the beginning of each

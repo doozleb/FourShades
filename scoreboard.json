@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 139,
+    "passing": 140,
     "total": 165,
     "groups": [
       {
@@ -81,7 +81,7 @@
       },
       {
         "group": "screen",
-        "passing": 4,
+        "passing": 5,
         "total": 30,
         "first_failure": {
           "test": "mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG)",

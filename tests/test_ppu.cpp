@@ -2,6 +2,9 @@
 
 #include "core/Ppu.h"
 
+#include <algorithm>
+#include <cstdint>
+
 using namespace fourshades;
 
 namespace {
@@ -250,4 +253,50 @@ TEST_CASE("the frame starts blank and every pixel is a shade 0-3") {
     for (const u8 pixel : ppu.frame()) {
         CHECK(pixel <= 3);
     }
+}
+
+namespace {
+// True when every pixel of the frame is shade 0 - what a DMG panel reads when
+// nothing is driving it (Pan Docs, LCDC: "When the display is disabled the
+// screen is blank, which on DMG is displayed as a white 'whiter' than color
+// #0").
+bool blank(const Ppu& ppu) {
+    const auto& frame = ppu.frame();
+    return std::all_of(frame.begin(), frame.end(), [](u8 pixel) { return pixel == 0; });
+}
+} // namespace
+
+// Pan Docs, Reducing Power Consumption: STOP "is intended to switch the Game
+// Boy into VERY low power standby mode", and on CGB "leaving the LCD enabled
+// when invoking STOP will result in a black screen". Nothing clocks the PPU
+// while the machine is in that state, so it neither advances nor drives the
+// panel, and a DMG panel with no drive reads blank. See
+// docs/known-divergences.md, "STOP stops the PPU and blanks the LCD".
+TEST_CASE("a stopped clock blanks the LCD and freezes the PPU where it stood") {
+    Ppu ppu;
+    static_cast<void>(ppu.write(0xFF47, 0x0F)); // BGP: colour 0 becomes shade 3
+    run(ppu, Ppu::kLines * Ppu::kDotsPerLine);  // a whole frame of empty tiles
+    REQUIRE_FALSE(blank(ppu));
+
+    ppu.setClockStopped(true);
+    CHECK(ppu.clockStopped());
+    CHECK(blank(ppu));
+    const int line = ppu.lineNumber();
+    const int dot = ppu.lineDot();
+    const std::uint64_t frames = ppu.frameCount();
+    // Two frames' worth of nothing, and 37 M-cycles more: not a whole number
+    // of frames, so a PPU still running would land on another line and dot.
+    run(ppu, 2 * Ppu::kLines * Ppu::kDotsPerLine + 37 * 4);
+    CHECK(ppu.lineNumber() == line);
+    CHECK(ppu.lineDot() == dot);
+    CHECK(ppu.frameCount() == frames);
+    CHECK(blank(ppu));
+
+    // Starting the clock again does not blank anything: the PPU picks the
+    // frame up where it left it and draws over it.
+    ppu.setClockStopped(false);
+    CHECK_FALSE(ppu.clockStopped());
+    run(ppu, Ppu::kLines * Ppu::kDotsPerLine);
+    CHECK(ppu.frameCount() > frames);
+    CHECK_FALSE(blank(ppu));
 }

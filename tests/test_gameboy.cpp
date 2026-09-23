@@ -2,6 +2,8 @@
 
 #include "core/GameBoy.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -252,4 +254,107 @@ TEST_CASE("a halted CPU is woken by the VBlank interrupt") {
         gb->step();
     }
     CHECK(gb->cpu().regs.pc == 0x0040);
+}
+
+namespace {
+// Every pixel shade 0: what a DMG panel reads when nothing drives it (Pan
+// Docs, LCDC: "When the display is disabled the screen is blank, which on DMG
+// is displayed as a white 'whiter' than color #0").
+bool blank(const GameBoy& gb) {
+    const auto& frame = gb.ppu().frame();
+    return std::all_of(frame.begin(), frame.end(), [](u8 pixel) { return pixel == 0; });
+}
+
+// A frame's worth of M-cycles with the CPU left where it is, so that a case
+// can get a picture on the screen without running the instruction it is about
+// to step into.
+void idleFrame(GameBoy& gb) {
+    for (int i = 0; i < Ppu::kLines * 114; ++i) {
+        gb.idle();
+    }
+}
+
+// The same, with the CPU spending them: running, halted or stopped.
+void stepFrames(GameBoy& gb, int frames) {
+    for (int i = 0; i < frames * Ppu::kLines * 114; ++i) {
+        gb.step();
+    }
+}
+
+// LD A,0x0F / LDH (47),A: BGP maps colour 0 to shade 3, so a zero-filled
+// background is drawn dark and a blank screen is distinguishable from a drawn
+// one. Then LD A,0x20 / LDH (00),A, which selects the d-pad group so a press
+// can end STOP, and STOP itself.
+const std::vector<u8> kDarkThenStop = {0x3E, 0x0F, 0xE0, 0x47, 0x3E, 0x20,
+                                       0xE0, 0x00, 0x10, 0x00, 0x3C};
+} // namespace
+
+// Pan Docs, Reducing Power Consumption: STOP "is intended to switch the Game
+// Boy into VERY low power standby mode", and on CGB "leaving the LCD enabled
+// when invoking STOP will result in a black screen". The whole machine's
+// clock stops, so the PPU stops with it and the panel goes blank. See
+// docs/known-divergences.md, "STOP stops the PPU and blanks the LCD".
+TEST_CASE("STOP blanks the screen and stops the PPU") {
+    auto gb = makeGameBoy(kDarkThenStop);
+    for (int i = 0; i < 4; ++i) {
+        gb->step(); // the two loads and the two that select the d-pad
+    }
+    idleFrame(*gb);
+    REQUIRE_FALSE(blank(*gb));
+
+    gb->step(); // STOP
+    REQUIRE(gb->cpu().state() == Cpu::State::Stopped);
+    const std::uint64_t frames = gb->ppu().frameCount();
+    gb->step();
+    CHECK(blank(*gb));
+
+    const int line = gb->ppu().lineNumber();
+    const int dot = gb->ppu().lineDot();
+    stepFrames(*gb, 2);
+    for (int i = 0; i < 37; ++i) {
+        gb->step(); // and a bit: not a whole number of frames, so a PPU still
+                    // running would land on another line and dot
+    }
+    REQUIRE(gb->cpu().state() == Cpu::State::Stopped);
+    CHECK(gb->ppu().lineNumber() == line); // the PPU is not advancing either
+    CHECK(gb->ppu().lineDot() == dot);
+    CHECK(gb->ppu().frameCount() == frames);
+    CHECK(blank(*gb));
+}
+
+TEST_CASE("leaving STOP puts the picture back") {
+    auto gb = makeGameBoy(kDarkThenStop);
+    for (int i = 0; i < 4; ++i) {
+        gb->step();
+    }
+    idleFrame(*gb); // something has to be on the screen for it to come back
+    REQUIRE_FALSE(blank(*gb));
+    gb->step(); // STOP
+    REQUIRE(gb->cpu().state() == Cpu::State::Stopped);
+    gb->step();
+    REQUIRE(blank(*gb));
+
+    gb->setButtons(button::Down);
+    gb->step();
+    REQUIRE(gb->cpu().state() == Cpu::State::Running);
+    stepFrames(*gb, 1); // the INC A after STOP, then the ROM's NOPs
+    CHECK_FALSE(blank(*gb));
+}
+
+// HALT is not STOP: the clock keeps running, so the PPU keeps drawing.
+TEST_CASE("HALT leaves the screen alone") {
+    // LD A,0x0F / LDH (47),A / HALT, with IE clear so nothing wakes it.
+    auto gb = makeGameBoy({0x3E, 0x0F, 0xE0, 0x47, 0x76});
+    gb->step();
+    gb->step();
+    idleFrame(*gb);
+    REQUIRE_FALSE(blank(*gb));
+
+    gb->step(); // HALT
+    REQUIRE(gb->cpu().state() == Cpu::State::Halted);
+    const std::uint64_t frames = gb->ppu().frameCount();
+    stepFrames(*gb, 1);
+    REQUIRE(gb->cpu().state() == Cpu::State::Halted);
+    CHECK(gb->ppu().frameCount() > frames);
+    CHECK_FALSE(blank(*gb));
 }

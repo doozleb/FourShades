@@ -33,6 +33,21 @@ public:
     // One M-cycle (4 dots). Returns the IF bits requested during it.
     u8 tick();
 
+    // Whether the machine's clock has stopped, which on a DMG is the whole
+    // machine's: the PPU has no oscillator of its own. Pan Docs, Reducing
+    // Power Consumption, describes STOP as switching the Game Boy "into VERY
+    // low power standby mode", and says that on CGB "leaving the LCD enabled
+    // when invoking STOP will result in a black screen". So a stopped clock
+    // means a PPU that neither advances nor drives the panel, and a panel
+    // with no drive reads blank - on DMG "a white 'whiter' than color #0"
+    // (Pan Docs, LCDC), which is shade 0 here, the same picture switching the
+    // LCD off leaves. Stopping the clock therefore blanks the frame once and
+    // freezes everything; starting it again simply lets the PPU carry on from
+    // where it stood and draw over the blank frame. See
+    // docs/known-divergences.md, "STOP stops the PPU and blanks the LCD".
+    void setClockStopped(bool stopped);
+    bool clockStopped() const { return clockStopped_; }
+
     u8 read(u16 address) const;      // FF40-FF4B
     // Returns the IF bits the write itself requests: on DMG a STAT write can
     // raise the STAT level line inside the writing M-cycle, and so can
@@ -204,6 +219,7 @@ private:
     bool lycSuppressed_ = false; // the first M-cycle of a line compares as "no match"
     bool lycFrozen_ = false;     // the comparison's last result before the LCD went off
     bool statLine_ = false;  // the level line: an interrupt fires on its rise
+    bool clockStopped_ = false; // the machine is in STOP mode: see setClockStopped
     std::uint64_t frames_ = 0;
     bool windowReached_ = false; // WY has matched LY somewhere in this frame
     int windowLine_ = 0;         // the window's own line counter
