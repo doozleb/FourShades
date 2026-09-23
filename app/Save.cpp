@@ -56,8 +56,17 @@ private:
 // memcpy'd over a struct: the file's byte order is little-endian because the
 // format says so, not because this machine happens to be.
 
+// The layout is stated once, here, and everything else about it is derived.
+// Writing 40 for the stamp's offset was the same number a third time, and a
+// third place for a layout change to be missed.
 constexpr std::size_t kRegisterBytes = 4; // each register is a u32 on disk
-constexpr std::size_t kStampOffset = 40;
+constexpr std::size_t kRegistersPerSet = 5; // seconds, minutes, hours, dayLow, dayHigh
+constexpr std::size_t kRegisterSets = 2;    // live, then latched
+constexpr std::size_t kStampBytes = 8;      // the Unix second, a little-endian u64
+constexpr std::size_t kStampOffset = kRegisterSets * kRegistersPerSet * kRegisterBytes;
+static_assert(kStampOffset + kStampBytes == kRtcFooterBytes,
+              "the footer is the two register sets followed by the timestamp, and "
+              "kRtcFooterBytes in app/Save.h is the sum of the two");
 
 void appendU32(std::vector<u8>& bytes, u8 value) {
     // One byte's worth of register in four bytes of file: three zeroes, every
@@ -74,13 +83,16 @@ void appendRegisters(std::vector<u8>& bytes, const fourshades::RtcRegisters& reg
     appendU32(bytes, regs.hours);
     appendU32(bytes, regs.dayLow);
     appendU32(bytes, regs.dayHigh);
+    // Five registers is what kRegistersPerSet says; anything else and
+    // kStampOffset above is pointing at the wrong bytes.
+    static_assert(kRegistersPerSet == 5, "appendRegisters writes five registers");
 }
 
 void appendFooter(std::vector<u8>& bytes, const fourshades::RtcState& state, std::int64_t stamp) {
     appendRegisters(bytes, state.live);
     appendRegisters(bytes, state.latched);
     const std::uint64_t unixSeconds = static_cast<std::uint64_t>(stamp);
-    for (int i = 0; i < 8; ++i) {
+    for (std::size_t i = 0; i < kStampBytes; ++i) {
         bytes.push_back(static_cast<u8>((unixSeconds >> (8 * i)) & 0xFF));
     }
 }
@@ -114,7 +126,7 @@ fourshades::RtcRegisters readRegisters(const u8* p) {
 fourshades::RtcState readState(const u8* footer) {
     fourshades::RtcState state;
     state.live = readRegisters(footer);
-    state.latched = readRegisters(footer + 5 * kRegisterBytes);
+    state.latched = readRegisters(footer + kRegistersPerSet * kRegisterBytes);
     return state;
 }
 
@@ -279,7 +291,21 @@ SaveResult writeSave(const fourshades::Cartridge& cart, const std::filesystem::p
         // is empty here and the file is the footer by itself. Nothing above
         // short-circuits on an empty RAM, for exactly that reason.
         bytes.reserve(bytes.size() + kRtcFooterBytes);
+        const std::size_t beforeFooter = bytes.size();
         appendFooter(bytes, cart.rtcState(), nowUnixSeconds);
+        // kRtcFooterBytes is what loadSave accepts and what every other
+        // emulator's reader expects; appendFooter is what actually decides the
+        // length. If those two ever disagree, the save is malformed, and the
+        // place to find that out is here rather than the next time the file is
+        // read back. Checked in every build, not just an asserting one: this
+        // costs a subtraction, and the failure it catches costs a save.
+        if (bytes.size() - beforeFooter != kRtcFooterBytes) {
+            return {SaveStatus::Failed, 0,
+                    "internal error: the clock footer is " +
+                        std::to_string(bytes.size() - beforeFooter) + " bytes, not " +
+                        std::to_string(kRtcFooterBytes) + " -- refusing to write a save this "
+                        "cartridge could not read back"};
+        }
     }
     std::string error;
     if (!writeTempFile(savePath, bytes, &error)) {
