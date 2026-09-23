@@ -40,10 +40,18 @@ constexpr std::array<u8, 48> kNintendoLogo = {
 // docs/known-divergences.md for why three rather than four, and what would
 // overturn the heuristic.
 bool logoAt(const std::vector<u8>& rom, std::size_t offset) {
+    // Safe by construction, not by call order: false whenever the logo would
+    // run past the end of rom, regardless of what any caller already checked.
+    if (rom.size() < offset + kNintendoLogo.size()) {
+        return false;
+    }
     return std::equal(kNintendoLogo.begin(), kNintendoLogo.end(), rom.begin() + static_cast<std::ptrdiff_t>(offset));
 }
 
 bool looksLikeMulticart(const std::vector<u8>& rom) {
+    // This runs on rom as Cartridge::load has already resized it to the
+    // header's declared size (0x8000 << sizeCode), not necessarily the file's
+    // length on disk, so "exactly 1 MiB" below means the declared size.
     constexpr std::size_t kMulticartRomSize = 0x100000; // 1 MiB
     if (rom.size() != kMulticartRomSize) {
         return false;
