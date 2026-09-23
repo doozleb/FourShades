@@ -73,10 +73,12 @@ inline constexpr double kSamplesPerFrame = static_cast<double>(kAudioSampleRate)
 // worth of emulated time, and several frames' worth of samples, in one
 // pass. Measured at up to 2,100 samples in a single step. The machine
 // really did run that long, so the samples are real and must not be thrown
-// away; the queue simply has to be able to hold them. At two frames the
-// high mark would be underneath the step, and the policy would spend the
-// next half-minute saturated. At three it absorbs the step with room over,
-// and takes about 30 seconds to walk back down. That is a transient, not a
+// away; the queue simply has to be able to hold them. Neither mark actually
+// contains a step that size: a ~2,100-sample burst on the ~1,607-sample
+// resting queue lands near 3,707, past either mark. What the third frame
+// buys is not containment but recovery time -- nothing is ever discarded,
+// only the one-sample-a-frame drift correction runs a little longer, about
+// 30 seconds, to walk the excess back down. That is a transient, not a
 // latency: the resting depth is still two frames.
 inline constexpr std::size_t kLowWaterSamples = static_cast<std::size_t>(kSamplesPerFrame);
 inline constexpr std::size_t kTargetQueuedSamples = static_cast<std::size_t>(2.0 * kSamplesPerFrame);
@@ -177,6 +179,15 @@ public:
     // the new one's first, and on resuming from a pause, which drained the
     // queue to nothing on purpose.
     std::size_t reprime();
+
+    // Tears the device down early, before SDL_Quit(): destroys the audio
+    // stream and marks the device closed, exactly what the destructor does
+    // for a stream still open at that point. main() calls this explicitly,
+    // alongside SDL_DestroyTexture/Renderer/Window, so the stream is never
+    // destroyed during stack unwinding after SDL_Quit() has already run --
+    // SDL_DestroyAudioStream reaches into memory SDL_Quit() may have freed.
+    // Safe to call on a device that never opened, and safe to call twice.
+    void close();
 
     // Counters, for FOURSHADES_AUDIO_LOG. `drops` and `repeats` are how
     // many frames the drift policy corrected; min and max are the extremes

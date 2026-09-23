@@ -502,9 +502,10 @@ int main(int argc, char** argv) {
             // A paused pass reaches here with an empty buffer and
             // emulatedFrame false, so nothing is pushed and nothing is
             // repeated: the device runs dry and plays silence, which is
-            // what a pause should sound like. The clear() is outside every
-            // condition because the buffer has to be drained whether or not
-            // there is a device to drain it into.
+            // what a pause should sound like. Within this Running branch,
+            // the clear() sits outside the paused/unpaused split above it,
+            // because the buffer has to be drained whether or not there is
+            // a device to drain it into.
             const std::size_t queuedSamples = audio.queued();
             audio.observeQueued(queuedSamples);
             audio.push(resampler.samples(), app::driftCorrection(emulatedFrame, queuedSamples));
@@ -567,6 +568,11 @@ int main(int argc, char** argv) {
     // disk before anything is torn down.
     saveSession(controller, session);
 
+    // Explicit, like the three below it: SDL_DestroyAudioStream must run
+    // before SDL_Quit() tears the library down, not after it, during stack
+    // unwinding, once SDL_Quit() may have already freed what it reaches
+    // into.
+    audio.close();
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

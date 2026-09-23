@@ -15,6 +15,13 @@ constexpr std::size_t kBytesPerStereoSample = 2 * sizeof(float);
 } // namespace
 
 Audio::~Audio() {
+    // Only a fallback: main() calls close() explicitly, before SDL_Quit(),
+    // so by the time this runs stream_ is already null. Left here for any
+    // caller that does not, so a live stream is never destroyed unclosed.
+    close();
+}
+
+void Audio::close() {
     if (stream_ != nullptr) {
         // Closes the device too -- that is what SDL_OpenAudioDeviceStream's
         // stream owns.
