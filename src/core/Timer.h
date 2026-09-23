@@ -28,6 +28,13 @@ public:
     // M-cycle in progress: either the increment in tick(), or a write to DIV
     // within that cycle clearing a bit the increment had left set. Each tick()
     // starts a fresh cycle, so an edge is reported once and only once.
+    //
+    // Reading this does not consume it: it stays true for the whole M-cycle,
+    // so every subsystem that cares can ask. But a subsystem that asks only
+    // from the machine's own per-cycle tick never sees the second kind of
+    // edge, because the machine advances time first and performs the access
+    // second: a DIV write lands after the asking is over, and the next cycle
+    // wipes the edge. Whatever wants those has to ask again after the write.
     bool counterBitFell(int bit) const { return ((fell_ >> bit) & 1) != 0; }
 
     // The same question about a counter pair held elsewhere.

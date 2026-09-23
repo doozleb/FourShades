@@ -42,6 +42,7 @@ void GameBoy::tick() {
         if_ = static_cast<u8>(if_ | irq::Serial);
     }
     if_ = static_cast<u8>(if_ | ppu_.tick());
+    apu_.tick();
     // The cartridge's own clock, if it has one. Nothing above or below
     // depends on it, and nothing it does depends on them.
     cart_.tick();
@@ -214,10 +215,13 @@ u8 GameBoy::readIo(u16 address) const {
     case 0xFF0F: return static_cast<u8>(if_ | 0xE0);
     case 0xFF46: return dmaRegister_;
     default:
+        if (address >= 0xFF10 && address <= 0xFF3F) {
+            return apu_.read(address);
+        }
         if (address >= 0xFF40 && address <= 0xFF4B) {
             return ppu_.read(address);
         }
-        return 0xFF; // not implemented yet (sound is piece 5)
+        return 0xFF; // not implemented yet
     }
 }
 
@@ -244,7 +248,9 @@ void GameBoy::writeIo(u16 address, u8 value) {
         dmaStartDelay_ = 1;
         break;
     default:
-        if (address >= 0xFF40 && address <= 0xFF4B) {
+        if (address >= 0xFF10 && address <= 0xFF3F) {
+            apu_.write(address, value);
+        } else if (address >= 0xFF40 && address <= 0xFF4B) {
             // A STAT write, or switching the LCD on, can raise the STAT level
             // line inside this very M-cycle, so the IF bit has to land now
             // rather than on the next tick.
