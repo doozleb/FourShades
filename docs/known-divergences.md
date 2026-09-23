@@ -938,17 +938,30 @@ moved, SingleStepTests 499/500, every doctest case passing.
   0x3F, 0x1F, 0xFF and 0xC1. `rtc-invalid-banks-test` says the same thing from
   the other end: the 0x0C it writes into the day-high register reads back as
   0x00, because 0x0C is bits 2 and 3 and neither exists.
-- **Finding 2: any write to 6000-7FFF latches**, whatever the value, and no
-  0x00-then-0x01 sequence is needed. Evidence: the 52 bytes `latch-rtc-test`
-  writes to 0x6000 are `D6 40 14 96 7B E9 73 1F 62 21 B0 D5 C4 23 06 F2 DC 28
-  AD AF E2 6B E1 46 11 26 DA F2 A3 92 D4 ED D3 EA 08 71 DA 68 B0 B7 F1 45 06
-  F9 54 BB 44 72 3C 05 A4 5C E3` — not one 0x00 and not one 0x01 among them —
-  and yet every iteration reads back exactly the five values written before
-  that write. Under the 0x00-then-0x01 rule the latched copy would keep the
-  zeroes the ROM latched during setup for the whole run: 243 of the 256 bytes
-  would be wrong, and the frame differed from the reference in 2270 pixels.
-  Pan Docs' sentence stays true either way, since a 0x00 followed by a 0x01 is
-  two writes and so latches under this rule too.
+- **Finding 2: a write of a value other than 0x00 or 0x01 to 6000-7FFF
+  latches**, and no 0x00-then-0x01 sequence is needed — that is what the ROM
+  proves, not the stronger claim that *any* write latches. Evidence: the 52
+  bytes `latch-rtc-test` writes to 0x6000 are `D6 40 14 96 7B E9 73 1F 62 21
+  B0 D5 C4 23 06 F2 DC 28 AD AF E2 6B E1 46 11 26 DA F2 A3 92 D4 ED D3 EA 08
+  71 DA 68 B0 B7 F1 45 06 F9 54 BB 44 72 3C 05 A4 5C E3` — not one 0x00 and
+  not one 0x01 among them — and yet every iteration reads back exactly the
+  five values written before that write. Under the 0x00-then-0x01 rule the
+  latched copy would keep the zeroes the ROM latched during setup for the
+  whole run: 243 of the 256 bytes would be wrong, and the frame differed from
+  the reference in 2270 pixels. Pan Docs' sentence stays true either way,
+  since a 0x00 followed by a 0x01 is two writes and so latches under this
+  rule too.
+  **What the ROM cannot separate this from.** No two of the 52 bytes above
+  are consecutive duplicates — each differs from the one before it — so
+  every one of the 52 writes latches equally well under a narrower,
+  edge-triggered rule: *a write to 6000-7FFF latches only when its value
+  differs from the previous write to that range* (the generalisation of Pan
+  Docs' 0x00-then-0x01 sequence to arbitrary values, rather than a departure
+  from it). This ROM cannot tell that rule apart from "any write latches",
+  because it never repeats a byte on consecutive writes. FourShades
+  implements "any write latches" as the simpler of the two, but the
+  change-triggered rule is a live alternative this evidence does not rule
+  out.
 - **Finding 3: an out-of-range counter wraps at its own width**, not at 256.
   This is inferred from finding 1 rather than measured directly: a six-bit
   seconds register cannot hold 64, so the old behaviour (write 63, count
@@ -960,10 +973,13 @@ moved, SingleStepTests 499/500, every doctest case passing.
   value at the register's span. `src/core/mbc/Mbc3.cpp` latches on any write
   to 6000-7FFF.
 - **What the ROMs cannot distinguish.** Whether the hardware narrows a value
-  as it is written or only as it is read: both ROMs write and then read, so
-  the two are the same to them. FourShades narrows on write, which is what a
-  register with no wire for bit 6 would do, and that choice is visible only
-  through the save-state API.
+  as it is written, only as it is read, or only as it is latched: both ROMs
+  write, latch and then read in that order every time, so all three are the
+  same to them. A third alternative, narrow-on-latch — the live register
+  keeps the full byte written and only the copy `latch()` makes is masked —
+  is exactly as invisible as narrow-on-read, for the same reason. FourShades
+  narrows on write, which is what a register with no wire for bit 6 would do,
+  and that choice is visible only through the save-state API.
 - **Not settled by either ROM:** what happens to the sub-second accumulator
   across a save. `RtcState` has no field for it, so a restored clock starts a
   fresh second; a save made a fraction of a second early or late is within the
@@ -974,7 +990,10 @@ moved, SingleStepTests 499/500, every doctest case passing.
 - **What would overturn it:** a measurement from real MBC3 hardware showing
   that a write of some particular value to 6000-7FFF does *not* latch, or that
   the seconds, minutes, hours or day-high registers read back bits these masks
-  drop.
+  drop; or a ROM (or hardware measurement) that writes the same non-0x00/0x01
+  value to 6000-7FFF twice in a row and shows the second write does not
+  latch, which would settle "any write latches" against the change-triggered
+  alternative Finding 2 leaves standing.
 - **Checked:** 2026-09-23.
 
 ## Timing model (not a divergence: where Pan Docs is silent)

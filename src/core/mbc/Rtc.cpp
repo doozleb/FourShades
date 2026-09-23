@@ -1,5 +1,7 @@
 #include "core/mbc/Rtc.h"
 
+#include <cassert>
+
 namespace fourshades {
 
 namespace {
@@ -38,6 +40,14 @@ constexpr std::uint64_t kDayCounterPeriod = 512; // 9 bits
 // carries a minute.
 std::uint64_t advanceField(u8& value, u8 limit, std::uint64_t span, std::uint64_t count) {
     if (value > limit) {
+        // Every path that sets a live register (Rtc::write's mask, setState's
+        // narrowed()) keeps `value` below `span`, so this never underflows in
+        // practice - but `span` is a caller-supplied parameter, not something
+        // this function derives, so the invariant is made explicit rather
+        // than assumed silently: past this point an out-of-range `value`
+        // would make `toWrap` wrap to a huge count and the counter would
+        // stop carrying instead of failing loudly.
+        assert(value < span && "advanceField: value must be within span");
         const std::uint64_t toWrap = span - value; // steps to reach 0
         if (count < toWrap) {
             value = static_cast<u8>(value + count);
