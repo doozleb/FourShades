@@ -13,8 +13,9 @@ namespace fourshades {
 class Mbc;
 
 // A cartridge: the ROM image plus its memory bank controller. Supports plain
-// ROMs (type 0x00), MBC1 (0x01-0x03) per Pan Docs "MBC1", and MBC5
-// (0x19-0x1E) per Pan Docs "MBC5". Other controllers arrive later in piece 4.
+// ROMs (type 0x00), MBC1 (0x01-0x03) per Pan Docs "MBC1", MBC2 (0x05-0x06)
+// per Pan Docs "MBC2", and MBC5 (0x19-0x1E) per Pan Docs "MBC5". Other
+// controllers arrive later in piece 4.
 //
 // The cartridge owns the ROM, the RAM and the header facts; which bank an
 // address reaches is the controller's business, behind Mbc. The cartridge
@@ -22,7 +23,7 @@ class Mbc;
 // register wider than the cartridge needs no handling in the chip.
 class Cartridge {
 public:
-    enum class Kind { RomOnly, Mbc1, Mbc5 };
+    enum class Kind { RomOnly, Mbc1, Mbc2, Mbc5 };
 
     // Returns nullopt, with a message in *error, for images that are too small
     // or use a controller FourShades doesn't support yet.

@@ -26,6 +26,7 @@ add_library(fourshades_core STATIC
     src/core/Cartridge.cpp
     src/core/mbc/MbcNone.cpp
     src/core/mbc/Mbc1.cpp
+    src/core/mbc/Mbc2.cpp
     src/core/mbc/Mbc5.cpp
     src/core/Timer.cpp
     src/core/Serial.cpp
