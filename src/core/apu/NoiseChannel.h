@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "core/Types.h"
 #include "core/apu/VolumeEnvelope.h"
