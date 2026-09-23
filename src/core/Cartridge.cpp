@@ -7,6 +7,8 @@
 #include "core/mbc/Mbc5.h"
 #include "core/mbc/MbcNone.h"
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <utility>
 
@@ -16,6 +18,45 @@ namespace {
 
 constexpr std::size_t kRomBank = 0x4000;
 constexpr std::size_t kRamBank = 0x2000;
+
+// The 48-byte Nintendo logo a header carries at 0x0104-0x0133; every
+// cartridge that boots on real hardware has this at its own header, since the
+// boot ROM refuses to run otherwise.
+constexpr std::array<u8, 48> kNintendoLogo = {
+    0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
+    0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+    0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99, 0xBB, 0xBB, 0x67, 0x63,
+    0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
+};
+
+// A compilation cartridge wires an ordinary MBC1 chip to pick between several
+// smaller games rather than banking one large one: the low bank register
+// narrows to 4 bits and the high register's bits supply bits 4-5 instead of
+// 5-6, so each quarter of the image is a self-contained 256 KiB game with its
+// own header, logo included. No header byte declares this, so it is inferred
+// from the ROM's own bytes: a 1 MiB image whose logo (the bytes every
+// cartridge must carry at its own header to boot at all) also appears at
+// three or more of the four 256 KiB boundaries. See
+// docs/known-divergences.md for why three rather than four, and what would
+// overturn the heuristic.
+bool logoAt(const std::vector<u8>& rom, std::size_t offset) {
+    return std::equal(kNintendoLogo.begin(), kNintendoLogo.end(), rom.begin() + static_cast<std::ptrdiff_t>(offset));
+}
+
+bool looksLikeMulticart(const std::vector<u8>& rom) {
+    constexpr std::size_t kMulticartRomSize = 0x100000; // 1 MiB
+    if (rom.size() != kMulticartRomSize) {
+        return false;
+    }
+    constexpr std::size_t offsets[] = {0x00104, 0x40104, 0x80104, 0xC0104};
+    int matches = 0;
+    for (const std::size_t offset : offsets) {
+        if (logoAt(rom, offset)) {
+            ++matches;
+        }
+    }
+    return matches >= 3;
+}
 
 std::string hexByte(u8 value) {
     static constexpr char digits[] = "0123456789ABCDEF";
@@ -154,7 +195,9 @@ std::optional<Cartridge> Cartridge::load(std::vector<u8> rom, std::string* error
     cart.rom_ = std::move(rom);
     switch (cart.kind_) {
     case Kind::RomOnly: cart.mbc_ = std::make_unique<MbcNone>(); break;
-    case Kind::Mbc1: cart.mbc_ = std::make_unique<Mbc1>(cart.ramBanks_); break;
+    case Kind::Mbc1:
+        cart.mbc_ = std::make_unique<Mbc1>(cart.ramBanks_, looksLikeMulticart(cart.rom_));
+        break;
     case Kind::Mbc2: cart.mbc_ = std::make_unique<Mbc2>(); break;
     case Kind::Mbc3:
         // 0x0F and 0x10 are the two MBC3 types with a clock.
