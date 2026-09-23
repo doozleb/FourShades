@@ -37,6 +37,15 @@ constexpr u8 kReadMask[] = {
 
 bool isGap(u16 address) { return address == 0xFF15 || address == 0xFF1F; }
 
+// One M-cycle is four T-cycles, and the frequency timers count T-cycles.
+constexpr int kTicksPerMCycle = 4;
+
+// The two pulse channels own five consecutive registers each, FF10-FF14 and
+// FF15-FF19. FF15 is the hole where channel 2's sweep register would be.
+constexpr u16 kPulseFirst = 0xFF10;
+constexpr u16 kPulseLast = 0xFF19;
+constexpr int kPulseRegisters = 5;
+
 // The sequencer's eight steps. Steps 0, 2, 4 and 6 clock the length counters
 // (256 Hz), steps 2 and 6 the sweep (128 Hz) and step 7 the envelope (64 Hz);
 // those rates are what the table produces, not three separate timers.
@@ -57,9 +66,22 @@ u8 lengthLoadMask(u16 address) {
 
 } // namespace
 
+Apu::Apu() {
+    // nr_ starts at the bytes the boot ROM leaves behind, so the channels are
+    // fed those same bytes: NR11's duty and NR12's DAC are already set when
+    // the machine starts, and channel 1 is already reporting itself on.
+    for (u16 address = kPulseFirst; address <= kPulseLast; ++address) {
+        if (isGap(address)) {
+            continue;
+        }
+        writePulse(address, nr_[static_cast<std::size_t>(address - kFirst)]);
+    }
+}
+
 void Apu::tick(const Timer& timer) {
     steppedThisCycle_ = false;
     clockFromCounter(timer);
+    tickChannels();
 }
 
 void Apu::counterWritten(const Timer& timer) {
@@ -87,8 +109,11 @@ void Apu::stepSequencer() {
     if (stepClocksLength(step)) {
         clockLengths();
     }
-    // Steps 2 and 6 clock the sweep and step 7 the envelope. Neither exists
-    // yet: they arrive with the channels that own them.
+    if (step == 7) {
+        clockEnvelopes();
+    }
+    // Steps 2 and 6 clock the sweep, which arrives with the channel that
+    // owns it.
 }
 
 void Apu::clockLengths() {
@@ -96,6 +121,22 @@ void Apu::clockLengths() {
         if (length_[channel].clock()) {
             channelOn_[channel] = false;
         }
+    }
+}
+
+void Apu::clockEnvelopes() {
+    for (PulseChannel& channel : pulse_) {
+        channel.clockEnvelope();
+    }
+}
+
+// The frequency timers run only while the APU has power.
+void Apu::tickChannels() {
+    if (!powered_) {
+        return;
+    }
+    for (PulseChannel& channel : pulse_) {
+        channel.tick(kTicksPerMCycle);
     }
 }
 
@@ -180,6 +221,15 @@ void Apu::write(u16 address, u8 value) {
     if (const int loads = lengthLoadChannel(address); loads >= 0) {
         length_[static_cast<std::size_t>(loads)].load(value);
     }
+    writePulse(address, value);
+    // A DAC that goes off takes its channel with it. One that comes on does
+    // not bring the channel back: only a trigger does that.
+    if (const int dac = dacChannel(address); dac >= 0) {
+        const std::size_t channel = static_cast<std::size_t>(dac);
+        if (!dacOn(channel)) {
+            channelOn_[channel] = false;
+        }
+    }
     if (const int controls = lengthControlChannel(address); controls >= 0) {
         // Bit 6 enables the length counter, bit 7 triggers the channel. The
         // half of the length period the write lands in decides the two
@@ -187,9 +237,64 @@ void Apu::write(u16 address, u8 value) {
         // when the step that comes next does not clock length.
         const bool firstHalf = !stepClocksLength(step_);
         const std::size_t channel = static_cast<std::size_t>(controls);
-        if (length_[channel].writeControl((value & 0x40) != 0, (value & 0x80) != 0, firstHalf)) {
+        const bool triggered = (value & 0x80) != 0;
+        if (length_[channel].writeControl((value & 0x40) != 0, triggered, firstHalf)) {
             channelOn_[channel] = false;
         }
+        // The counter is dealt with first: a write that both expires the
+        // length and triggers leaves the channel on, which is why it is the
+        // counter that refuses to report an expiry when trigger is set.
+        if (triggered) {
+            trigger(channel);
+        }
+    }
+}
+
+void Apu::writePulse(u16 address, u8 value) {
+    if (address < kPulseFirst || address > kPulseLast) {
+        return;
+    }
+    const int offset = static_cast<int>(address - kPulseFirst);
+    PulseChannel& channel = pulse_[static_cast<std::size_t>(offset / kPulseRegisters)];
+    switch (offset % kPulseRegisters) {
+    case 1: channel.writeDuty(value); break;
+    case 2: channel.writeEnvelope(value); break;
+    case 3: channel.writeFrequencyLow(value); break;
+    case 4: channel.writeFrequencyHigh(value); break;
+    default: break; // NRx0 is the sweep, which channel 1 does not own yet
+    }
+}
+
+// Bit 7 of NRx4. The length counter has already had its share of the write.
+// A channel whose DAC is off cannot be switched on, so this is where the
+// refusal lives -- and where channels 3 and 4, whose generators are not
+// written yet, still get the enable flag every channel has.
+void Apu::trigger(std::size_t channel) {
+    if (channel < pulse_.size()) {
+        pulse_[channel].trigger();
+    }
+    channelOn_[channel] = dacOn(channel);
+}
+
+// Three of the four DACs are off when the top five bits of an envelope
+// register are zero. The wave channel has no envelope, so its DAC is a bit of
+// its own: NR30 bit 7.
+bool Apu::dacOn(std::size_t channel) const {
+    switch (channel) {
+    case 2: return (nr_[kNr30 - kFirst] & 0x80) != 0;
+    case 3: return (nr_[kNr42 - kFirst] & 0xF8) != 0;
+    default: return pulse_[channel].dacOn();
+    }
+}
+
+// Which channel's DAC an address holds, or -1 for every other address.
+int Apu::dacChannel(u16 address) {
+    switch (address) {
+    case 0xFF12: return 0;
+    case 0xFF17: return 1;
+    case 0xFF1A: return 2;
+    case 0xFF21: return 3;
+    default: return -1;
     }
 }
 
@@ -211,6 +316,9 @@ u8 Apu::stored(u16 address) const {
 void Apu::powerOff() {
     nr_.fill(0x00);
     channelOn_.fill(false);
+    for (PulseChannel& channel : pulse_) {
+        channel.powerOff();
+    }
     // NRx4 goes with the rest, so every length counter loses its enable. The
     // counters themselves are left alone: on DMG they survive the power
     // cycle, which is also why their load bits stay writable while down.
