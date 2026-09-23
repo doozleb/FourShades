@@ -12,6 +12,18 @@ constexpr u8 kRegDayHigh = 0x0C;
 constexpr u8 kHaltBit = 0x40;
 constexpr u8 kCarryBit = 0x80;
 
+// How wide each counter is. Pan Docs gives the range a running clock keeps to
+// (0-59, 0-59, 0-23) but not how many bits the registers have, and the two are
+// not the same thing: a program can write any byte, and only the width decides
+// what comes back. Six bits for seconds and minutes, five for hours, and three
+// for the day-high register — bits 0, 6 and 7, the only ones Pan Docs names.
+// See docs/known-divergences.md, "MBC3's clock: the register widths and the
+// latch, where Pan Docs is silent".
+constexpr u8 kSecondsMask = 0x3F;
+constexpr u8 kMinutesMask = 0x3F;
+constexpr u8 kHoursMask = 0x1F;
+constexpr u8 kDayHighMask = 0xC1;
+
 constexpr std::uint64_t kDayCounterPeriod = 512; // 9 bits
 
 // Advances one counter by `count` steps and returns how many times it
@@ -20,12 +32,13 @@ constexpr std::uint64_t kDayCounterPeriod = 512; // 9 bits
 // `limit` is the last in-range value: the counter carries when it steps off
 // it, so a value of `limit` plus one step is 0 plus a carry. A value above
 // `limit` is not a fault to be corrected — the hardware keeps whatever the
-// program wrote and counts on from it, with no carry, until the 8-bit
-// register wraps back into range. Writing 63 to seconds therefore counts
-// 63, 64, ... 255, 0, ... 59, and only then carries a minute.
-std::uint64_t advanceField(u8& value, u8 limit, std::uint64_t count) {
+// program wrote and counts on from it, with no carry, until the register
+// wraps back into range. `span` is how many values the register can hold, so
+// writing 63 to the six-bit seconds counts 63, 0, 1, ... 59, and only then
+// carries a minute.
+std::uint64_t advanceField(u8& value, u8 limit, std::uint64_t span, std::uint64_t count) {
     if (value > limit) {
-        const std::uint64_t toWrap = 256 - value; // steps to reach 0
+        const std::uint64_t toWrap = span - value; // steps to reach 0
         if (count < toWrap) {
             value = static_cast<u8>(value + count);
             return 0;
@@ -41,6 +54,17 @@ std::uint64_t advanceField(u8& value, u8 limit, std::uint64_t count) {
     const std::uint64_t part = value + count % period;
     value = static_cast<u8>(part % period);
     return whole + part / period;
+}
+
+// A saved state restored into registers only as wide as the chip's. Bits the
+// hardware cannot hold must not come back through a save file either.
+RtcRegisters narrowed(const RtcRegisters& regs) {
+    RtcRegisters out = regs;
+    out.seconds = static_cast<u8>(out.seconds & kSecondsMask);
+    out.minutes = static_cast<u8>(out.minutes & kMinutesMask);
+    out.hours = static_cast<u8>(out.hours & kHoursMask);
+    out.dayHigh = static_cast<u8>(out.dayHigh & kDayHighMask);
+    return out;
 }
 } // namespace
 
@@ -60,9 +84,9 @@ void Rtc::advanceSeconds(std::uint64_t seconds) {
     if (halted()) {
         return;
     }
-    std::uint64_t carry = advanceField(live_.seconds, 59, seconds);
-    carry = advanceField(live_.minutes, 59, carry);
-    carry = advanceField(live_.hours, 23, carry);
+    std::uint64_t carry = advanceField(live_.seconds, 59, kSecondsMask + 1, seconds);
+    carry = advanceField(live_.minutes, 59, kMinutesMask + 1, carry);
+    carry = advanceField(live_.hours, 23, kHoursMask + 1, carry);
     addDays(carry);
 }
 
@@ -91,9 +115,7 @@ u8 Rtc::read(u8 reg) const {
     case kRegDayLow:
         return latched_.dayLow;
     case kRegDayHigh:
-        // Pan Docs documents bits 0, 6 and 7 of this register and says
-        // nothing about bits 1-5, so they read back as whatever was written
-        // rather than as a fill pattern nothing attests to.
+        // Three bits wide, so bits 1-5 are already gone: see the masks above.
         return latched_.dayHigh;
     default:
         // Not a clock register; the caller decodes 0x08-0x0C before getting
@@ -105,25 +127,25 @@ u8 Rtc::read(u8 reg) const {
 void Rtc::write(u8 reg, u8 value) {
     switch (reg) {
     case kRegSeconds:
-        live_.seconds = value;
+        live_.seconds = static_cast<u8>(value & kSecondsMask);
         // Hardware restarts the sub-second divider on a seconds write, so a
         // program that sets the seconds gets a whole second before the next
         // increment instead of however much of one was left.
         ticks_ = 0;
         break;
     case kRegMinutes:
-        live_.minutes = value;
+        live_.minutes = static_cast<u8>(value & kMinutesMask);
         break;
     case kRegHours:
-        live_.hours = value;
+        live_.hours = static_cast<u8>(value & kHoursMask);
         break;
     case kRegDayLow:
         live_.dayLow = value;
         break;
     case kRegDayHigh:
-        // Stored whole: this is the only way the halt bit is set or cleared
-        // and the only way the day-overflow carry is cleared.
-        live_.dayHigh = value;
+        // The three bits that exist, and this is the only way the halt bit is
+        // set or cleared and the only way the day-overflow carry is cleared.
+        live_.dayHigh = static_cast<u8>(value & kDayHighMask);
         break;
     default:
         break;
@@ -135,8 +157,8 @@ bool Rtc::halted() const { return (live_.dayHigh & kHaltBit) != 0; }
 RtcState Rtc::state() const { return RtcState{live_, latched_}; }
 
 void Rtc::setState(const RtcState& state) {
-    live_ = state.live;
-    latched_ = state.latched;
+    live_ = narrowed(state.live);
+    latched_ = narrowed(state.latched);
     // The saved state is whole seconds, so a restored clock starts a fresh
     // one rather than inheriting whatever this object had accumulated.
     ticks_ = 0;

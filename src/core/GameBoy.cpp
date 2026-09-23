@@ -42,6 +42,9 @@ void GameBoy::tick() {
         if_ = static_cast<u8>(if_ | irq::Serial);
     }
     if_ = static_cast<u8>(if_ | ppu_.tick());
+    // The cartridge's own clock, if it has one. Nothing above or below
+    // depends on it, and nothing it does depends on them.
+    cart_.tick();
     tickDma();
 }
 

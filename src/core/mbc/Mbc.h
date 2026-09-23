@@ -9,6 +9,8 @@
 
 namespace fourshades {
 
+class Rtc;
+
 // A memory bank controller: the chip on the cartridge that decides which ROM
 // bank the CPU sees and what answers from A000-BFFF. Cartridge owns the ROM
 // and the RAM and does the address decoding; everything that differs between
@@ -33,6 +35,13 @@ public:
 
     // One M-cycle. Only a controller with a timer does anything.
     virtual void tick() {}
+
+    // The cartridge's clock, or null on a controller that has none. The
+    // cartridge needs it to save and restore the time across a power cycle,
+    // which is the one thing about a clock that is not a bus access; what to
+    // do with it is the cartridge's business, not this chip's.
+    virtual Rtc* rtc() { return nullptr; }
+    virtual const Rtc* rtc() const { return nullptr; }
 
     // --- Plumbing, not part of the banking interface ------------------
     //
