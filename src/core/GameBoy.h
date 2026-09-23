@@ -8,6 +8,7 @@
 #include "core/Serial.h"
 #include "core/Timer.h"
 #include "core/Types.h"
+#include "core/apu/Apu.h"
 
 #include <array>
 #include <cstdint>
@@ -77,6 +78,7 @@ private:
     Cartridge cart_;
     Timer timer_;
     Serial serial_;
+    Apu apu_;
     Ppu ppu_;
     std::array<u8, 0x2000> wram_{};
     std::array<u8, 0x7F> hram_{};

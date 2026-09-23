@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 126,
+    "passing": 127,
     "total": 165,
     "groups": [
       {
@@ -27,10 +27,10 @@
       },
       {
         "group": "sound",
-        "passing": 0,
+        "passing": 1,
         "total": 12,
         "first_failure": {
-          "test": "blargg/dmg_sound/01-registers.gb",
+          "test": "blargg/dmg_sound/02-len_ctr.gb",
           "reason": "Failed #2"
         }
       },
