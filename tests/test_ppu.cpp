@@ -39,7 +39,7 @@ TEST_CASE("the PPU starts where the boot ROM left it") {
 // The dot within line 153 the boot ROM leaves the PPU on is not given by Pan
 // Docs. It was solved from the two reads a power-on register walk makes: see
 // docs/known-divergences.md, "The PPU's power-on phase within line 153".
-TEST_CASE("the PPU's power-on phase is the measured one, and M-cycle aligned") {
+TEST_CASE("the PPU's power-on phase is the value chosen inside the solved band, and M-cycle aligned") {
     Ppu ppu;
     CHECK(ppu.lineDot() == 356);
     CHECK(ppu.lineDot() % 4 == 0); // an odd phase desynchronises dot from M-cycle
