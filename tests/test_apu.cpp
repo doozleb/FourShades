@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "core/GameBoy.h"
+#include "core/Timer.h"
 #include "core/apu/Apu.h"
 
 #include <utility>
@@ -53,6 +54,21 @@ const std::vector<Entry>& powerUpValues() {
 
 void powerOff(Apu& apu) { apu.write(0xFF26, 0x00); }
 void powerOn(Apu& apu) { apu.write(0xFF26, 0x80); }
+
+// One M-cycle of the pair, in the order the machine runs them: the counter
+// moves first, then the APU asks it what fell.
+void cycle(Timer& timer, Apu& apu) {
+    timer.tick();
+    apu.tick(timer);
+}
+
+// Puts the counter four T-cycles below `target` and runs the cycle that
+// reaches it, so the APU sees whatever that crossing does to bit 12.
+void cycleTo(Timer& timer, Apu& apu, u16 target) {
+    timer.setCounter(static_cast<u16>(target - 4));
+    cycle(timer, apu);
+    REQUIRE(timer.counter() == target);
+}
 
 } // namespace
 
@@ -153,9 +169,10 @@ TEST_CASE("on DMG the length load still writes while the APU is down") {
 }
 
 TEST_CASE("powering on restarts the frame sequencer") {
-    // Task 3 brings the sequencer itself; until then the only thing to assert
-    // is that the step a power-on leaves behind is 0.
     Apu apu;
+    Timer timer;
+    cycleTo(timer, apu, 0x2000); // one step in, so 0 below means something
+    REQUIRE(apu.sequencerStep() == 1);
     powerOff(apu);
     powerOn(apu);
     CHECK(apu.powered() == true);
@@ -163,32 +180,118 @@ TEST_CASE("powering on restarts the frame sequencer") {
     CHECK(apu.read(0xFF26) == 0xF0); // on, and no channel came back with it
 }
 
-TEST_CASE("NR52's low four bits are read only") {
+TEST_CASE("the frame sequencer steps on a falling edge of counter bit 12") {
     Apu apu;
-    const u8 before = apu.read(0xFF26);
-    apu.write(0xFF26, 0xFF);
-    CHECK(apu.read(0xFF26) == before);
-    apu.write(0xFF26, 0x8F);
-    CHECK(apu.read(0xFF26) == before);
-    // Bit 7 clear still powers down, whatever the low bits say.
-    apu.write(0xFF26, 0x0F);
-    CHECK(apu.read(0xFF26) == 0x70);
+    Timer timer;
+    CHECK(apu.sequencerStep() == 0);
+
+    cycleTo(timer, apu, 0x1000); // bit 12 rises: not an edge the sequencer wants
+    CHECK(apu.sequencerStep() == 0);
+    cycle(timer, apu);           // 0x1004, nothing crosses
+    CHECK(apu.sequencerStep() == 0);
+
+    cycleTo(timer, apu, 0x2000); // bit 12 falls
+    CHECK(apu.sequencerStep() == 1);
+    cycle(timer, apu);
+    CHECK(apu.sequencerStep() == 1); // the edge belongs to one M-cycle only
+
+    cycleTo(timer, apu, 0x2200); // bit 8 falls; bit 12 is clear either side
+    CHECK(apu.sequencerStep() == 1);
+    cycleTo(timer, apu, 0x3000); // bit 12 rises again
+    CHECK(apu.sequencerStep() == 1);
 }
 
-TEST_CASE("the machine routes FF10-FF3F to the APU") {
+TEST_CASE("the frame sequencer wraps after eight steps") {
+    Apu apu;
+    Timer timer;
+    for (int i = 1; i <= 8; ++i) {
+        CAPTURE(i);
+        cycleTo(timer, apu, 0x2000);
+        CHECK(apu.sequencerStep() == (i & 7));
+    }
+}
+
+TEST_CASE("a DIV write that drops counter bit 12 steps the frame sequencer") {
+    // The machine advances time first and performs the access second, so the
+    // edge a DIV write makes lands after the APU's per-cycle poll. It has to
+    // be asked again from the write itself, or this edge is lost.
     auto cart = Cartridge::load(std::vector<u8>(0x8000, 0x00), nullptr);
     REQUIRE(cart.has_value());
     GameBoy gb{std::move(*cart)};
-    for (const Entry& entry : powerUpValues()) {
-        CAPTURE(entry.address);
-        CHECK(gb.peek(entry.address) == entry.value);
+    // Wait for DIV bit 4 -- counter bit 12 -- to be set, and for the cycle the
+    // write itself spends not to be the one that carries the counter past it.
+    for (int guard = 0; guard < 4096; ++guard) {
+        const u8 div = gb.peek(0xFF04);
+        if ((div & 0x10) != 0 && (div & 0x0F) != 0x0F) break;
+        gb.idle();
     }
-    gb.write(0xFF30, 0x5A);
-    CHECK(gb.peek(0xFF30) == 0x5A);
-    gb.write(0xFF12, 0x00);
-    CHECK(gb.peek(0xFF12) == 0x00);
-    // And the gaps answer through the machine too, where 0xFF used to be the
-    // answer for the whole block.
-    CHECK(gb.peek(0xFF1F) == 0xFF);
-    CHECK(gb.peek(0xFF26) == 0xF1);
+    REQUIRE((gb.peek(0xFF04) & 0x10) != 0);
+    const int before = gb.apu().sequencerStep();
+    gb.write(0xFF04, 0x00);
+    CHECK(gb.peek(0xFF04) == 0x00);
+    CHECK(gb.apu().sequencerStep() == (before + 1) % 8);
+}
+
+TEST_CASE("one falling edge is one step, however many times it is asked about") {
+    // The edge query is a level that stands for the whole M-cycle, so the
+    // cycle that both crosses bit 12 and has the counter written must not
+    // step the sequencer twice.
+    Apu apu;
+    Timer timer;
+    timer.setCounter(0x1FFC);
+    timer.tick(); // 0x2000: bit 12 falls on the increment itself
+    apu.tick(timer);
+    CHECK(apu.sequencerStep() == 1);
+    timer.write(0xFF04, 0x00); // the same M-cycle's write, on a counter already past it
+    apu.counterWritten(timer);
+    CHECK(apu.sequencerStep() == 1);
+}
+
+TEST_CASE("a DIV write that drops nothing leaves the frame sequencer alone") {
+    auto cart = Cartridge::load(std::vector<u8>(0x8000, 0x00), nullptr);
+    REQUIRE(cart.has_value());
+    GameBoy gb{std::move(*cart)};
+    for (int guard = 0; guard < 4096; ++guard) {
+        const u8 div = gb.peek(0xFF04);
+        if ((div & 0x10) == 0 && (div & 0x0F) != 0x0F) break;
+        gb.idle();
+    }
+    REQUIRE((gb.peek(0xFF04) & 0x10) == 0);
+    const int before = gb.apu().sequencerStep();
+    gb.write(0xFF04, 0x00);
+    CHECK(gb.apu().sequencerStep() == before);
+}
+
+TEST_CASE("a length counter that runs out switches its channel off in NR52") {
+    Apu apu;
+    Timer timer;
+    // Channel 1 is the one the boot ROM leaves running, so it is the one
+    // whose flag can be watched going out.
+    REQUIRE((apu.read(0xFF26) & 0x01) != 0);
+    apu.write(0xFF11, 0x3F); // one length step left
+    apu.write(0xFF14, 0x40); // length enabled, no trigger
+    // Step 0 clocks length, and the counter reaches zero on it.
+    cycleTo(timer, apu, 0x2000);
+    CHECK(apu.sequencerStep() == 1);
+    CHECK((apu.read(0xFF26) & 0x01) == 0);
+    CHECK(apu.read(0xFF26) == 0xF0);
+}
+
+TEST_CASE("the frame sequencer clocks length on four of its eight steps") {
+    Apu apu;
+    Timer timer;
+    apu.write(0xFF11, 0x3B); // 64 - 59: five length steps left
+    apu.write(0xFF14, 0x40); // length enabled, no trigger
+    REQUIRE(apu.sequencerStep() == 0);
+    // Five length clocks are eight sequencer steps and one more: steps 0, 2,
+    // 4 and 6 of the first round, then step 0 of the second. A sequencer that
+    // clocked length every step would have run out on the fifth.
+    for (int step = 1; step <= 8; ++step) {
+        CAPTURE(step);
+        cycleTo(timer, apu, 0x2000);
+        CHECK((apu.read(0xFF26) & 0x01) != 0);
+    }
+    CHECK(apu.sequencerStep() == 0); // eight steps: back to the start
+    cycleTo(timer, apu, 0x2000);
+    CHECK((apu.read(0xFF26) & 0x01) == 0);
 }
