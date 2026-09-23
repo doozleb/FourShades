@@ -901,6 +901,82 @@ moved, SingleStepTests 499/500, every doctest case passing.
 - **What would overturn it:** a measurement of MBC5's ROM bank register power-on state from real DMG or CGB hardware, or discovery of a cartridge that depends on bank 0 being mapped at power-on — which would be incompatible with this one.
 - **Checked:** 2026-09-23.
 
+## MBC3's clock: the register widths and the latch, where Pan Docs is silent (2026-09-23)
+
+- **Tests:** the Emulator Shootout's `cpp` set, `cpp/latch-rtc-test.gb` and
+  `cpp/rtc-invalid-banks-test.gb` (screenshot tests at the pinned Shootout
+  commit; both ROMs carry a "Built 2021-04-22" string). Neither is marked
+  hardware-verified the way Mooneye marks its own, so what follows rests on
+  what the ROMs measure, set out in full below.
+- **Pan Docs, [MBC3](https://gbdev.io/pandocs/MBC3.html):** lists the five
+  clock registers with the ranges a *running* clock keeps to — RTC S 0-59,
+  RTC M 0-59, RTC H 0-23, RTC DL 0-255 — and names bits 0, 6 and 7 of RTC DH,
+  saying nothing about bits 1-5. Of 6000-7FFF it says only that "when writing
+  $00, and then $01 to this register, the current time becomes latched into
+  the RTC registers". It does not say how *wide* the registers are, what a
+  program that writes a value outside the range gets back, or what a write of
+  any other value to 6000-7FFF does. All three findings below fill that
+  silence; none of them contradicts a Pan Docs sentence.
+- **What `rtc-invalid-banks-test` does.** It opens the RAM-and-timer gate,
+  writes the number *n* into whatever 4000-5FFF's value *n* selects for each
+  n in 0x00-0x0F, latches, and displays the sixteen bytes read back from
+  0xA000. The reference image reads
+  `00 01 02 03 FF FF FF FF 08 09 0A 0B 00 FF FF FF`.
+- **What `latch-rtc-test` does.** It seeds a 32-bit counter at 0xC1A4 and runs
+  a small LCG at 0x00DF. Each of its 53 iterations writes five pseudo-random
+  bytes into the five clock registers, reads the five *latched* registers back
+  into the display buffer, and then writes one more pseudo-random byte to
+  0x6000 before the next iteration. The reference image is the resulting
+  16 x 16 table of 256 bytes, and re-running the ROM's own LCG reproduces
+  every byte of it.
+- **Finding 1: the registers are narrower than a byte** — six bits of seconds,
+  six of minutes, five of hours, eight of day-low and three of day-high.
+  Evidence from `latch-rtc-test`'s first two iterations alone: 0x7F written to
+  hours reads back 0x1F, 0xCF to day-high reads 0xC1, then 0x67 to seconds
+  reads 0x27, 0xEE to minutes reads 0x2E, 0xFC to hours reads 0x1C and 0xB2 to
+  day-high reads 0x80. Every one of the 256 bytes agrees with masks of 0x3F,
+  0x3F, 0x1F, 0xFF and 0xC1. `rtc-invalid-banks-test` says the same thing from
+  the other end: the 0x0C it writes into the day-high register reads back as
+  0x00, because 0x0C is bits 2 and 3 and neither exists.
+- **Finding 2: any write to 6000-7FFF latches**, whatever the value, and no
+  0x00-then-0x01 sequence is needed. Evidence: the 52 bytes `latch-rtc-test`
+  writes to 0x6000 are `D6 40 14 96 7B E9 73 1F 62 21 B0 D5 C4 23 06 F2 DC 28
+  AD AF E2 6B E1 46 11 26 DA F2 A3 92 D4 ED D3 EA 08 71 DA 68 B0 B7 F1 45 06
+  F9 54 BB 44 72 3C 05 A4 5C E3` — not one 0x00 and not one 0x01 among them —
+  and yet every iteration reads back exactly the five values written before
+  that write. Under the 0x00-then-0x01 rule the latched copy would keep the
+  zeroes the ROM latched during setup for the whole run: 243 of the 256 bytes
+  would be wrong, and the frame differed from the reference in 2270 pixels.
+  Pan Docs' sentence stays true either way, since a 0x00 followed by a 0x01 is
+  two writes and so latches under this rule too.
+- **Finding 3: an out-of-range counter wraps at its own width**, not at 256.
+  This is inferred from finding 1 rather than measured directly: a six-bit
+  seconds register cannot hold 64, so the old behaviour (write 63, count
+  63, 64, ... 255, 0) was impossible. The carry into minutes still happens
+  only when the counter steps off 59, so writing 60 counts 60, 61, 62, 63, 0,
+  1, ... 59, and only then carries.
+- **What FourShades does:** `src/core/mbc/Rtc.cpp` masks each register to its
+  width on write and in `setState`, and `advanceField` wraps an out-of-range
+  value at the register's span. `src/core/mbc/Mbc3.cpp` latches on any write
+  to 6000-7FFF.
+- **What the ROMs cannot distinguish.** Whether the hardware narrows a value
+  as it is written or only as it is read: both ROMs write and then read, so
+  the two are the same to them. FourShades narrows on write, which is what a
+  register with no wire for bit 6 would do, and that choice is visible only
+  through the save-state API.
+- **Not settled by either ROM:** what happens to the sub-second accumulator
+  across a save. `RtcState` has no field for it, so a restored clock starts a
+  fresh second; a save made a fraction of a second early or late is within the
+  error of the elapsed-time estimate the app layer hands `advanceSeconds`
+  anyway.
+- **Effect:** `latch-rtc-test` 2270 differing pixels -> 0, and
+  `rtc-invalid-banks-test` 32 -> 0. The `mbc3 / rtc` group goes 1 / 3 -> 3 / 3.
+- **What would overturn it:** a measurement from real MBC3 hardware showing
+  that a write of some particular value to 6000-7FFF does *not* latch, or that
+  the seconds, minutes, hours or day-high registers read back bits these masks
+  drop.
+- **Checked:** 2026-09-23.
+
 ## Timing model (not a divergence: where Pan Docs is silent)
 
 Pan Docs gives cycle counts but not every within-M-cycle order. These are the

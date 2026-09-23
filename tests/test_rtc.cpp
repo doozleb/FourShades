@@ -145,20 +145,47 @@ TEST_CASE("RTC writing seconds resets the sub-second accumulator") {
     CHECK(live(rtc).seconds == 5); // a whole second to go, not one tick
 }
 
-TEST_CASE("RTC an out-of-range seconds value is kept and counted from") {
+TEST_CASE("RTC an out-of-range seconds value is kept and counted from, within six bits") {
     Rtc rtc;
-    rtc.write(kSeconds, 0x3F); // 63: above 59, so it counts on up
+    rtc.write(kSeconds, 0x3C); // 60: above 59, so it counts on up
     rtc.advanceSeconds(1);
-    CHECK(live(rtc).seconds == 64);
+    CHECK(live(rtc).seconds == 61);
     CHECK(live(rtc).minutes == 0);
 
-    // 64 -> ... -> 255 -> 0 (no carry) -> ... -> 59 -> carry.
-    rtc.advanceSeconds(192); // 64 + 192 = 256, i.e. 0
+    // 61 -> 62 -> 63 -> 0 (no carry) -> ... -> 59 -> carry.
+    rtc.advanceSeconds(3);
     CHECK(live(rtc).seconds == 0);
     CHECK(live(rtc).minutes == 0);
     rtc.advanceSeconds(60);
     CHECK(live(rtc).seconds == 0);
     CHECK(live(rtc).minutes == 1);
+}
+
+TEST_CASE("RTC the registers are narrower than a byte") {
+    Rtc rtc;
+    rtc.write(kSeconds, 0xFF);
+    rtc.write(kMinutes, 0xFF);
+    rtc.write(kHours, 0xFF);
+    rtc.write(kDayLow, 0xFF);
+    rtc.write(kDayHigh, 0xFF);
+    rtc.latch();
+    CHECK(rtc.read(kSeconds) == 0x3F); // six bits
+    CHECK(rtc.read(kMinutes) == 0x3F); // six bits
+    CHECK(rtc.read(kHours) == 0x1F);   // five bits
+    CHECK(rtc.read(kDayLow) == 0xFF);  // all eight
+    CHECK(rtc.read(kDayHigh) == 0xC1); // bits 0, 6 and 7 only
+}
+
+TEST_CASE("RTC a restored state is narrowed to the registers that exist") {
+    RtcState wide;
+    wide.live.seconds = 0xFF;
+    wide.live.hours = 0xFF;
+    wide.latched.dayHigh = 0xFF;
+    Rtc rtc;
+    rtc.setState(wide);
+    CHECK(live(rtc).seconds == 0x3F);
+    CHECK(live(rtc).hours == 0x1F);
+    CHECK(rtc.read(kDayHigh) == 0xC1);
 }
 
 TEST_CASE("RTC advanceSeconds rolls up through minutes") {

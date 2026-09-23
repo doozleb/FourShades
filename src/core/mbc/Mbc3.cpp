@@ -4,6 +4,8 @@ namespace fourshades {
 
 namespace {
 constexpr std::size_t kRamBank = 0x2000;
+constexpr u8 kFirstClockRegister = 0x08;
+constexpr u8 kLastClockRegister = 0x0C;
 } // namespace
 
 std::size_t Mbc3::romBank(u16 address) const {
@@ -13,10 +15,14 @@ std::size_t Mbc3::romBank(u16 address) const {
     return romBank_;
 }
 
+bool Mbc3::clockSelected() const {
+    return hasTimer_ && ramSelect_ >= kFirstClockRegister && ramSelect_ <= kLastClockRegister;
+}
+
 bool Mbc3::ramBankSelected() const {
-    // 0x00-0x03 name a RAM bank. Everything else (0x04-0x0C: the unbuilt
-    // clock registers alongside a gap Pan Docs doesn't name; 0x0D-0x0F:
-    // invalid) selects nothing yet.
+    // 0x00-0x03 name a RAM bank. Everything else selects nothing: 0x04-0x07
+    // is a gap Pan Docs doesn't name, 0x08-0x0C is the clock (or, on a
+    // cartridge without one, nothing at all), 0x0D-0x0F is invalid.
     return ramSelect_ <= 0x03;
 }
 
@@ -30,6 +36,11 @@ std::size_t Mbc3::ramOffset(u16 address) const {
 }
 
 std::optional<u8> Mbc3::readRam(u16 address) const {
+    // The enable gate at 0000-1FFF covers the clock as well as the RAM: Pan
+    // Docs calls it "RAM and Timer Enable", and 0x0A opens both.
+    if (ramEnabled_ && clockSelected()) {
+        return rtc_.read(ramSelect_);
+    }
     if (!ramReachable()) {
         return std::nullopt;
     }
@@ -37,6 +48,10 @@ std::optional<u8> Mbc3::readRam(u16 address) const {
 }
 
 void Mbc3::writeRam(u16 address, u8 value) {
+    if (ramEnabled_ && clockSelected()) {
+        rtc_.write(ramSelect_, value);
+        return;
+    }
     if (!ramReachable()) {
         return;
     }
@@ -52,9 +67,21 @@ void Mbc3::writeControl(u16 address, u8 value) {
         romBank_ = bank == 0 ? 1 : bank;
     } else if (address < 0x6000) {
         ramSelect_ = static_cast<u8>(value & 0x0F);
+    } else {
+        // 6000-7FFF, the latch. Pan Docs gives the 0x00-then-0x01 sequence a
+        // program writes; the chip itself latches on any write here, whatever
+        // the value, which is what the 0x00-then-0x01 sequence amounts to.
+        if (hasTimer_) {
+            rtc_.latch();
+        }
     }
-    // 6000-7FFF: the latch, arriving with the clock in a later task; the
-    // caller never passes anything at or above 0x8000.
+    // The caller never passes anything at or above 0x8000.
+}
+
+void Mbc3::tick() {
+    if (hasTimer_) {
+        rtc_.tick();
+    }
 }
 
 std::unique_ptr<Mbc> Mbc3::clone() const {

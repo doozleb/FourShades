@@ -156,7 +156,10 @@ std::optional<Cartridge> Cartridge::load(std::vector<u8> rom, std::string* error
     case Kind::RomOnly: cart.mbc_ = std::make_unique<MbcNone>(); break;
     case Kind::Mbc1: cart.mbc_ = std::make_unique<Mbc1>(cart.ramBanks_); break;
     case Kind::Mbc2: cart.mbc_ = std::make_unique<Mbc2>(); break;
-    case Kind::Mbc3: cart.mbc_ = std::make_unique<Mbc3>(cart.ramBanks_); break;
+    case Kind::Mbc3:
+        // 0x0F and 0x10 are the two MBC3 types with a clock.
+        cart.mbc_ = std::make_unique<Mbc3>(cart.ramBanks_, type == 0x0F || type == 0x10);
+        break;
     case Kind::Mbc5:
         // 0x1C-0x1E are the rumble variants: their RAM-bank register's bit 3
         // is the motor and must not reach the bank number.
@@ -170,6 +173,30 @@ std::optional<Cartridge> Cartridge::load(std::vector<u8> rom, std::string* error
     }
     cart.bindMbc();
     return cart;
+}
+
+void Cartridge::tick() { mbc_->tick(); }
+
+bool Cartridge::hasTimer() const { return mbc_->rtc() != nullptr; }
+
+RtcState Cartridge::rtcState() const {
+    const Rtc* rtc = mbc_->rtc();
+    return rtc != nullptr ? rtc->state() : RtcState{};
+}
+
+bool Cartridge::setRtcState(const RtcState& state) {
+    Rtc* rtc = mbc_->rtc();
+    if (rtc == nullptr) {
+        return false;
+    }
+    rtc->setState(state);
+    return true;
+}
+
+void Cartridge::advanceRtcSeconds(std::uint64_t seconds) {
+    if (Rtc* rtc = mbc_->rtc()) {
+        rtc->advanceSeconds(seconds);
+    }
 }
 
 bool Cartridge::setRam(const std::vector<u8>& bytes) {

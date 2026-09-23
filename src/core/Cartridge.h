@@ -1,8 +1,10 @@
 #pragma once
 
 #include "core/Types.h"
+#include "core/mbc/Rtc.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -14,9 +16,9 @@ class Mbc;
 
 // A cartridge: the ROM image plus its memory bank controller. Supports plain
 // ROMs (type 0x00), MBC1 (0x01-0x03) per Pan Docs "MBC1", MBC2 (0x05-0x06)
-// per Pan Docs "MBC2", MBC3 (0x0F-0x13) per Pan Docs "MBC3" (banking only;
-// the real-time clock arrives later in piece 4), and MBC5 (0x19-0x1E) per
-// Pan Docs "MBC5". Other controllers arrive later in piece 4.
+// per Pan Docs "MBC2", MBC3 (0x0F-0x13) per Pan Docs "MBC3", clock and all,
+// and MBC5 (0x19-0x1E) per Pan Docs "MBC5". Other controllers arrive later
+// in piece 4.
 //
 // The cartridge owns the ROM, the RAM and the header facts; which bank an
 // address reaches is the controller's business, behind Mbc. The cartridge
@@ -42,6 +44,10 @@ public:
     u8 read(u16 address) const;        // 0000-7FFF and A000-BFFF
     void write(u16 address, u8 value); // MBC registers and cartridge RAM
 
+    // One M-cycle, for whatever on the cartridge counts time. Only a
+    // cartridge with a clock does anything with it.
+    void tick();
+
     Kind kind() const { return kind_; }
     bool headerChecksumOk() const { return headerChecksumOk_; }
     u8 headerChecksum() const { return rom_[0x014D]; }
@@ -55,6 +61,20 @@ public:
     // Cartridge RAM, in bank order, exactly as the hardware holds it. Empty
     // when the cartridge has none.
     const std::vector<u8>& ram() const { return ram_; }
+
+    // Whether the header declares a real-time clock: types 0x0F and 0x10.
+    bool hasTimer() const;
+
+    // The clock, for saving and restoring across a power cycle. Reading one
+    // that isn't there gives a zeroed state; writing one that isn't there
+    // changes nothing and returns false.
+    RtcState rtcState() const;
+    bool setRtcState(const RtcState& state);
+
+    // How much time went by while the machine was off. The core never reads a
+    // host clock, so whatever loads a save works that out and says so here.
+    // A cartridge without a clock ignores it.
+    void advanceRtcSeconds(std::uint64_t seconds);
 
     // Replaces cartridge RAM wholesale. Refuses, and changes nothing, unless
     // the size matches exactly: the header decides how much RAM this

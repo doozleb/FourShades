@@ -6,9 +6,13 @@
 
 namespace fourshades {
 
-// The five registers, live or latched. Days are 9 bits: `dayLow` plus bit 0
-// of `dayHigh`. Bit 6 of `dayHigh` halts the clock; bit 7 is the carry that
-// a day-counter overflow sets and only the program clears.
+// The five registers, live or latched. They are narrower than a byte: six
+// bits of seconds, six of minutes, five of hours, and three of `dayHigh`.
+// Days are 9 bits: `dayLow` plus bit 0 of `dayHigh`. Bit 6 of `dayHigh` halts
+// the clock; bit 7 is the carry that a day-counter overflow sets and only the
+// program clears. A value that does not fit is not kept: see
+// docs/known-divergences.md, "MBC3's clock: the register widths and the
+// latch, where Pan Docs is silent".
 struct RtcRegisters {
     u8 seconds = 0;
     u8 minutes = 0;
@@ -35,10 +39,10 @@ struct RtcState {
 // rather than a loop.
 //
 // There are two copies of the registers. The live one counts; the latched
-// one is what the program reads, and only a 6000-7FFF latch sequence copies
-// live over latched. That is the whole point of the latch: a program reading
-// five registers one at a time would otherwise see a clock that ticked
-// between two of them.
+// one is what the program reads, and only a write to 6000-7FFF copies live
+// over latched. That is the whole point of the latch: a program reading five
+// registers one at a time would otherwise see a clock that ticked between two
+// of them.
 //
 // Deliberately plain data: Mbc3 is copied whenever a Cartridge is, and the
 // compiler's own copy constructor has to do the right thing.
