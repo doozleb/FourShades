@@ -51,8 +51,8 @@ TEST_CASE("loading rejects tiny images and unsupported controllers") {
     std::string error;
     CHECK_FALSE(Cartridge::load(std::vector<u8>(0x100, 0), &error).has_value());
     CHECK_FALSE(error.empty());
-    CHECK_FALSE(Cartridge::load(makeRom(2, 0x13, 0x00, 0x00), &error).has_value()); // MBC3
-    CHECK(error.find("0x13") != std::string::npos);
+    CHECK_FALSE(Cartridge::load(makeRom(2, 0x20, 0x00, 0x00), &error).has_value()); // MBC6
+    CHECK(error.find("0x20") != std::string::npos);
 }
 
 TEST_CASE("a bad header checksum is reported but not fatal") {

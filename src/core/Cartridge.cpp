@@ -3,6 +3,7 @@
 #include "core/mbc/Mbc.h"
 #include "core/mbc/Mbc1.h"
 #include "core/mbc/Mbc2.h"
+#include "core/mbc/Mbc3.h"
 #include "core/mbc/Mbc5.h"
 #include "core/mbc/MbcNone.h"
 
@@ -110,6 +111,8 @@ std::optional<Cartridge> Cartridge::load(std::vector<u8> rom, std::string* error
     case 0x00: cart.kind_ = Kind::RomOnly; break;
     case 0x01: case 0x02: case 0x03: cart.kind_ = Kind::Mbc1; break;
     case 0x05: case 0x06: cart.kind_ = Kind::Mbc2; break;
+    case 0x0F: case 0x10: case 0x11:
+    case 0x12: case 0x13: cart.kind_ = Kind::Mbc3; break;
     case 0x19: case 0x1A: case 0x1B:
     case 0x1C: case 0x1D: case 0x1E: cart.kind_ = Kind::Mbc5; break;
     default: return fail("unsupported cartridge type " + hexByte(type));
@@ -128,15 +131,21 @@ std::optional<Cartridge> Cartridge::load(std::vector<u8> rom, std::string* error
         // decides this allocation.
         cart.ram_.assign(512, 0x00);
     } else if (type == 0x02 || type == 0x03 ||
+        type == 0x10 || type == 0x12 || type == 0x13 ||
         type == 0x1A || type == 0x1B || type == 0x1D || type == 0x1E) {
+        // Type 0x0F (TIMER+BATTERY) is deliberately excluded here: it has a
+        // battery and a timer but no RAM at all.
         cart.ramBanks_ = ramBanksFor(rom[0x0149]);
         cart.ram_.assign(cart.ramBanks_ * kRamBank, 0x00);
     }
     // Of the types accepted above, only 0x03 (MBC1+RAM+BATTERY), 0x06
-    // (MBC2+BATTERY) and 0x1B / 0x1E (MBC5+RAM+BATTERY, plain and rumble)
-    // declare a battery; the other RAM-bearing types have the same RAM with
-    // nothing holding it up.
-    cart.hasBattery_ = type == 0x03 || type == 0x06 || type == 0x1B || type == 0x1E;
+    // (MBC2+BATTERY), 0x0F (MBC3+TIMER+BATTERY, no RAM), 0x10
+    // (MBC3+TIMER+RAM+BATTERY), 0x13 (MBC3+RAM+BATTERY) and 0x1B / 0x1E
+    // (MBC5+RAM+BATTERY, plain and rumble) declare a battery; the other
+    // RAM-bearing types have the same RAM with nothing holding it up.
+    cart.hasBattery_ = type == 0x03 || type == 0x06 ||
+        type == 0x0F || type == 0x10 || type == 0x13 ||
+        type == 0x1B || type == 0x1E;
     u8 sum = 0;
     for (u16 a = 0x0134; a <= 0x014C; ++a) {
         sum = static_cast<u8>(sum - rom[a] - 1);
@@ -147,6 +156,7 @@ std::optional<Cartridge> Cartridge::load(std::vector<u8> rom, std::string* error
     case Kind::RomOnly: cart.mbc_ = std::make_unique<MbcNone>(); break;
     case Kind::Mbc1: cart.mbc_ = std::make_unique<Mbc1>(cart.ramBanks_); break;
     case Kind::Mbc2: cart.mbc_ = std::make_unique<Mbc2>(); break;
+    case Kind::Mbc3: cart.mbc_ = std::make_unique<Mbc3>(cart.ramBanks_); break;
     case Kind::Mbc5:
         // 0x1C-0x1E are the rumble variants: their RAM-bank register's bit 3
         // is the motor and must not reach the bank number.
