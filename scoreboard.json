@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 106,
+    "passing": 122,
     "total": 165,
     "groups": [
       {
@@ -51,12 +51,9 @@
       },
       {
         "group": "oam dma",
-        "passing": 5,
+        "passing": 6,
         "total": 6,
-        "first_failure": {
-          "test": "mooneye/acceptance/oam_dma/sources-GS.gb",
-          "reason": "cartridge: unsupported cartridge type 0x1B"
-        }
+        "first_failure": null
       },
       {
         "group": "ppu timing",
@@ -87,12 +84,9 @@
       },
       {
         "group": "mbc2 / mbc5",
-        "passing": 0,
+        "passing": 15,
         "total": 15,
-        "first_failure": {
-          "test": "mooneye/emulator-only/mbc2/bits_ramg.gb",
-          "reason": "cartridge: unsupported cartridge type 0x06"
-        }
+        "first_failure": null
       },
       {
         "group": "screen",
