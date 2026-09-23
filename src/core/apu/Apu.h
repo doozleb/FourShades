@@ -3,6 +3,7 @@
 #include "core/Timer.h"
 #include "core/Types.h"
 #include "core/apu/LengthCounter.h"
+#include "core/apu/PulseChannel.h"
 
 #include <array>
 #include <cstddef>
@@ -19,6 +20,11 @@ namespace fourshades {
 // 0xFF whatever is written to them.
 class Apu {
 public:
+    // The register block already holds what the boot ROM left behind, so the
+    // channels are handed those bytes rather than starting from zero: a
+    // channel 1 whose DAC read off here would refuse a ROM's first trigger.
+    Apu();
+
     // One M-cycle. The frame sequencer is not a timer of its own: it steps on
     // a falling edge of bit 12 of the system counter, which is why this is
     // handed the counter's owner rather than counting cycles.
@@ -45,8 +51,13 @@ public:
     // machine reads through it.
     u8 stored(u16 address) const;
 
+    // Channels 1 and 2, in that order, for the same onlookers.
+    const PulseChannel& pulse(std::size_t index) const { return pulse_[index]; }
+
 private:
     static constexpr u16 kFirst = 0xFF10;     // NR10
+    static constexpr u16 kNr30 = 0xFF1A;      // the wave channel's DAC bit
+    static constexpr u16 kNr42 = 0xFF21;      // the noise channel's envelope
     static constexpr u16 kNr52 = 0xFF26;
     static constexpr u16 kWaveFirst = 0xFF30; // wave RAM, 16 bytes
 
@@ -57,6 +68,18 @@ private:
     void clockFromCounter(const Timer& timer);
     void stepSequencer();
     void clockLengths();
+    void clockEnvelopes();
+    void tickChannels();
+    // FF10-FF19: the two pulse channels' five registers each, which is why
+    // FF15 is a hole -- channel 2 has no sweep register to put there.
+    void writePulse(u16 address, u8 value);
+    void trigger(std::size_t channel);
+    // Whether a channel's DAC is on. A channel whose DAC is off is switched
+    // off and cannot be triggered back on -- that much is true of all four,
+    // so it lives here rather than with the two channels that exist.
+    bool dacOn(std::size_t channel) const;
+    // Which channel's DAC an address holds, or -1.
+    static int dacChannel(u16 address);
     u8 channelFlags() const;
     // Which channel's length counter an address loads (NRx1) or controls
     // (NRx4), or -1 for every other address.
@@ -73,10 +96,11 @@ private:
         0x00, 0x00, 0x00, 0x00, 0x77, 0xF3,
     };
     std::array<u8, 0x10> wave_{};
+    std::array<PulseChannel, 2> pulse_{};
     // Pan Docs' power-up table reads NR52 as 0xF1 on DMG, so channel 1 is
-    // already running when the boot ROM hands the machine over. A length
-    // counter running out is, for now, the only thing that can switch one
-    // off; powering the APU down switches them all off.
+    // already running when the boot ROM hands the machine over. A trigger
+    // switches one on, a length counter running out or a DAC going off
+    // switches one back off, and powering the APU down switches them all off.
     std::array<bool, 4> channelOn_{true, false, false, false};
     // Channel 3 counts from 256; the other three count from 64.
     std::array<LengthCounter, 4> length_{

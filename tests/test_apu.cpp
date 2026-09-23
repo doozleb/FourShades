@@ -180,6 +180,72 @@ TEST_CASE("powering on restarts the frame sequencer") {
     CHECK(apu.read(0xFF26) == 0xF0); // on, and no channel came back with it
 }
 
+TEST_CASE("every channel's enable flag follows its own DAC and trigger") {
+    // The two pulse channels have their generators; channels 3 and 4 do not
+    // yet. The enable flag, the length counter and the DAC belong to all
+    // four all the same, which is what this checks.
+    struct Channel {
+        u8 flag;
+        u16 dacRegister;
+        u8 dacOn;   // a value whose DAC bits are set
+        u16 control; // NRx4
+    };
+    // Channel 3's DAC is NR30 bit 7; the other three are the top five bits of
+    // an envelope register.
+    const std::vector<Channel> channels = {
+        {0x01, 0xFF12, 0xF0, 0xFF14},
+        {0x02, 0xFF17, 0xF0, 0xFF19},
+        {0x04, 0xFF1A, 0x80, 0xFF1E},
+        {0x08, 0xFF21, 0xF0, 0xFF23},
+    };
+    for (const Channel& channel : channels) {
+        CAPTURE(channel.flag);
+        Apu apu;
+        apu.write(channel.dacRegister, 0x00); // DAC off, so the channel is off
+        REQUIRE((apu.read(0xFF26) & channel.flag) == 0);
+        apu.write(channel.control, 0x80); // a trigger the DAC refuses
+        CHECK((apu.read(0xFF26) & channel.flag) == 0);
+        apu.write(channel.dacRegister, channel.dacOn);
+        CHECK((apu.read(0xFF26) & channel.flag) == 0); // a DAC does not enable
+        apu.write(channel.control, 0x80);
+        CHECK((apu.read(0xFF26) & channel.flag) != 0); // a trigger does
+        apu.write(channel.dacRegister, 0x00);
+        CHECK((apu.read(0xFF26) & channel.flag) == 0); // and a DAC disables
+    }
+}
+
+TEST_CASE("NR52's low four bits are read only") {
+    Apu apu;
+    const u8 before = apu.read(0xFF26);
+    apu.write(0xFF26, 0xFF);
+    CHECK(apu.read(0xFF26) == before);
+    apu.write(0xFF26, 0x8F);
+    CHECK(apu.read(0xFF26) == before);
+    // Bit 7 clear still powers down, whatever the low bits say.
+    apu.write(0xFF26, 0x0F);
+    CHECK(apu.read(0xFF26) == 0x70);
+}
+
+TEST_CASE("the machine routes FF10-FF3F to the APU") {
+    auto cart = Cartridge::load(std::vector<u8>(0x8000, 0x00), nullptr);
+    REQUIRE(cart.has_value());
+    GameBoy gb{std::move(*cart)};
+    for (const Entry& entry : powerUpValues()) {
+        CAPTURE(entry.address);
+        CHECK(gb.peek(entry.address) == entry.value);
+    }
+    gb.write(0xFF30, 0x5A);
+    CHECK(gb.peek(0xFF30) == 0x5A);
+    gb.write(0xFF12, 0x00);
+    CHECK(gb.peek(0xFF12) == 0x00);
+    // And the gaps answer through the machine too, where 0xFF used to be the
+    // answer for the whole block.
+    CHECK(gb.peek(0xFF1F) == 0xFF);
+    // 0xF1 at power-up, but that NR12 write above turned channel 1's DAC off
+    // and took the channel with it, so its flag is gone.
+    CHECK(gb.peek(0xFF26) == 0xF0);
+}
+
 TEST_CASE("the frame sequencer steps on a falling edge of counter bit 12") {
     Apu apu;
     Timer timer;
