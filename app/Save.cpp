@@ -1,5 +1,6 @@
 #include "app/Save.h"
 
+#include <chrono>
 #include <fstream>
 #include <system_error>
 
@@ -49,6 +50,88 @@ private:
     HANDLE handle_;
 };
 
+// --- The clock footer -------------------------------------------------------
+//
+// See app/Save.h for the layout. Read and written a byte at a time rather than
+// memcpy'd over a struct: the file's byte order is little-endian because the
+// format says so, not because this machine happens to be.
+
+constexpr std::size_t kRegisterBytes = 4; // each register is a u32 on disk
+constexpr std::size_t kStampOffset = 40;
+
+void appendU32(std::vector<u8>& bytes, u8 value) {
+    // One byte's worth of register in four bytes of file: three zeroes, every
+    // time. The other three bytes exist only because BGB's do.
+    bytes.push_back(value);
+    bytes.push_back(0x00);
+    bytes.push_back(0x00);
+    bytes.push_back(0x00);
+}
+
+void appendRegisters(std::vector<u8>& bytes, const fourshades::RtcRegisters& regs) {
+    appendU32(bytes, regs.seconds);
+    appendU32(bytes, regs.minutes);
+    appendU32(bytes, regs.hours);
+    appendU32(bytes, regs.dayLow);
+    appendU32(bytes, regs.dayHigh);
+}
+
+void appendFooter(std::vector<u8>& bytes, const fourshades::RtcState& state, std::int64_t stamp) {
+    appendRegisters(bytes, state.live);
+    appendRegisters(bytes, state.latched);
+    const std::uint64_t unixSeconds = static_cast<std::uint64_t>(stamp);
+    for (int i = 0; i < 8; ++i) {
+        bytes.push_back(static_cast<u8>((unixSeconds >> (8 * i)) & 0xFF));
+    }
+}
+
+std::uint32_t readU32(const u8* p) {
+    return static_cast<std::uint32_t>(p[0]) | (static_cast<std::uint32_t>(p[1]) << 8) |
+           (static_cast<std::uint32_t>(p[2]) << 16) | (static_cast<std::uint32_t>(p[3]) << 24);
+}
+
+std::uint64_t readU64(const u8* p) {
+    std::uint64_t value = 0;
+    for (int i = 7; i >= 0; --i) {
+        value = (value << 8) | static_cast<std::uint64_t>(p[i]);
+    }
+    return value;
+}
+
+fourshades::RtcRegisters readRegisters(const u8* p) {
+    // Only the low byte of each u32 is a register; a file that put something
+    // in the other three bytes is a file that disagrees with the chip, and
+    // Cartridge::setRtcState narrows what survives even of this.
+    fourshades::RtcRegisters regs;
+    regs.seconds = static_cast<u8>(readU32(p + 0 * kRegisterBytes) & 0xFF);
+    regs.minutes = static_cast<u8>(readU32(p + 1 * kRegisterBytes) & 0xFF);
+    regs.hours = static_cast<u8>(readU32(p + 2 * kRegisterBytes) & 0xFF);
+    regs.dayLow = static_cast<u8>(readU32(p + 3 * kRegisterBytes) & 0xFF);
+    regs.dayHigh = static_cast<u8>(readU32(p + 4 * kRegisterBytes) & 0xFF);
+    return regs;
+}
+
+fourshades::RtcState readState(const u8* footer) {
+    fourshades::RtcState state;
+    state.live = readRegisters(footer);
+    state.latched = readRegisters(footer + 5 * kRegisterBytes);
+    return state;
+}
+
+// How long the machine was off, in seconds, and never a negative number
+// dressed up as a huge positive one. `then` in the future -- a host clock
+// corrected backwards, a different time zone, a dead CMOS battery -- is worth
+// nothing elapsed, because the alternative is winding a player's clock back.
+// The subtraction is done unsigned on purpose: `now - then` in signed
+// arithmetic can overflow on a hand-edited timestamp, while modular unsigned
+// arithmetic gives the exact difference once `now > then` is known.
+std::uint64_t elapsedSeconds(std::int64_t now, std::int64_t then) {
+    if (now <= then) {
+        return 0;
+    }
+    return static_cast<std::uint64_t>(now) - static_cast<std::uint64_t>(then);
+}
+
 } // namespace
 
 std::filesystem::path savePathFor(const std::filesystem::path& romPath) {
@@ -67,7 +150,17 @@ bool mayWriteSave(LoadStatus status) {
     return status == LoadStatus::NoFile || status == LoadStatus::Loaded;
 }
 
+std::int64_t hostUnixSeconds() {
+    const auto since = std::chrono::system_clock::now().time_since_epoch();
+    return static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::seconds>(since).count());
+}
+
 LoadResult loadSave(fourshades::Cartridge& cart, const std::filesystem::path& savePath) {
+    return loadSave(cart, savePath, hostUnixSeconds());
+}
+
+LoadResult loadSave(fourshades::Cartridge& cart, const std::filesystem::path& savePath,
+                    std::int64_t nowUnixSeconds) {
     if (!cart.hasBattery()) {
         return {LoadStatus::NoBattery, {}};
     }
@@ -79,12 +172,21 @@ LoadResult loadSave(fourshades::Cartridge& cart, const std::filesystem::path& sa
     if (ec) {
         return {LoadStatus::Refused, "cannot measure " + savePath.string() + ": " + ec.message()};
     }
-    const std::size_t expected = cart.ram().size();
-    if (size != expected) {
+    const std::size_t ramBytes = cart.ram().size();
+    // The clock's 48 bytes are an alternative length, not an extra one: a
+    // cartridge with no clock has nowhere to put them, so RAM + 48 is as
+    // wrong for it as RAM + 47 is for anything.
+    const bool withFooter = cart.hasTimer() && size == ramBytes + kRtcFooterBytes;
+    if (size != ramBytes && !withFooter) {
+        const std::string lengths =
+            cart.hasTimer() ? (std::to_string(ramBytes) + " or " + std::to_string(ramBytes + kRtcFooterBytes) +
+                               " bytes of RAM and clock")
+                            : (std::to_string(ramBytes) + " bytes of RAM");
         return {LoadStatus::Refused,
                 savePath.string() + " is " + std::to_string(size) + " bytes, but this cartridge has " +
-                    std::to_string(expected) + " bytes of RAM -- refusing to load it, and leaving it alone"};
+                    lengths + " -- refusing to load it, and leaving it alone"};
     }
+    const std::size_t expected = withFooter ? ramBytes + kRtcFooterBytes : ramBytes;
     std::ifstream in(savePath, std::ios::binary);
     if (!in) {
         return {LoadStatus::Refused, "cannot read " + savePath.string()};
@@ -98,8 +200,21 @@ LoadResult loadSave(fourshades::Cartridge& cart, const std::filesystem::path& sa
     }
     // Belt and braces: the core refuses a wrong size too, so a mistake here
     // cannot put a cartridge into a size it does not have.
-    if (!cart.setRam(bytes)) {
+    if (!cart.setRam(std::vector<u8>(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(ramBytes)))) {
         return {LoadStatus::Refused, savePath.string() + " does not fit this cartridge's RAM"};
+    }
+    if (withFooter) {
+        // setRtcState narrows every register to the width the chip really
+        // has, so a hand-edited or foreign footer cannot get a bit into this
+        // clock that the hardware could not hold.
+        cart.setRtcState(readState(bytes.data() + ramBytes));
+        const std::uint64_t elapsed =
+            elapsedSeconds(nowUnixSeconds, static_cast<std::int64_t>(readU64(bytes.data() + ramBytes + kStampOffset)));
+        if (elapsed > 0) {
+            // The cartridge's own battery kept this clock running while the
+            // machine was off; this is it being told how long that was.
+            cart.advanceRtcSeconds(elapsed);
+        }
     }
     return {LoadStatus::Loaded, {}};
 }
@@ -149,12 +264,25 @@ bool commitTempFile(const std::filesystem::path& savePath, std::string* error) {
 }
 
 SaveResult writeSave(const fourshades::Cartridge& cart, const std::filesystem::path& savePath) {
+    return writeSave(cart, savePath, hostUnixSeconds());
+}
+
+SaveResult writeSave(const fourshades::Cartridge& cart, const std::filesystem::path& savePath,
+                     std::int64_t nowUnixSeconds) {
     if (!cart.hasBattery()) {
         return {SaveStatus::NoBattery, 0, {}};
     }
-    const std::vector<u8>& ram = cart.ram();
+    // The RAM first, raw and in bank order, then the clock if there is one.
+    std::vector<u8> bytes = cart.ram();
+    if (cart.hasTimer()) {
+        // Type 0x0F has a battery and a clock and no RAM at all, so `bytes`
+        // is empty here and the file is the footer by itself. Nothing above
+        // short-circuits on an empty RAM, for exactly that reason.
+        bytes.reserve(bytes.size() + kRtcFooterBytes);
+        appendFooter(bytes, cart.rtcState(), nowUnixSeconds);
+    }
     std::string error;
-    if (!writeTempFile(savePath, ram, &error)) {
+    if (!writeTempFile(savePath, bytes, &error)) {
         // The previous save, if there was one, has not been touched.
         std::error_code ec;
         std::filesystem::remove(tempPathFor(savePath), ec);
@@ -165,7 +293,7 @@ SaveResult writeSave(const fourshades::Cartridge& cart, const std::filesystem::p
         std::filesystem::remove(tempPathFor(savePath), ec);
         return {SaveStatus::Failed, 0, error};
     }
-    return {SaveStatus::Written, ram.size(), {}};
+    return {SaveStatus::Written, bytes.size(), {}};
 }
 
 } // namespace app

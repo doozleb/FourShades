@@ -167,3 +167,34 @@ TEST_CASE("a rom dropped after a failed load can still be reset") {
     CHECK_FALSE(controller.reset());
     CHECK(controller.state() == AppState::Waiting);
 }
+
+TEST_CASE("reset keeps the cartridge clock, the way the battery does") {
+    AppController controller;
+    REQUIRE(controller.loadRom(makeRom(4, 0x10, 0x01, 0x02))); // MBC3+TIMER+RAM+BATTERY
+    REQUIRE(controller.gameBoy().cartridge().hasTimer());
+
+    fourshades::RtcState state;
+    state.live.seconds = 9;
+    state.live.minutes = 17;
+    state.live.hours = 4;
+    state.live.dayLow = 200;
+    state.latched.seconds = 8;
+    state.latched.minutes = 16;
+    state.latched.hours = 3;
+    state.latched.dayLow = 199;
+    REQUIRE(controller.gameBoy().cartridge().setRtcState(state));
+
+    REQUIRE(controller.reset());
+
+    // A cartridge clock runs off its own battery: switching the machine off
+    // and on again is the one thing it is built to ignore.
+    const fourshades::RtcState after = controller.gameBoy().cartridge().rtcState();
+    CHECK(static_cast<int>(after.live.seconds) == 9);
+    CHECK(static_cast<int>(after.live.minutes) == 17);
+    CHECK(static_cast<int>(after.live.hours) == 4);
+    CHECK(static_cast<int>(after.live.dayLow) == 200);
+    CHECK(static_cast<int>(after.latched.seconds) == 8);
+    CHECK(static_cast<int>(after.latched.minutes) == 16);
+    CHECK(static_cast<int>(after.latched.hours) == 3);
+    CHECK(static_cast<int>(after.latched.dayLow) == 199);
+}

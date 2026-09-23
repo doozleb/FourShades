@@ -38,11 +38,12 @@ public:
     // PPU's frame counter, the cartridge's bank registers -- is gone with
     // it.
     //
-    // The one thing that survives is battery-backed cartridge RAM, because
-    // that is what a battery is for: a DMG has no reset button, so the
+    // What survives is what the cartridge's own battery holds: its
+    // battery-backed RAM, and, on a cartridge with one, its real-time clock.
+    // That is what a battery is for -- a DMG has no reset button, so the
     // nearest real thing is switching it off and on again, and a saved game
-    // lives through that. RAM with no battery behind it does not, and is
-    // cleared.
+    // and the clock beside it both live through that. RAM with no battery
+    // behind it does not, and is cleared.
     //
     // Does nothing and returns false when no ROM is loaded.
     bool reset();
