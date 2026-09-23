@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 122,
+    "passing": 126,
     "total": 165,
     "groups": [
       {
@@ -75,12 +75,9 @@
       },
       {
         "group": "mbc1",
-        "passing": 12,
+        "passing": 13,
         "total": 13,
-        "first_failure": {
-          "test": "mooneye/emulator-only/mbc1/multicart_rom_8Mb.gb",
-          "reason": "failure bytes (0x42) over serial"
-        }
+        "first_failure": null
       },
       {
         "group": "mbc2 / mbc5",
@@ -99,12 +96,9 @@
       },
       {
         "group": "mbc3 / rtc",
-        "passing": 0,
+        "passing": 3,
         "total": 3,
-        "first_failure": {
-          "test": "cpp/rtc-invalid-banks-test.gb",
-          "reason": "cartridge: unsupported cartridge type 0x10"
-        }
+        "first_failure": null
       }
     ],
     "informational": [
