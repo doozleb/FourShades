@@ -24,7 +24,6 @@ void PulseChannel::writeDuty(u8 value) {
 
 void PulseChannel::writeEnvelope(u8 value) {
     envelope_.write(value);
-    dacOn_ = (value & 0xF8) != 0;
 }
 
 void PulseChannel::writeFrequencyLow(u8 value) {
@@ -59,7 +58,6 @@ void PulseChannel::powerOff() {
     frequency_ = 0;
     position_ = 0;
     timer_ = kMaxPeriod;
-    dacOn_ = false;
     envelope_ = VolumeEnvelope{};
 }
 

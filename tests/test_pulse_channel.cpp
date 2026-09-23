@@ -5,6 +5,7 @@
 #include "core/apu/PulseChannel.h"
 
 #include <array>
+#include <vector>
 
 using namespace fourshades;
 
@@ -181,16 +182,27 @@ TEST_CASE("writing NRx2 does not move the volume until the next trigger") {
 }
 
 TEST_CASE("the DAC is off when the top five bits of NRx2 are zero") {
-    PulseChannel channel;
-    CHECK_FALSE(channel.dacOn()); // nothing written: volume 0, counting down
-    channel.writeEnvelope(0x08);  // volume 0, counting up: the DAC is on
-    CHECK(channel.dacOn());
-    channel.writeEnvelope(0x00);
-    CHECK_FALSE(channel.dacOn());
-    channel.writeEnvelope(0x10); // volume 1, counting down
-    CHECK(channel.dacOn());
-    channel.writeEnvelope(0x07); // only the envelope period: still off
-    CHECK_FALSE(channel.dacOn());
+    // The DAC is read out of the stored NRx2 byte rather than kept in the
+    // channel, so what it does is visible only through the APU: a trigger is
+    // refused while it is off, and accepted while it is on.
+    struct Case {
+        u8 envelope;
+        bool dacOn;
+    };
+    const std::vector<Case> cases = {
+        {0x00, false}, // nothing set: volume 0, counting down
+        {0x08, true},  // volume 0, counting up: the DAC is on
+        {0x10, true},  // volume 1, counting down
+        {0x07, false}, // only the envelope period: still off
+    };
+    for (const Case& entry : cases) {
+        CAPTURE(entry.envelope);
+        Apu apu;
+        apu.write(kNr12, 0x00); // channel 1 off, whatever the boot left
+        apu.write(kNr12, entry.envelope);
+        apu.write(kNr14, 0x80); // a trigger only a live DAC accepts
+        CHECK(((apu.read(kNr52) & 0x01) != 0) == entry.dacOn);
+    }
 }
 
 TEST_CASE("turning a DAC off switches its channel off, and on does not switch it on") {
@@ -283,7 +295,7 @@ TEST_CASE("the pulse channels stop while the APU is powered down") {
     REQUIRE(apu.pulse(0).position() == 1);
     apu.write(kNr52, 0x00);
     CHECK(apu.pulse(0).position() == 0); // the zeroed registers take it with them
-    CHECK_FALSE(apu.pulse(0).dacOn());
+    CHECK(apu.stored(0xFF12) == 0x00);   // NR12 with it, so the DAC is off too
     CHECK(apu.pulse(0).frequency() == 0);
     for (int step = 0; step < 4; ++step) {
         cycle(timer, apu);
@@ -296,6 +308,10 @@ TEST_CASE("the boot ROM's NR11 and NR12 reach channel 1") {
     // 0xF3, whose top five bits are not zero. A channel 1 that reported its
     // DAC off here would refuse the first trigger a ROM gives it.
     Apu apu;
-    CHECK(apu.pulse(0).dacOn());
+    REQUIRE((apu.read(kNr52) & 0x01) != 0); // channel 1 comes up running
+    // A trigger a dead DAC refuses would switch that channel back off, since
+    // a trigger sets the enable flag to whatever the DAC says. It stays on.
+    apu.write(kNr14, 0x80);
+    CHECK((apu.read(kNr52) & 0x01) != 0);
     CHECK(apu.pulse(0).dutyOutput()); // duty 2 starts its pattern at 1
 }
