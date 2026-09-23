@@ -12,9 +12,17 @@
 // Cartridge::load's message and returns to waiting rather than closing the
 // window.
 //
+// Sound comes out of the same loop. The machine is pumped into
+// app::AudioResampler after every step and the frame's samples are handed
+// to app::Audio once a frame; if the sound device will not open, the
+// emulator runs anyway, silently, with the reason printed once. A missing
+// or busy sound card is not a reason to refuse to play a game.
+//
 // Keys: arrows, Z, X, Enter and Backspace are the joypad; P toggles the
-// palette; Space pauses; R resets.
+// palette; M mutes; Space pauses; R resets.
 #include "app/AppController.h"
+#include "app/Audio.h"
+#include "app/AudioResampler.h"
 #include "app/FramePacer.h"
 #include "app/Input.h"
 #include "app/Save.h"
@@ -155,6 +163,44 @@ void reportPacing(const app::FrameRateMeter& meter) {
     std::fflush(stdout);
 }
 
+// What the drift policy actually had to do, when FOURSHADES_AUDIO_LOG is
+// set to anything. Opt-in for the same reason as reportPacing: the numbers
+// are how the claim that the water marks are in the right place stays
+// honest, and a player closing a game does not want a statistics line.
+//
+// What a working policy looks like here, measured: 100 seconds undisturbed
+// is 5,955 frames, 7 drops and 5 repeats, and a queue sawtoothing between
+// 1,300 and 1,800 -- the two-frame target, corrected 0.2% of the time.
+//
+// What a broken one looks like: a queue that climbs past the high-water
+// mark and stays there with the drop count rising every single frame, which
+// is the policy saturated and losing, or a minimum of zero outside a pause,
+// which is the device starving. A single step up of a couple of thousand
+// samples is neither -- it is a pass that emulated more than one frame's
+// worth of time, which the machine really did run, and the policy spends
+// half a minute absorbing it.
+void reportAudio(const app::Audio& audio, const app::AudioResampler& resampler) {
+    if (SDL_getenv("FOURSHADES_AUDIO_LOG") == nullptr) {
+        return;
+    }
+    if (!audio.isOpen()) {
+        std::printf("audio: device not open (%s)\n",
+                    audio.failure().empty() ? "never attempted" : audio.failure().c_str());
+        std::fflush(stdout);
+        return;
+    }
+    std::printf("audio: %llu samples emitted, %llu pushed, queue min %zu max %zu "
+                "(marks %zu..%zu), %llu drops, %llu repeats over %llu frames%s\n",
+                static_cast<unsigned long long>(resampler.emitted()),
+                static_cast<unsigned long long>(audio.pushedSamples()), audio.minQueued(),
+                audio.maxQueued(), app::kLowWaterSamples, app::kHighWaterSamples,
+                static_cast<unsigned long long>(audio.drops()),
+                static_cast<unsigned long long>(audio.repeats()),
+                static_cast<unsigned long long>(audio.observations()),
+                resampler.muted() ? ", muted" : "");
+    std::fflush(stdout);
+}
+
 void setDrawColor(SDL_Renderer* renderer, std::uint32_t rgb) {
     SDL_SetRenderDrawColor(renderer, static_cast<Uint8>((rgb >> 16) & 0xFF),
                             static_cast<Uint8>((rgb >> 8) & 0xFF), static_cast<Uint8>(rgb & 0xFF), 255);
@@ -288,6 +334,33 @@ int main(int argc, char** argv) {
     // pixels, never blurred.
     SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
 
+    // The sound device, and the thing that turns cycles into samples for
+    // it. A device that will not open says so once and is then a no-op
+    // everywhere: the resampler still runs, the loop is unchanged, and the
+    // game plays silently. Unlike the window, this is never fatal.
+    app::Audio audio;
+    app::AudioResampler resampler;
+    if (!audio.open()) {
+        std::fprintf(stderr, "no sound: %s\nthe emulator will run silently\n",
+                     audio.failure().c_str());
+    }
+    // Read once: the summary at exit is not enough to tell a queue that
+    // oscillates inside the band from one that walks steadily towards a
+    // mark, and only a series of readings over a long run can. Every five
+    // seconds, and only when asked for.
+    const bool audioLog = SDL_getenv("FOURSHADES_AUDIO_LOG") != nullptr;
+    constexpr std::uint64_t kAudioLogEveryFrames = 300;
+    std::uint64_t audioLogFrames = 0;
+    // Every moment the queue stops belonging to the machine that filled it:
+    // a reset, a dropped ROM, and coming back from a pause.
+    const auto reprimeAudio = [&audio, &audioLog](const char* why) {
+        const std::size_t added = audio.reprime();
+        if (audioLog) {
+            std::printf("audio: reprimed on %s, %zu samples of silence added\n", why, added);
+            std::fflush(stdout);
+        }
+    };
+
     app::Palette palette = app::Palette::Grey;
     std::array<std::uint32_t, Ppu::kWidth * Ppu::kHeight> pixels{};
     // The most recent drop's failure, shown under the prompt until the next
@@ -316,7 +389,19 @@ int main(int argc, char** argv) {
                        event.key.key == SDLK_SPACE) {
                 if (controller.state() == AppState::Running) {
                     paused = !paused;
-                    if (paused) {
+                    if (!paused) {
+                        // Resuming. The pause drained the device to empty --
+                        // correctly, since nothing was falling due -- and
+                        // coming back into an empty queue means every late
+                        // frame underruns until the one-sample-a-frame
+                        // correction has walked it back up, which measured
+                        // at eighteen seconds of it. So the queue is primed
+                        // with silence again, exactly as it was when the
+                        // device opened: 33 ms of nothing at the moment the
+                        // player pressed the key, instead of eighteen
+                        // seconds of a starved device.
+                        reprimeAudio("resume");
+                    } else {
                         // A pause is the one moment the player knows they
                         // are safe, so it is worth making that true: the
                         // battery RAM goes to disk here, through the same
@@ -327,12 +412,28 @@ int main(int argc, char** argv) {
                         saveSession(controller, session);
                     }
                 }
+            } else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_M) {
+                // Mute lives in the resampler, not on the device: samples
+                // keep falling due and keep being pushed, they are just
+                // zeroes. The queue therefore behaves identically muted and
+                // unmuted, so the drift policy never has to know about
+                // this, and the stream is never starved by a mute.
+                resampler.setMuted(!resampler.muted());
+                std::printf("%s\n", resampler.muted() ? "muted" : "unmuted");
+                std::fflush(stdout);
             } else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_R) {
                 // Rebuilt from the cartridge by AppController, never poked
                 // back into shape here. A reset always resumes: coming back
                 // from R to a still picture would look like a crash.
                 if (controller.reset()) {
                     paused = false;
+                    // The machine underneath the resampler is a new one and
+                    // its cycle count restarts at zero, so re-anchor and
+                    // discharge the capacitor. Whatever the old program had
+                    // already queued is thrown away rather than played over
+                    // the top of the new one's first frames.
+                    resampler.reset(controller.gameBoy().cycles());
+                    reprimeAudio("reset");
                 }
             } else if (event.type == SDL_EVENT_DROP_FILE) {
                 const std::string path = event.drop.data != nullptr ? event.drop.data : "";
@@ -340,6 +441,11 @@ int main(int argc, char** argv) {
                 if (loadRomFromPath(controller, path, error, session)) {
                     waitingMessage.clear();
                     paused = false;
+                    // Same as a reset: a different machine, a cycle count
+                    // that restarts, and a queue that belongs to the
+                    // program that just went away.
+                    resampler.reset(controller.gameBoy().cycles());
+                    reprimeAudio("a dropped ROM");
                 } else {
                     waitingMessage = error;
                 }
@@ -377,8 +483,40 @@ int main(int argc, char** argv) {
                 const std::uint64_t before = gameBoy.ppu().frameCount();
                 while (gameBoy.ppu().frameCount() == before) {
                     gameBoy.step();
+                    // After each step, not once at the end of the frame:
+                    // Apu::sample() answers "what is the level right now",
+                    // so asking it 800 times spread across the frame is
+                    // what makes the output the machine's waveform rather
+                    // than one reading of it per frame.
+                    resampler.pump(gameBoy.cycles(), gameBoy.apu());
                 }
                 emulatedFrame = true;
+            }
+
+            // One frame's samples, once a frame, with at most one sample of
+            // drift correction -- see app/Audio.h for the marks and the
+            // reasoning. The queue is read once and the same number is both
+            // logged and handed to the policy, so the log reports what the
+            // policy actually saw.
+            //
+            // A paused pass reaches here with an empty buffer and
+            // emulatedFrame false, so nothing is pushed and nothing is
+            // repeated: the device runs dry and plays silence, which is
+            // what a pause should sound like. The clear() is outside every
+            // condition because the buffer has to be drained whether or not
+            // there is a device to drain it into.
+            const std::size_t queuedSamples = audio.queued();
+            audio.observeQueued(queuedSamples);
+            audio.push(resampler.samples(), app::driftCorrection(emulatedFrame, queuedSamples));
+            resampler.clear();
+
+            if (audioLog && ++audioLogFrames % kAudioLogEveryFrames == 0) {
+                std::printf("audio @%llu: queued %zu, drops %llu, repeats %llu%s\n",
+                            static_cast<unsigned long long>(audioLogFrames), queuedSamples,
+                            static_cast<unsigned long long>(audio.drops()),
+                            static_cast<unsigned long long>(audio.repeats()),
+                            resampler.muted() ? ", muted" : "");
+                std::fflush(stdout);
             }
 
             // Outside the pause: the frame is re-coloured and re-uploaded
@@ -423,6 +561,7 @@ int main(int argc, char** argv) {
     }
 
     reportPacing(meter);
+    reportAudio(audio, resampler);
 
     // A clean exit: the window was closed, so the battery RAM goes back to
     // disk before anything is torn down.

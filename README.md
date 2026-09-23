@@ -239,6 +239,7 @@ the window and waits for another one.
 | Z, X | A, B |
 | Enter, Backspace | Start, Select |
 | P | toggle the grey and green palettes |
+| M | mute; the machine keeps running, it just stops being audible |
 | Space | pause; also writes the save to disk |
 | R | reset: a power cycle, not a poke - the machine is rebuilt from the cartridge |
 

@@ -12,7 +12,11 @@ target_link_libraries(screen_lib PUBLIC fourshades_core)
 # in SDL's own constants rather than copies of their numbers.
 target_include_directories(screen_lib SYSTEM PUBLIC ${SDL3_INCLUDE_DIR})
 
-add_executable(fourshades_app main.cpp)
+# Audio.cpp is the only file in app/ that calls SDL, so it is the only one
+# that cannot live in screen_lib. app/Audio.h holds the drift policy as
+# constexpr free functions and forward-declares SDL_AudioStream, so
+# fourshades_tests includes that header and links none of this.
+add_executable(fourshades_app main.cpp Audio.cpp)
 target_link_libraries(fourshades_app PRIVATE screen_lib fourshades_core SDL3::SDL3)
 add_custom_command(TARGET fourshades_app POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
