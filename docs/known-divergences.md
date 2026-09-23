@@ -120,13 +120,99 @@ mode.
   2026-09-22 by building the commit before this change and running the ROM
   runner from it: `bully` 346, `strikethrough` 53. It is the only count in
   the screenshot table below that differs between that run and one made
-  today, and it is a failing test either way, so no verdict moved with it. Mooneye's `boot_hwio-dmgABCmgb` still fails, and a traced run on
-  2026-09-22 puts its first mismatch at $FF10 (NR10), the first sound
-  register: the ROM wants $80 and FourShades reads $FF, because there is no
-  APU until piece 5. The registers it checks before that, $FF00-$FF0F, all
-  match. The ROM stops at its first mismatch, so nothing is claimed here
-  about the registers after $FF10 — STAT ($FF41) among them is never reached.
+  today, and it is a failing test either way, so no verdict moved with it. Mooneye's
+  `boot_hwio-dmgABCmgb` still failed at that date, and a traced run on
+  2026-09-22 put its first mismatch at $FF10 (NR10), the first sound
+  register: the ROM wanted $80 and FourShades read $FF, because there was no
+  APU until piece 5. The registers it checked before that, $FF00-$FF0F, all
+  matched. The ROM stops at its first mismatch, so nothing was claimed here
+  about the registers after $FF10 — STAT ($FF41) among them was never reached.
+  It passes as of 2026-09-24: the APU landed in piece 5 and the power-on
+  *phase* entry below settled the $FF41 and $FF44 rows it then went on to
+  reach. STAT's power-on value recorded here needed no change for that.
 - **Checked:** 2026-09-22.
+
+## The PPU's power-on phase within line 153: solved to a band, chosen inside it (2026-09-24)
+
+Pan Docs gives the PPU's power-on *state* but not its *phase*. The entry above
+settles the state - line 153, mode 1, LY reading 0, STAT $85. Which dot of line
+153 the boot ROM leaves the PPU on is a separate question, and it is not free:
+it sets the phase of every later line against the CPU, so anything that reads
+LY or STAT a fixed number of M-cycles after $0100 depends on it.
+
+- **Pan Docs:** [Power Up Sequence](https://gbdev.io/pandocs/Power_Up_Sequence.html)
+  lists the register values at PC = $0100 and nothing about where inside a line
+  the PPU sits. There is no documented figure to follow or diverge from here.
+- **What FourShades did:** `Ppu::dot_` started at 4 - the smallest dot that
+  makes LY read 0 through the LY=153 quirk, which is how the value was picked
+  when the state above was settled. It was never measured.
+- **The two constraints that pin it.** One of the 165 scored ROMs (Mooneye's
+  DMG power-on register walk, in the `boot state` group) reads $FF00-$FF7F
+  against a table and stops at its first mismatch. Two of its rows depend on
+  the phase, and a traced run on 2026-09-23 puts both to the M-cycle:
+  - it reads $FF41 (STAT) **1139 M-cycles** after power-on, and the table wants
+    $80 - mode 0, with LYC 0 unmatched;
+  - it reads $FF44 (LY) **1190 M-cycles** after power-on, and the table wants
+    **$0A**. FourShades returned $09: line 9, dot 204, 252 dots short of the
+    line boundary.
+- **How the band was derived.** Both reads land on a line whose position is
+  `dot_ + 4 x M - 456` dots into the frame, so an advance of the power-on phase
+  by dots moves both. Requiring LY = 10 at the second read puts the frame
+  offset inside line 10's 456 dots; requiring STAT to still report mode 0 at
+  the first read puts that one at or after the dot mode 0 begins on a bare line
+  (dot 256, as reported, the boundary `intr_2_mode0_timing` pins). Together
+  they leave an advance of **between 253 and 455 dots**.
+- **How the multiple-of-four rule was derived, and it is not from that ROM.**
+  The PPU steps four dots per M-cycle, so an advance that is not a multiple of
+  four permanently offsets every dot-counted boundary from the M-cycle the CPU
+  sees it on. `dot_ = 354` (an advance of 350) was built and measured on
+  2026-09-24: the register walk still **passes** (`boot state` 3/3), and seven
+  doctest cases fail - `tests/test_stat.cpp`'s "LY leads the mode 0 STAT
+  interrupt by 50 M-cycles, fewer as SCX grows" (it reports 49), four
+  `tests/test_oam_bug.cpp` cases, which step a register at offsets from a frame
+  boundary the odd phase moves off the M-cycle, `tests/test_gameboy.cpp`'s "the
+  CPU sees the PPU's blocking, and FEA0-FEFF follows OAM", and the power-on
+  phase assertion below, which names 356 and so is expected to move. So the
+  rule is pinned by the M-cycle arithmetic and by those unit tests, not by the
+  ROM, and this entry does not claim the ROM has anything to say about it - it
+  does not.
+- **FourShades now:** `Ppu::dot_ = 356` (an advance of 352). `line_` is
+  untouched at 153, so the documented power-on register values are unchanged -
+  LY still reads 0 and STAT still reads $85 at PC = $0100.
+- **356 is a choice, not a measurement.** The band admits 49 values in total:
+  `dot_` of 260, 264, ... 452. Nothing in the suite distinguishes them.
+  Measured on 2026-09-24, not argued: `dot_ = 260`, the bottom of the band,
+  was built and the register walk **passes** exactly as at 356, the unit suite
+  is otherwise green, and the only assertion that moves is the one that names
+  356 itself. 356 is recorded
+  here as the value that was tried first and measured, and
+  `tests/test_ppu.cpp`'s "the PPU's power-on phase is the measured one, and
+  M-cycle aligned" pins it so that a future change to it is deliberate. The
+  two constraints the ROM actually imposes are pinned separately, by M-cycle
+  count rather than by the ROM's name, in "the power-on phase puts mode 0 at
+  1139 M-cycles and LY 0x0A at 1190".
+- **What would settle it.** Any one of: a second ROM that reads LY or STAT a
+  known number of M-cycles from $0100 with a band that does not contain the
+  whole of this one (two such ROMs would intersect to a point); a trace of the
+  DMG boot ROM's own last instructions, which would give the phase outright
+  rather than bounding it; or a hardware measurement of LY at a known M-cycle
+  after $0100. Until one exists, the 49 values are equally supported and only
+  the band is evidence.
+- **Effect.** Test ROMs 138 -> 139 of 165: the register walk gained and nothing
+  lost. SingleStepTests unchanged at 499/500. One screenshot count moved,
+  `ashiepaws/bully` from 290 to 346 differing pixels, taking the `screen`
+  group's total from 73,572 to 73,628; it is a failing test either way, and the
+  screenshot section below records what is known about why. Every other pixel
+  count in that section is identical.
+- **A unit test inherited the old phase and was repositioned, not relaxed.**
+  `tests/test_gameboy.cpp`'s "OAM DMA from VRAM blocks VRAM and OAM, but ROM
+  and WRAM stay readable" idles 170 M-cycles from power-on and then expects
+  $8000 to be readable. It was reading the power-on phase by accident: with the
+  phase moved, those 170 M-cycles land in mode 3 and VRAM is locked by the PPU
+  rather than by the DMA the test is about. It now switches the LCD off first,
+  exactly as its WRAM-source sibling immediately above it already did for the
+  same reason. No assertion in it changed.
+- **Checked:** 2026-09-24.
 
 ## OAM DMA bus conflicts: resolved in favour of the hardware-verified tests (2026-09-11)
 
@@ -561,7 +647,7 @@ records for `m3_lcdc_win_en_change_multiple`.
 | `m3_lcdc_obj_en_change` | 146 | mid-line LCDC bit 1 changes |
 | `m3_wx_4_change` | 229 | window re-activation |
 | `m3_lcdc_obj_size_change_scx` | 270 | mid-line LCDC bit 2 changes |
-| `ashiepaws/bully` | 290 | not diagnosed |
+| `ashiepaws/bully` | 346 | not diagnosed; two subtests deep (see below) |
 | `m3_lcdc_obj_size_change` | 410 | mid-line LCDC bit 2 changes; 60 worse under the seven-dot shift, cause unknown (see below) |
 | `m3_obp0_change` | 432 | object pixels in the leftmost 18 columns |
 | `m3_scx_low_3_bits` | 540 | mid-line SCX changes inside the fetch |
@@ -623,10 +709,10 @@ Notes on the ones that are more than "a behaviour not written yet":
   their two-dot fetch stages instead of the second was tried; it took this
   test from 80 to 77 but the `screen` group as a whole from 73,628 differing
   pixels to 78,855, so it was reverted. Those two figures are the pair as it
-  was measured, before the power-on change above moved `ashiepaws/bully` by
-  56 pixels; the group's total today, and the sum of the table above, is
-  73,572. What decided the revert is the 5,000-pixel rise, which the
-  power-on change does not touch either way. The remaining error is under two
+  was measured, before either power-on change moved `ashiepaws/bully` by
+  56 pixels - down, then back up; the group's total today, and the sum of the
+  table above, is 73,628. What decided the revert is the 5,000-pixel rise,
+  which neither power-on change touches either way. The remaining error is under two
   dots and is not yet pinned to a stage.
 - **`m3_lcdc_obj_size_change` (410) and `m3_lcdc_obj_size_change_scx`
   (270).** These two probe the same thing - LCDC bit 2, the object height
@@ -697,19 +783,33 @@ Notes on the ones that are more than "a behaviour not written yet":
   2026-09-22 and the count stayed at 22,739 exactly, so that was not the
   whole story and the failure is undiagnosed. See the STOP entry at the top
   of this file.
-- **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (290).** Neither is
-  diagnosed, and both were failing before this task and still are. Their
-  counts did not both stand still, though, and an earlier version of this
-  entry said they did. `strikethrough` has been 53 throughout.
-  `bully` was 346 until the power-on change above (the PPU starting at line
-  153 in mode 1 rather than line 0 in mode 2) took it to 290 - measured on
-  2026-09-22 by building the commit before that change and running the ROM
-  runner from it. That commit's own entry recorded only that no ROM's
-  verdict moved, which is a narrower claim than nothing moving, and this
-  section then kept the old figure.
+- **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (346).** Neither's
+  verdict is diagnosed, and both were failing before the pixel pipeline was
+  finished and still are. Their counts did not both stand still, though, and an
+  earlier version of this entry said they did. `strikethrough` has been 53
+  throughout. `bully` has been 346, then 290, then 346 again:
+  - it was 346 until the first power-on change (the PPU starting at line 153 in
+    mode 1 rather than line 0 in mode 2) took it to 290 - measured on
+    2026-09-22 by building the commit before that change and running the ROM
+    runner from it. That commit's own entry recorded only that no ROM's verdict
+    moved, which is a narrower claim than nothing moving, and this section then
+    kept the old figure.
+  - it went back to 346 on 2026-09-24 with the power-on *phase* (`dot_` 4 ->
+    356, its own entry above). The two 346s are not the same picture. `bully`
+    is a chain of subtests that prints the first one it fails, and the
+    2026-09-23 investigation disassembled it: it was failing on "Invalid
+    initial DIV" ($FF04 read at line 0 dot 0, so a function of the PPU's phase,
+    wanting $AD where FourShades gave $AE), and with the phase moved that check
+    is satisfied and the ROM reaches "Invalid initial tile data" instead - a
+    longer message, hence more differing pixels. What that next subtest wants is
+    the Nintendo logo the DMG boot ROM unpacks into VRAM, which FourShades
+    leaves zeroed. So the rise is a step forward measured in pixels, which is
+    what a screenshot comparator does to a chain of serial-style subtests, and
+    not a regression. Measured 2026-09-24: 290 -> 346, no other screenshot
+    count in this table moved by a pixel.
 
-- **Checked:** 2026-09-22. Every count in this section is from a full run of
-  `rom_runner`; the per-pixel diff maps quoted above were taken from the
+- **Checked:** 2026-09-22; `bully`'s count and the group total re-measured
+  2026-09-24. Every count in this section is from a full run of `rom_runner`; the per-pixel diff maps quoted above were taken from the
   frames it writes into `build/frames` and the reference images
   `tools/roms/tests.json` names.
 

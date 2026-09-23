@@ -188,8 +188,13 @@ private:
     // Sequence gives DMG at PC = $0100 as STAT = $85, LY = $00: mode 1 with
     // LY already reading 0, which is line 153 past its first few dots (the
     // LY=153 quirk). STAT's bit 2 is then set because LY and LYC both read 0.
+    // Pan Docs does not give the dot within line 153, and it is not free: it
+    // sets the phase of every later line against the CPU. The value below was
+    // solved from a register walk's two reads and is one of 49 admissible
+    // multiples of four; see docs/known-divergences.md, "The PPU's power-on
+    // phase within line 153".
     int line_ = 153; // 0-153, the real line; LY reads differently on line 153
-    int dot_ = 4;    // 0-455 within the line; past line 153's first dots
+    int dot_ = 356;  // 0-455 within the line; past line 153's first dots
     int mode_ = 1;        // the PPU's own mode: VBlank
     int visibleMode_ = 1; // what the CPU sees: mode_ one M-cycle ago
     bool rendering_ = false;  // the pixel pipeline is running (it outlives mode 3)
