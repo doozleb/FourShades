@@ -94,8 +94,23 @@ private:
     Kind kind_ = Kind::RomOnly;
     bool headerChecksumOk_ = false;
     bool hasBattery_ = false;
+    // Both counts are a power of two whenever they are non-zero, which is
+    // what makes masking a bank number with `count - 1` the same thing as
+    // taking it modulo the count. Cartridge::load is the only thing that sets
+    // either, and every value it can pick is a power of two.
+    //
+    // ramBanks_ is the one to be careful with, because 0 is a legal value for
+    // it and 0 is not a power of two: `ramBanks_ - 1` is then SIZE_MAX, and
+    // the mask lets every bank number through untouched. It means "no RAM
+    // banked through this count" -- either no RAM at all, or MBC2's fixed
+    // 512 bytes, which its own controller addresses directly and never masks
+    // with this. Every controller that does mask with it (Mbc1, Mbc3 and Mbc5
+    // each re-implement `bank & (ramBanks_ - 1)` in their own ramOffset) is
+    // therefore required to have established that the RAM is non-empty before
+    // it gets there, which each does in its own reachability check. Read the
+    // mask and that check as one thing.
     std::size_t romBanks_ = 2; // 16 KiB each, always a power of two
-    std::size_t ramBanks_ = 0; // 8 KiB each
+    std::size_t ramBanks_ = 0; // 8 KiB each; a power of two, or 0 (see above)
 };
 
 } // namespace fourshades
