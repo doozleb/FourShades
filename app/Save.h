@@ -79,6 +79,15 @@ struct LoadResult {
 // player's only copy of their progress, so it is read, rejected and left
 // exactly where it is.
 //
+// One consequence of that rule worth stating, because it surprises: for a
+// cartridge with a clock and no RAM at all (header type 0x0F) `ram().size()`
+// is 0, so the two accepted lengths are 0 and 48, and an empty file is a
+// valid save. A zero-byte .sav therefore comes back Loaded, not Refused. It
+// cannot lose anything -- there is no RAM to restore, the clock is simply not
+// restored, and the next writeSave lays down a whole 48-byte footer -- but it
+// does mean an empty file is accepted here where every other cartridge would
+// refuse one.
+//
 // With a footer, the clock's registers come back too, and then the clock is
 // wound forward by however many seconds passed between the footer's timestamp
 // and `nowUnixSeconds` -- that is the whole point of the timestamp, since the
@@ -86,6 +95,18 @@ struct LoadResult {
 // host clock that has moved backwards since the save advances the clock by
 // nothing at all; it is never wound back, and never wound forward by the
 // enormous number an unsigned subtraction would produce.
+//
+// No plausibility window is applied to that timestamp, on purpose. Any
+// ceiling on "how long the machine can have been off" would silently discard
+// a genuine long absence -- a save picked up after two years is exactly as
+// legitimate as one picked up after two minutes, and the player would have no
+// way to tell that their clock had been quietly held back. The price of that
+// choice, stated rather than hidden: a zeroed or corrupt timestamp reads as
+// 1970, so the catch-up is decades, which runs the day counter past 511 and
+// sets the day-counter overflow carry (RTC DH bit 7). Some games read that
+// carry as clock tampering and react accordingly. Clearing it is the
+// program's job, not this loader's, and the overflow is what the hardware
+// would really have done had the cartridge sat in a drawer that long.
 //
 // The overload without a time reads hostUnixSeconds() for it.
 LoadResult loadSave(fourshades::Cartridge& cart, const std::filesystem::path& savePath,

@@ -893,11 +893,38 @@ moved, SingleStepTests 499/500, every doctest case passing.
 
 ## MBC5: ROM bank register initializes to 1, not 0 (2026-09-23)
 
-- **Test:** Mooneye's hardware-verified MBC5 test ROMs — all eight in `mbc5/rom_512kb.gb` and its siblings, marked "verified: DMG" against real hardware.
+- **Tests:** the eight Mooneye MBC5 ROMs, `mbc5/rom_512kb.gb` through
+  `mbc5/rom_64Mb.gb`. They sit in Mooneye's `emulator-only/` tier, not
+  `acceptance/`, and the ROM binaries themselves contain no `verified` string
+  at all — so the "marked 'verified: DMG'" wording an earlier draft of this
+  entry used was simply wrong, and is corrected here. The hardware marking is
+  in the upstream source instead: each of the eight `.s` files in
+  `Gekkio/mooneye-test-suite`, `emulator-only/mbc5/`, carries the line
+
+      ; Results have been verified using a flash cartridge with a genuine MBC5 chip
+      ; and support for configuring ROM/RAM sizes.
+
+  read from upstream and checked in all eight on 2026-09-23. That is the same
+  form of marking, reached the same way, as the hardware-verified MBC1
+  multicart ROM cited further down this file ("using a flash cartridge with a
+  genuine MBC1B1 chip"). What it verifies is the ROMs' *expected results*
+  against a real MBC5 — not a direct probe of the power-on register, which is
+  why the "what would overturn it" line below still asks for one.
 - **Pan Docs:** [Memory Bank Controllers](https://gbdev.io/pandocs/MBCs.html) is silent on MBC5's reset value for the ROM bank register at 0x2000-0x3FFF. The page describes general MBC5 features but gives no power-on state for the register.
 - **What FourShades does:** `src/core/mbc/Mbc5.h` initializes `romBank_` to 1, so bank 1 is visible at 0x4000-0x7FFF at power-on, before any write to the bank register.
-- **Evidence:** In `mbc5/rom_512kb.gb`, the code at 0x0150 (entry point after boot, with no prior bank selection) calls into switchable ROM at address 0x48DB without writing the bank register. At file offset 0x08DB (bank 0's copy of that address) the byte is 0xFF, padding; at 0x48DB (bank 1's copy) it is 0x78, real code (RET). With the register defaulting to 0, all eight Mooneye MBC5 ROMs run into padding and hang; with it defaulting to 1, all eight pass. MBC5 has no remap of bank 0 — writing 0x00 to 0x2000-0x2FFF really does select bank 0 — so the reset value is the only mechanism that can route execution to bank 1 before the first write.
-- **Decision (2026-09-23):** the hardware-verified Mooneye tests outrank Pan Docs' silence, per the rule at the top of this file. Piece 4, task 2 ships with this behaviour.
+- **Evidence:** In `mbc5/rom_512kb.gb`, the code at 0x0150 (entry point after boot, with no prior bank selection) calls into switchable ROM at address 0x48DB without writing the bank register. At file offset 0x08DB (bank 0's copy of that address) the byte is 0xFF, padding; at 0x48DB (bank 1's copy) it is 0x78, real code — `LD A,B`, the first byte of the copy loop `78 B1 C8 1A 22 13 0B 18` (`LD A,B; OR C; RET Z; LD A,(DE); LD (HL+),A; INC DE; DEC BC; JR`). An earlier draft of this entry glossed 0x78 as `RET`; `RET` is 0xC9, and the 0xC8 two bytes further on is the `RET Z` that ends the loop. With the register defaulting to 0, all eight Mooneye MBC5 ROMs run into padding and hang; with it defaulting to 1, all eight pass. MBC5 has no remap of bank 0 — writing 0x00 to 0x2000-0x2FFF really does select bank 0 — so the reset value is the only mechanism that can route execution to bank 1 before the first write.
+- **Decision (2026-09-23):** the rule at the top of this file applies, on the
+  upstream marking quoted above rather than on the tier the ROMs live in.
+  Mooneye's `emulator-only/` tier means the ROM needs no reference hardware
+  *image* to score, not that its results were never measured; the per-ROM
+  source comment is where Mooneye records that they were, and all eight MBC5
+  ROMs carry it. The step from "these results were measured on a genuine
+  MBC5" to "the register powers on at 1" is the ROM's own structure: it cannot
+  reach its test code at all unless bank 1 is mapped before the first bank
+  write, so a run that produced the verified results on real hardware is a run
+  in which the hardware had bank 1 mapped at power-on. Pan Docs is silent, so
+  nothing is contradicted either way. Piece 4, task 2 ships with this
+  behaviour.
 - **What would overturn it:** a measurement of MBC5's ROM bank register power-on state from real DMG or CGB hardware, or discovery of a cartridge that depends on bank 0 being mapped at power-on — which would be incompatible with this one.
 - **Checked:** 2026-09-23.
 
@@ -907,7 +934,12 @@ moved, SingleStepTests 499/500, every doctest case passing.
   `cpp/rtc-invalid-banks-test.gb` (screenshot tests at the pinned Shootout
   commit; both ROMs carry a "Built 2021-04-22" string). Neither is marked
   hardware-verified the way Mooneye marks its own, so what follows rests on
-  what the ROMs measure, set out in full below.
+  what the ROMs measure, set out in full below. To be precise about what that
+  marking is, since the MBC5 entry above turns on the same point: Mooneye's
+  marking is a comment in the ROM's own upstream source recording that its
+  expected results were measured on real hardware, and it is independent of
+  which tier (`acceptance/`, `emulator-only/`) the ROM is filed under. The
+  Shootout ROMs here carry nothing of the kind, in their binaries or upstream.
 - **Pan Docs, [MBC3](https://gbdev.io/pandocs/MBC3.html):** lists the five
   clock registers with the ranges a *running* clock keeps to — RTC S 0-59,
   RTC M 0-59, RTC H 0-23, RTC DL 0-255 — and names bits 0, 6 and 7 of RTC DH,
@@ -980,6 +1012,25 @@ moved, SingleStepTests 499/500, every doctest case passing.
   is exactly as invisible as narrow-on-read, for the same reason. FourShades
   narrows on write, which is what a register with no wire for bit 6 would do,
   and that choice is visible only through the save-state API.
+  Two more the same way, recorded here because nothing else records them:
+  - **The bank-select register's own width.** `Mbc3::writeControl` masks
+    4000-5FFF's value to four bits (`ramSelect_ = value & 0x0F`) rather than
+    storing the whole byte and masking where it is used. Neither ROM writes a
+    value that could tell the two apart: `rtc-invalid-banks-test` sweeps only
+    0x00-0x0F, every one of which is already four bits wide, and
+    `latch-rtc-test` never writes to 4000-5FFF outside that range either. A
+    program that wrote, say, 0x18 would distinguish them if the hardware kept
+    bit 4 somewhere a later read could see it; nothing here says whether it
+    does.
+  - **Which register writes restart the sub-second divider.** `Rtc::write`
+    zeroes the sub-second accumulator (`ticks_`) only on a write to the
+    seconds register; the design note this was built from said a write to any
+    clock register restarts it. Neither ROM can separate the two: both write
+    all five registers and then read the latched copies back within the same
+    second, so the accumulator's state never reaches an output either of them
+    checks. Restarting on seconds alone is the narrower claim, and is what a
+    divider gated by the counter it feeds would do, but it is a choice, not a
+    measurement.
 - **Not settled by either ROM:** what happens to the sub-second accumulator
   across a save. `RtcState` has no field for it, so a restored clock starts a
   fresh second; a save made a fraction of a second early or late is within the

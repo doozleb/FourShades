@@ -53,8 +53,13 @@ void GameBoy::tickDma() {
     if (dmaActive_) {
         u16 from = static_cast<u16>(dmaFrom_ + dmaIndex_);
         // Pan Docs lists DMA sources $00-$DF only. Mapping E000 and above
-        // onto C000 and above (as the echo area does) is inferred, to be
-        // confirmed by the MBC5-dependent sources-GS test in piece 4.
+        // onto C000 and above, the way the echo area does, was inferred when
+        // this was written. Piece 4 settled it on 2026-09-23: once this core
+        // gained the bank controller the hardware-verified DMA source test
+        // needs, that test agreed with this mapping exactly as it stands, no
+        // change here, and the DMA group came out whole. Not a divergence --
+        // Pan Docs says nothing this contradicts -- so there is no entry in
+        // docs/known-divergences.md for it.
         if (from >= 0xE000) {
             from = static_cast<u16>(from - 0x2000);
         }
