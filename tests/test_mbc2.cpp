@@ -137,3 +137,25 @@ TEST_CASE("MBC2 without BATTERY has no battery but still gets its 512 bytes") {
     CHECK_FALSE(cart.hasBattery());
     CHECK(cart.ram().size() == 512);
 }
+
+// Pan Docs' rule for enabling cartridge RAM is about the low nibble, not the
+// whole byte: any value with 0xA in its lower 4 bits enables the RAM, and any
+// other value disables it. All four gated controllers spell that the same
+// way, as `(value & 0x0F) == 0x0A`, so a regression to a whole-byte `value ==
+// 0x0A` would be the widest single-expression regression this core could
+// have. Until this case existed, only the external test ROMs would have
+// caught it on any chip.
+TEST_CASE("MBC2 RAM enable tests only the low nibble: 0x1A and 0xFA open it, 0x0B does not") {
+    // MBC2's RAM is 4 bits wide, so an enabled read of an untouched cell is
+    // 0xF0 (the upper nibble is open bus), not 0x00 -- and still not 0xFF.
+    Cartridge cart = loadOk(makeRom(2, 0x06, 0x00, 0x00));
+    CHECK(cart.read(0xA000) == 0xFF);  // disabled at power-on
+    cart.write(0x0000, 0x1A);          // low nibble 0xA, high nibble set
+    CHECK(cart.read(0xA000) == 0xF0);  // enabled
+    cart.write(0x0000, 0x00);
+    CHECK(cart.read(0xA000) == 0xFF);
+    cart.write(0x0000, 0xFA);          // every high bit set, low nibble still 0xA
+    CHECK(cart.read(0xA000) == 0xF0);
+    cart.write(0x0000, 0x0B);          // low nibble 0xB: not the pattern at all
+    CHECK(cart.read(0xA000) == 0xFF);
+}

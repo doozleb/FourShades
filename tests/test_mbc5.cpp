@@ -140,3 +140,23 @@ TEST_CASE("MBC5 rumble types mask the motor bit out of the RAM bank number") {
     cart.write(0x4000, 0x0B); // motor bit (bit 3) set: must still land on bank 3
     CHECK(cart.read(0xA000) == 0xAA);
 }
+
+// Pan Docs' rule for enabling cartridge RAM is about the low nibble, not the
+// whole byte: any value with 0xA in its lower 4 bits enables the RAM, and any
+// other value disables it. All four gated controllers spell that the same
+// way, as `(value & 0x0F) == 0x0A`, so a regression to a whole-byte `value ==
+// 0x0A` would be the widest single-expression regression this core could
+// have. Until this case existed, only the external test ROMs would have
+// caught it on any chip.
+TEST_CASE("MBC5 RAM enable tests only the low nibble: 0x1A and 0xFA open it, 0x0B does not") {
+    Cartridge cart = loadOk(makeRom(2, 0x1A, 0x00, 0x00)); // MBC5+RAM, 8 KiB
+    CHECK(cart.read(0xA000) == 0xFF);  // disabled at power-on
+    cart.write(0x0000, 0x1A);          // low nibble 0xA, high nibble set
+    CHECK(cart.read(0xA000) == 0x00);  // enabled
+    cart.write(0x0000, 0x00);
+    CHECK(cart.read(0xA000) == 0xFF);
+    cart.write(0x0000, 0xFA);          // every high bit set, low nibble still 0xA
+    CHECK(cart.read(0xA000) == 0x00);
+    cart.write(0x0000, 0x0B);          // low nibble 0xB: not the pattern at all
+    CHECK(cart.read(0xA000) == 0xFF);
+}
