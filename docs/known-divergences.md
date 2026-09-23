@@ -996,6 +996,87 @@ moved, SingleStepTests 499/500, every doctest case passing.
   alternative Finding 2 leaves standing.
 - **Checked:** 2026-09-23.
 
+## MBC1 multicart: detected by counting logos, since no header byte declares one (2026-09-23)
+
+- **What a multicart is.** Pan Docs' MBC1 page describes "MBC1M" compilation
+  cartridges directly: the chip "ignores the top bit of the main ROM banking
+  register (making it effectively a 4-bit register for banking, though the
+  full 5 bit register is still used for 00→01 translation) and applies the
+  2-bit register to bits 4-5 of the bank number (instead of the usual bits
+  5-6)",
+  [MBC1: "MBC1M": 1 MiB Multi-Game Compilation Carts](https://gbdev.io/pandocs/MBC1.html#mbc1m-1-mib-multi-game-compilation-carts).
+  The same page also states the problem this entry is about: "these carts have
+  an alternative wiring" that **the header cannot distinguish from an ordinary
+  MBC1 ROM** — cartridge type, ROM size code and RAM size code are all the same
+  either way.
+- **The detection rule FourShades uses — a heuristic, not a measurement.**
+  `Cartridge::load` (`looksLikeMulticart` in `src/core/Cartridge.cpp`) treats a
+  cartridge type of 0x01, 0x02 or 0x03 as a multicart when the ROM is exactly
+  1 MiB (0x100000 bytes) *and* the 48-byte Nintendo logo that every header
+  carries at 0x0104-0x0133 also appears at three or more of the four 256 KiB
+  quarter-boundaries (0x00104, 0x40104, 0x80104, 0xC0104). Pan Docs names the
+  same signal for the general case — "These carts can normally be identified
+  by having a Nintendo copyright header in bank $10" (same section) — but
+  gives no threshold; three of four, not four of four, is FourShades' own
+  choice, made because one of the four boundaries is the outer menu's own
+  header, which is required by the boot ROM anyway, and real dumps exist where
+  a compilation leaves one of the other three slots blank (no sub-game
+  installed in that quarter). Requiring all four would miss those; the
+  heuristic accepts three so it still fires on them.
+- **What this can get wrong, honestly.** This is inference from content, not
+  a header flag, so it can misfire in both directions, and nothing in the 165
+  test ROMs or the unit suite proves it cannot:
+  - **False positive.** Nothing stops an ordinary, non-multicart 1 MiB MBC1
+    ROM from happening to carry the 48-byte logo at three or more of those
+    same offsets — for instance a ROM whose sub-banks happen to start with
+    that exact byte sequence for an unrelated reason, or a deliberately
+    constructed one. FourShades would then narrow its bank registers on a
+    cartridge that needs the full 5-bit ones, which would corrupt its
+    banking. No such ROM is known to exist; this is a description of what the
+    heuristic cannot rule out, not a report of it happening.
+  - **False negative.** A multicart with the logo present at only one or two
+    of the three non-primary boundaries — two blank sub-game slots rather
+    than one — is banked as an ordinary MBC1 instead, per the "two logos ...
+    not detected" case `tests/test_mbc1_multicart.cpp` covers. Pan Docs'
+    "normally" (in the identification sentence quoted above) implies this
+    already: the signal is typical, not universal.
+- **Evidence this rule is not merely guessed.** Mooneye's hardware-verified
+  multicart test ROM (marked as measured "using a flash cartridge with a
+  genuine MBC1B1 chip", not just emulator-generated) is exactly 1 MiB, type
+  0x01, and carries the logo at all four boundaries (every bank but bank 0 in
+  its source puts the logo at its own $0104, and bank 0 — the real header —
+  always must). Running it through `Cartridge::load` sets the multicart flag,
+  and the ROM group's `mbc1` count goes 12/13 -> 13/13 with this task.
+- **What would overturn it:** a hardware-verified test, or a real dumped
+  cartridge, that this heuristic misidentifies either way — a genuine
+  MBC1M cart scored as ordinary MBC1, or an ordinary MBC1 cart scored as a
+  multicart — would be grounds to tighten or loosen the threshold, or to add
+  a second signal (Pan Docs' other identifying mark, "duplicate content in
+  banks $10-$1F ... and banks $30-$3F", is one candidate). Absent that, three
+  of four logos is what this task shipped, chosen for the reason above and
+  not otherwise measured.
+- **A related finding this task made, not a divergence:** the low bank
+  register's own "0 acts as 1" substitution is a property of the *full*
+  5-bit register, evaluated before a multicart's wiring drops its top bit —
+  not a property of the narrowed 4-bit value. Pan Docs states this
+  explicitly in the sentence quoted above ("though the full 5 bit register is
+  still used for 00→01 translation"), and the Mooneye ROM's own
+  `expected_banks` table measures it directly: writing 0x10 to 0x2000-0x3FFF
+  leaves the 5-bit register at 16, which is not zero, so bank $4000-$7FFF
+  reads bank 0 (16 with its top bit dropped), not bank 1. An earlier version
+  of this task's own working notes described the register as simply "4 bits
+  wide (value & 0x0F, still 0 → 1)", which reads as the substitution applying
+  to the already-narrowed value — that phrasing would return bank 1 for this
+  case instead of bank 0, and the first implementation of this task did
+  exactly that and failed the Mooneye ROM (12/13) until corrected.
+  `Mbc1::romBank` now masks to 4 bits only after the substitution, and
+  `tests/test_mbc1_multicart.cpp`'s "the zero substitution reads the full
+  5-bit register" case pins it. This is recorded here as a correction made
+  during the task, in the same spirit as the MBC3 latch entry above, not as a
+  live divergence — Pan Docs, the hardware-verified ROM and FourShades all
+  agree.
+- **Checked:** 2026-09-23.
+
 ## Timing model (not a divergence: where Pan Docs is silent)
 
 Pan Docs gives cycle counts but not every within-M-cycle order. These are the

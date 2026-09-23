@@ -12,7 +12,17 @@ namespace fourshades {
 // bank instead.
 class Mbc1 : public Mbc {
 public:
-    explicit Mbc1(std::size_t ramBanks) : ramBanks_(ramBanks) {}
+    // multicart narrows the bank number's low half from 5 bits to 4 and
+    // moves the high register's two bits from bits 5-6 of the bank number to
+    // bits 4-5, per the compilation cartridges wired that way; everything
+    // else, including mode 1 and the low register's own "0 acts as 1"
+    // substitution (still evaluated on the full 5-bit register before the
+    // top bit is dropped — see romBank()), is unchanged. Cartridge decides
+    // this from the ROM's own bytes (see docs/known-divergences.md for how,
+    // why, and the hardware-verified test the bit-drop timing is measured
+    // from) and it carries across clone() like every other register here.
+    explicit Mbc1(std::size_t ramBanks, bool multicart = false)
+        : ramBanks_(ramBanks), multicart_(multicart) {}
 
     std::size_t romBank(u16 address) const override;
     std::optional<u8> readRam(u16 address) const override;
@@ -26,9 +36,11 @@ private:
 
     std::size_t ramBanks_ = 0; // 8 KiB each
     bool ramEnabled_ = false;
-    u8 bankLow_ = 0;           // 2000-3FFF, 5 bits; 0 acts as 1
+    u8 bankLow_ = 0;           // 2000-3FFF, 5 bits always; 0 acts as 1 (before
+                               // a multicart's wiring drops bit 4 — see romBank())
     u8 bankHigh_ = 0;          // 4000-5FFF, 2 bits
     bool mode1_ = false;       // 6000-7FFF
+    bool multicart_ = false;
 };
 
 } // namespace fourshades
