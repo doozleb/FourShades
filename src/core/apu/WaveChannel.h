@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "core/Types.h"
 
@@ -36,10 +36,16 @@ public:
     // after it; see the wave-channel entry in docs/known-divergences.md.
     void trigger();
 
-    // The frequency timer, in T-cycles, handed one M-cycle at a time. The
-    // sixteen bytes come in from the APU: the channel reads one sample out of
-    // them every time the timer expires.
-    void tick(int tCycles, const std::array<u8, 16>& wave);
+    // The frequency timer, handed some whole number of T-cycles at a time.
+    // The sixteen bytes come in from the APU: the channel reads one sample out
+    // of them every time the timer expires.
+    //
+    // `playing` is the APU's channel-enabled flag, which lives there for all
+    // four channels. A channel that is switched off does not read, so its
+    // position and its sample buffer stand still -- but the M-cycle phase
+    // below keeps running either way, because that is the bus's phase and not
+    // the channel's.
+    void tick(int tCycles, const std::array<u8, 16>& wave, bool playing);
 
     // NR52's power bit going low zeroes NR30 to NR34.
     void powerOff();
@@ -98,6 +104,11 @@ private:
     // from and what pins it down.
     static constexpr int kTriggerDelay = 6;
 
+    // An M-cycle's four T-cycles. The channel counts them itself so that the
+    // wave RAM window stays the last T-cycle of an M-cycle whatever number of
+    // T-cycles a caller hands over at a time.
+    static constexpr int kTicksPerMCycle = 4;
+
     // How far ahead of a sample read the channel counts as about to read it,
     // in T-cycles. Not a figure any document gives either; the same entry
     // covers it.
@@ -110,6 +121,9 @@ private:
     int frequency_ = 0;
     int position_ = 0;
     int timer_ = kMaxPeriod;
+    // Which T-cycle of an M-cycle the next tick is: 0 is the first, 3 the one
+    // the CPU's access lands on.
+    int phase_ = 0;
     u8 sample_ = 0;
     bool readOnLastCycle_ = false;
 };

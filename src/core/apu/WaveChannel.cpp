@@ -24,12 +24,26 @@ void WaveChannel::trigger() {
 // T-cycles puts two reads inside one M-cycle, and only a read on the last of
 // the four coincides with the CPU's access.
 //
+// That last-of-four is counted here, on the channel's own phase, rather than
+// taken from the length of this call. A caller that hands over two T-cycles
+// at a time, or one, is dividing an M-cycle up, not redefining it -- and the
+// wave RAM window would quietly open on every read if the flag were set from
+// the call's own last cycle.
+//
 // The period is read afresh at every reload rather than held from the
 // trigger, which is what makes a frequency written to NR33 or NR34 take
 // effect only after the following sample read.
-void WaveChannel::tick(int tCycles, const std::array<u8, 16>& wave) {
+void WaveChannel::tick(int tCycles, const std::array<u8, 16>& wave, bool playing) {
     readOnLastCycle_ = false;
     for (int cycle = 0; cycle < tCycles; ++cycle) {
+        const bool lastOfMCycle = phase_ == kTicksPerMCycle - 1;
+        phase_ = (phase_ + 1) % kTicksPerMCycle;
+        // A channel that is switched off does not read: its position, its
+        // sample buffer and its timer stand still until a trigger brings it
+        // back. The phase above is the bus's and keeps running regardless.
+        if (!playing) {
+            continue;
+        }
         if (--timer_ > 0) {
             continue;
         }
@@ -39,7 +53,7 @@ void WaveChannel::tick(int tCycles, const std::array<u8, 16>& wave) {
         // High nibble first: sample 0 is the top half of the first byte,
         // sample 1 the bottom half, sample 2 the top half of the second.
         sample_ = static_cast<u8>((position_ & 1) == 0 ? (byte >> 4) : (byte & 0x0F));
-        readOnLastCycle_ = (cycle == tCycles - 1);
+        readOnLastCycle_ = lastOfMCycle;
     }
 }
 

@@ -33,6 +33,7 @@ add_library(fourshades_core STATIC
     src/core/apu/Apu.cpp
     src/core/apu/PulseChannel.cpp
     src/core/apu/WaveChannel.cpp
+    src/core/apu/NoiseChannel.cpp
     src/core/apu/FrequencySweep.cpp
     src/core/Timer.cpp
     src/core/Serial.cpp

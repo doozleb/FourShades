@@ -40,6 +40,17 @@ bool isGap(u16 address) { return address == 0xFF15 || address == 0xFF1F; }
 // One M-cycle is four T-cycles, and the frequency timers count T-cycles.
 constexpr int kTicksPerMCycle = 4;
 
+// A digital level runs 0 to 15 and its DAC's output runs +1 to -1, so half
+// the digital range is what one unit of analog output costs.
+constexpr float kHalfScale = 7.5f;
+
+// How many channels the mix is divided by, so that a side of the pair stays
+// within the same [-1, +1] one channel is within.
+constexpr float kChannels = 4.0f;
+
+// How far NR51's left nibble is from its right one.
+constexpr int kLeftShift = 4;
+
 // The two pulse channels own five consecutive registers each, FF10-FF14 and
 // FF15-FF19. FF15 is the hole where channel 2's sweep register would be.
 constexpr u16 kPulseFirst = 0xFF10;
@@ -49,6 +60,10 @@ constexpr int kPulseRegisters = 5;
 // The wave channel's five, FF1A-FF1E.
 constexpr u16 kWaveFirstRegister = 0xFF1A;
 constexpr u16 kWaveLastRegister = 0xFF1E;
+
+// The noise channel's four, FF20-FF23.
+constexpr u16 kNoiseFirstRegister = 0xFF20;
+constexpr u16 kNoiseLastRegister = 0xFF23;
 
 // The sequencer's eight steps. Steps 0, 2, 4 and 6 clock the length counters
 // (256 Hz), steps 2 and 6 the sweep (128 Hz) and step 7 the envelope (64 Hz);
@@ -86,6 +101,9 @@ Apu::Apu() {
     }
     for (u16 address = kWaveFirstRegister; address <= kWaveLastRegister; ++address) {
         writeWave(address, nr_[static_cast<std::size_t>(address - kFirst)]);
+    }
+    for (u16 address = kNoiseFirstRegister; address <= kNoiseLastRegister; ++address) {
+        writeNoise(address, nr_[static_cast<std::size_t>(address - kFirst)]);
     }
 }
 
@@ -154,6 +172,7 @@ void Apu::clockEnvelopes() {
     for (PulseChannel& channel : pulse_) {
         channel.clockEnvelope();
     }
+    noise4_.clockEnvelope();
 }
 
 // The frequency timers run only while the APU has power.
@@ -164,7 +183,13 @@ void Apu::tickChannels() {
     for (PulseChannel& channel : pulse_) {
         channel.tick(kTicksPerMCycle);
     }
-    wave3_.tick(kTicksPerMCycle, wave_);
+    // Channel 3 is the one generator whose running is visible from outside
+    // it: a channel that is switched off does not read wave RAM, which is
+    // what leaves the last sample read standing in the buffer and leaves the
+    // sixteen bytes reachable. The other three keep their timers running with
+    // the channel off, because nothing outside them can tell.
+    wave3_.tick(kTicksPerMCycle, wave_, channelOn_[2]);
+    noise4_.tick(kTicksPerMCycle);
 }
 
 // NR52's low four bits: one per channel, in channel order.
@@ -265,6 +290,7 @@ void Apu::write(u16 address, u8 value) {
     }
     writePulse(address, value);
     writeWave(address, value);
+    writeNoise(address, value);
     // A DAC that goes off takes its channel with it. One that comes on does
     // not bring the channel back: only a trigger does that.
     if (const int dac = dacChannel(address); dac >= 0) {
@@ -332,6 +358,76 @@ void Apu::writeWave(u16 address, u8 value) {
     }
 }
 
+void Apu::writeNoise(u16 address, u8 value) {
+    if (address < kNoiseFirstRegister || address > kNoiseLastRegister) {
+        return;
+    }
+    switch (address) {
+    case 0xFF21: noise4_.writeEnvelope(value); break; // NR42
+    case 0xFF22: noise4_.writeControl(value); break;  // NR43
+    default:
+        // NR41, the length load, which the length counter has already taken,
+        // and NR44, whose trigger and length enable belong to the APU.
+        break;
+    }
+}
+
+// What a channel is handing its DAC: a digital level, 0 to 15. The two pulse
+// channels and the noise channel play their envelope's volume or nothing, as
+// their generator's output bit says; the wave channel plays its sample buffer
+// shifted by NR32.
+u8 Apu::channelLevel(std::size_t channel) const {
+    switch (channel) {
+    case 2: return wave3_.output();
+    case 3: return noise4_.output() ? noise4_.volume() : 0;
+    default:
+        return pulse_[channel].dutyOutput() ? pulse_[channel].volume() : 0;
+    }
+}
+
+// The mixer. Pan Docs "Audio Details": each channel's DAC turns a digital 0
+// into an analog +1 and a digital 15 into an analog -1; a DAC that is off, or
+// a channel that is switched off, is 0 instead, which is what makes turning
+// one off audible. NR51 then routes each channel to the left, the right, both
+// or neither, and NR50's two three-bit volumes scale each side by
+// (volume + 1) / 8.
+//
+// The sum of four channels within [-1, +1] is divided by four, so a side of
+// this pair is within [-1, +1] too: that is this emulator's unit for a sample
+// and not something the hardware does. Nothing else happens here -- the DMG's
+// high-pass capacitor, which is what pulls the mix back to zero, belongs to
+// the output stage.
+Apu::Sample Apu::sample() const {
+    if (!powered_) {
+        return Sample{0.0f, 0.0f};
+    }
+    float left = 0.0f;
+    float right = 0.0f;
+    const u8 routing = nr_[kNr51 - kFirst];
+    for (std::size_t channel = 0; channel < channelOn_.size(); ++channel) {
+        if (!channelOn_[channel] || !dacOn(channel)) {
+            continue;
+        }
+        const float analog =
+            1.0f - static_cast<float>(channelLevel(channel)) / kHalfScale;
+        const unsigned bit = 1u << channel;
+        if ((routing & (bit << kLeftShift)) != 0) {
+            left += analog;
+        }
+        if ((routing & bit) != 0) {
+            right += analog;
+        }
+    }
+    // NR50 bit 7 and bit 3 are the Vin mixers: the cartridge's own sound pin
+    // routed to a side. No cartridge this emulator runs drives that pin, so
+    // there is nothing on it to add -- the bits are read and stored, and mix
+    // in silence.
+    const u8 volumes = nr_[kNr50 - kFirst];
+    const float leftVolume = static_cast<float>(((volumes >> 4) & 0x07) + 1) / 8.0f;
+    const float rightVolume = static_cast<float>((volumes & 0x07) + 1) / 8.0f;
+    return Sample{left * leftVolume / kChannels, right * rightVolume / kChannels};
+}
+
 void Apu::writePulse(u16 address, u8 value) {
     if (address < kPulseFirst || address > kPulseLast) {
         return;
@@ -368,6 +464,9 @@ void Apu::trigger(std::size_t channel) {
             corruptWaveRam();
         }
         wave3_.trigger();
+    }
+    if (channel == 3) {
+        noise4_.trigger();
     }
     channelOn_[channel] = dacOn(channel);
     // Channel 1's sweep takes its copy of the frequency here, and with a
@@ -431,6 +530,7 @@ void Apu::powerOff() {
     // register, timer, enabled flag and the negate latch -- goes with it.
     sweep_.powerOff();
     wave3_.powerOff();
+    noise4_.powerOff();
     powered_ = false;
 }
 

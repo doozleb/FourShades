@@ -1207,9 +1207,27 @@ first read, and with it the phase of every read after it, moves two T-cycles
 earlier each iteration while the CPU's own access stays a fixed 208 T-cycles
 after the trigger. Each iteration then prints what it saw: the byte a read of
 $FF30 returned (09), wave RAM after a retrigger (10), or wave RAM after a
-write of $F7 (12). Sixty-nine phases, two T-cycles apart, checksummed. Any of
-the three figures above being wrong moves the whole sequence and fails the
-checksum.
+write of $F7 (12). Sixty-nine phases, two T-cycles apart, checksummed. The trigger delay and the
+access window move all three sequences, so getting either wrong fails all
+three checksums. The corruption window moves only one: of the three ROMs only
+the retrigger one retriggers, so that figure is checked by that ROM alone --
+the sentence this entry used to carry, that any of the three figures being
+wrong fails the checksum, was too broad.
+
+**How the expected sequences were obtained.** Not by guessing a phase and
+rerunning until one stuck. blargg's checksum scheme was reconstructed first --
+CRC-32 over the raw bytes printed, with spaces and newlines not checksummed,
+and `print_hex` checksumming the byte value rather than the digits it prints
+-- and validated against a ROM whose result was already known, whose first
+`check_crc $F604603B` reproduced exactly. With the scheme trusted, the
+expected 69-byte sequence was solved for rather than guessed: the read timing
+was written as a parametric model and its parameters searched for the sequence
+whose CRC-32 is the DMG constant `$118A3620` that the read ROM checks. That
+gave one sequence, six T-cycles away from what the first implementation
+produced, which is where `kTriggerDelay` comes from. The retrigger ROM's
+constant `$533D6D4D` was solved the same way and gave both the two T-cycle
+lead and the next-read index. So the two figures were read out of the
+checksums, and the ROMs then confirmed them rather than produced them.
 
 **Measured, 2026-09-23** (one change at a time, rebuilt, `--only dmg_sound`,
 then reverted):
@@ -1230,14 +1248,48 @@ then reverted):
 - Output level 3 shifting by 3 instead of 2: unit suite red; sound 12/12, for
   the same reason.
 
+**Every neighbouring value of both constants fails** (measured the same way,
+2026-09-23). This is the strongest evidence in this entry: the two figures are
+not a range that happens to contain the right answer, they are single values
+with nothing beside them.
+
+- `kTriggerDelay` at 4, 5, 7 or 8 -- one and two T-cycles either side of 6:
+  sound **9/12** at every one of them, all three wave ROMs failing. With 0 it
+  is 9/12 as well. Only 6 scores 12.
+- `kAboutToRead` at 0, 1, 3, 4 or 6 -- from no lead at all to three T-cycles:
+  sound **11/12** at every one of them, the retrigger ROM failing each time.
+  Only 2 scores 12.
+
+**What would falsify this.** Only the *spacing* between the CPU's access and
+the channel's read is claimed here, not the absolute phase of either. This
+emulator performs the access at the end of an M-cycle and the two constants
+are measured against that, so a model that put the access two T-cycles earlier
+and shortened the trigger delay to four produces the identical 69 sequences;
+no ROM in the suite can tell those two apart. What would separate them: a
+hardware trace of where in the M-cycle the CPU's access actually lands
+relative to a wave read, or any test that varies the offset of the access
+independently of the trigger -- all three ROMs here hold that offset fixed at
+208 T-cycles and vary only the period. Either would fix the absolute phase,
+and so fix each constant on its own; either could also show this emulator's
+pair to be the wrong point on the right line.
+
 **What is fitted rather than derived.** The two figures are expressed against
 this emulator's own advance-then-access order, so what they really fix is the
 distance between the CPU's access and the channel's read — six T-cycles of
-trigger delay and a two T-cycle lead for the corruption. A model that put the
-CPU's access two T-cycles earlier in the M-cycle and shortened the trigger
-delay to four would produce the identical 69 sequences; the ROMs cannot tell
-the two apart, and neither can this entry. What the ROMs do settle is the
-relative spacing, and that is what the two constants carry.
+trigger delay and a two T-cycle lead for the corruption. What the ROMs settle
+is that relative spacing, and that is what the two constants carry; the
+falsifier above says what it would take to settle the rest.
+
+**Where the window is decided (2026-09-23).** "The channel's read coincided
+with the CPU's access" is a statement about which T-cycle of an *M-cycle* the
+read fell on, so `WaveChannel` counts that phase itself rather than taking it
+from however many T-cycles a caller happens to hand over at a time. It used to
+be read off the length of the call, which was right only while every caller
+ticked whole M-cycles: a caller that subdivided one — audio resampling, say —
+would have opened the wave RAM window on every read. Nothing in the ROM suite
+would have noticed. Measured: that, and a channel 3 that keeps reading wave
+RAM while it is switched off, both leave sound at 12/12; only the unit suite
+catches either.
 
 - **Checked:** 2026-09-23.
 

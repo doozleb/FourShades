@@ -4,6 +4,7 @@
 #include "core/Types.h"
 #include "core/apu/FrequencySweep.h"
 #include "core/apu/LengthCounter.h"
+#include "core/apu/NoiseChannel.h"
 #include "core/apu/PulseChannel.h"
 #include "core/apu/WaveChannel.h"
 
@@ -59,12 +60,25 @@ public:
     // Channel 3, for the same onlookers again.
     const WaveChannel& wave() const { return wave3_; }
 
+    // ... and channel 4.
+    const NoiseChannel& noise() const { return noise4_; }
+
+    // What the four channels come to, mixed, routed and scaled: one stereo
+    // pair, each side nominally within [-1, +1].
+    struct Sample {
+        float left;
+        float right;
+    };
+    Sample sample() const;
+
 private:
     static constexpr u16 kFirst = 0xFF10;     // NR10
     static constexpr u16 kNr13 = 0xFF13;      // channel 1's frequency, the low byte
     static constexpr u16 kNr14 = 0xFF14;      // and its high three bits
     static constexpr u16 kNr30 = 0xFF1A;      // the wave channel's DAC bit
     static constexpr u16 kNr42 = 0xFF21;      // the noise channel's envelope
+    static constexpr u16 kNr50 = 0xFF24;      // the two master volumes
+    static constexpr u16 kNr51 = 0xFF25;      // which channel goes to which side
     static constexpr u16 kNr52 = 0xFF26;
     static constexpr u16 kWaveFirst = 0xFF30; // wave RAM, 16 bytes
 
@@ -85,6 +99,12 @@ private:
     // which the length counter has already taken, and NR30 is the DAC bit,
     // which is read straight out of the stored byte.
     void writeWave(u16 address, u8 value);
+    // FF20-FF23: the noise channel's four registers. NR41 is the length load,
+    // which the length counter has already taken, and the top five bits of
+    // NR42 are the DAC, which is read straight out of the stored byte.
+    void writeNoise(u16 address, u8 value);
+    // What a channel is handing its DAC this instant: a digital level 0-15.
+    u8 channelLevel(std::size_t channel) const;
     // FF30-FF3F. While channel 3 is playing, the CPU reaches those sixteen
     // bytes only on the T-cycle the channel reads one of them, and reaches
     // the byte the channel is reading rather than the one it asked for.
@@ -118,6 +138,7 @@ private:
     std::array<u8, 0x10> wave_{};
     std::array<PulseChannel, 2> pulse_{};
     WaveChannel wave3_{};
+    NoiseChannel noise4_{};
     // Channel 1's, and only channel 1's: there is no NR20 for channel 2 to
     // put a second one behind.
     FrequencySweep sweep_{};
