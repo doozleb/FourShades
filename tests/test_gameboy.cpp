@@ -186,6 +186,7 @@ TEST_CASE("OAM DMA from WRAM copies 160 bytes and blocks WRAM, ROM and OAM, but 
 
 TEST_CASE("OAM DMA from VRAM blocks VRAM and OAM, but ROM and WRAM stay readable") {
     auto gb = makeGameBoy({0x00});
+    gb->write(0xFF40, 0x11); // LCD off: the DMA's own bus blocking is what's under test here
     gb->write(0xC000, 0x01);
     gb->write(0xFF46, 0x80); // source 0x8000: the video bus
     gb->idle(); // start-up cycle

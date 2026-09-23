@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 138,
+    "passing": 139,
     "total": 165,
     "groups": [
       {
@@ -39,12 +39,9 @@
       },
       {
         "group": "boot state",
-        "passing": 2,
+        "passing": 3,
         "total": 3,
-        "first_failure": {
-          "test": "mooneye/acceptance/boot_hwio-dmgABCmgb.gb",
-          "reason": "failure bytes (0x42) over serial"
-        }
+        "first_failure": null
       },
       {
         "group": "oam dma",

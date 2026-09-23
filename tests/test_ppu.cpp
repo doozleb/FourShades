@@ -33,6 +33,33 @@ TEST_CASE("the PPU starts where the boot ROM left it") {
     CHECK(ppu.read(0xFF41) == 0x85);
 }
 
+// The dot within line 153 the boot ROM leaves the PPU on is not given by Pan
+// Docs. It was solved from the two reads a power-on register walk makes: see
+// docs/known-divergences.md, "The PPU's power-on phase within line 153".
+TEST_CASE("the PPU's power-on phase is the measured one, and M-cycle aligned") {
+    Ppu ppu;
+    CHECK(ppu.lineDot() == 356);
+    CHECK(ppu.lineDot() % 4 == 0); // an odd phase desynchronises dot from M-cycle
+}
+
+// The same two constraints the register walk imposes, pinned here by the
+// M-cycle counts it reads at rather than by its name: at 1139 M-cycles from
+// power-on STAT must still report mode 0, and at 1190 LY must read 0x0A.
+TEST_CASE("the power-on phase puts mode 0 at 1139 M-cycles and LY 0x0A at 1190") {
+    Ppu ppu;
+    for (int i = 0; i < 1139; ++i) {
+        ppu.tick();
+    }
+    CHECK(ppu.ly() == 9);
+    CHECK(ppu.mode() == 0);
+    CHECK(ppu.read(0xFF41) == 0x80); // mode 0, LYC 0 unmatched
+    for (int i = 1139; i < 1190; ++i) {
+        ppu.tick();
+    }
+    CHECK(ppu.ly() == 0x0A);
+    CHECK(ppu.read(0xFF44) == 0x0A);
+}
+
 TEST_CASE("a drawn line is mode 2, then 3, then 0, and lasts 456 dots") {
     Ppu ppu;
     toTopOfFrame(ppu); // line 0, dot 4: the first M-cycle STAT calls mode 2
