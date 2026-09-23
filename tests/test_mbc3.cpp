@@ -172,7 +172,7 @@ TEST_CASE("MBC3+TIMER a latch shows the time as of the latch, and time passing d
     CHECK(cart.read(0xA000) == 0x05);
 }
 
-TEST_CASE("MBC3+TIMER any write to 6000-7FFF latches, whatever the value") {
+TEST_CASE("MBC3+TIMER a write to 6000-7FFF latches without a 0x00-then-0x01 sequence, but a write outside 6000-7FFF does not") {
     Cartridge cart = timerCart();
     cart.write(0x4000, 0x08);
     cart.write(0xA000, 0x2A);
@@ -265,23 +265,24 @@ TEST_CASE("MBC3+TIMER the clock state round-trips, and survives a cartridge copy
     CHECK(copy.rtcState().latched.seconds == 0x33);
 }
 
-TEST_CASE("MBC3+TIMER 1048576 M-cycles of a running machine advance the clock one second") {
-    std::vector<u8> rom = makeRom(2, 0x10, 0x00, 0x03);
-    rom[0x0100] = 0x18; // jr -2: sit still and let time pass
-    rom[0x0101] = 0xFE;
-    u8 sum = 0;
-    for (u16 a = 0x0134; a <= 0x014C; ++a) {
-        sum = static_cast<u8>(sum - rom[a] - 1);
-    }
-    rom[0x014D] = sum;
-    std::string error;
-    auto cart = Cartridge::load(std::move(rom), &error);
-    INFO(error);
-    REQUIRE(cart.has_value());
-    GameBoy gb(std::move(*cart));
+TEST_CASE("MBC3+TIMER 1048576 idle M-cycles advance the cartridge clock one second") {
+    // GameBoy::idle() never steps the CPU (that's GameBoy::step()), so this
+    // drives the hardware tick directly rather than running a program: at
+    // 1,048,576 M-cycles per second, ticking the machine that many times is
+    // one second of clock time, whether or not any instruction ever runs.
+    GameBoy gb(loadOk(makeRom(2, 0x10, 0x00, 0x03)));
     for (std::uint64_t i = 0; i < 1048576; ++i) {
         gb.idle();
     }
     REQUIRE(gb.cycles() == 1048576);
     CHECK(gb.cartridge().rtcState().live.seconds == 1);
+}
+
+TEST_CASE("MBC3+TIMER the clock register mirrors across all of A000-BFFF") {
+    Cartridge cart = timerCart();
+    cart.write(0x4000, 0x08); // seconds
+    cart.write(0xA000, 0x2A);
+    latch(cart);
+    CHECK(cart.read(0xA000) == 0x2A);
+    CHECK(cart.read(0xBFFF) == 0x2A); // same register, the far end of the mirror
 }

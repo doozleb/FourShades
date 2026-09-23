@@ -69,8 +69,13 @@ void Mbc3::writeControl(u16 address, u8 value) {
         ramSelect_ = static_cast<u8>(value & 0x0F);
     } else {
         // 6000-7FFF, the latch. Pan Docs gives the 0x00-then-0x01 sequence a
-        // program writes; the chip itself latches on any write here, whatever
-        // the value, which is what the 0x00-then-0x01 sequence amounts to.
+        // program writes; the chip here latches on any write, whatever the
+        // value. That is the simpler of two rules the available evidence
+        // cannot tell apart from this one: a write latches only when its
+        // value differs from the previous write to this range, the same
+        // 0x00-then-0x01 sequence generalised to arbitrary values. See
+        // docs/known-divergences.md, "MBC3's clock: the register widths and
+        // the latch, where Pan Docs is silent".
         if (hasTimer_) {
             rtc_.latch();
         }
