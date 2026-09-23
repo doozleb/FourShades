@@ -46,6 +46,10 @@ constexpr u16 kPulseFirst = 0xFF10;
 constexpr u16 kPulseLast = 0xFF19;
 constexpr int kPulseRegisters = 5;
 
+// The wave channel's five, FF1A-FF1E.
+constexpr u16 kWaveFirstRegister = 0xFF1A;
+constexpr u16 kWaveLastRegister = 0xFF1E;
+
 // The sequencer's eight steps. Steps 0, 2, 4 and 6 clock the length counters
 // (256 Hz), steps 2 and 6 the sweep (128 Hz) and step 7 the envelope (64 Hz);
 // those rates are what the table produces, not three separate timers.
@@ -79,6 +83,9 @@ Apu::Apu() {
             continue;
         }
         writePulse(address, nr_[static_cast<std::size_t>(address - kFirst)]);
+    }
+    for (u16 address = kWaveFirstRegister; address <= kWaveLastRegister; ++address) {
+        writeWave(address, nr_[static_cast<std::size_t>(address - kFirst)]);
     }
 }
 
@@ -157,6 +164,7 @@ void Apu::tickChannels() {
     for (PulseChannel& channel : pulse_) {
         channel.tick(kTicksPerMCycle);
     }
+    wave3_.tick(kTicksPerMCycle, wave_);
 }
 
 // NR52's low four bits: one per channel, in channel order.
@@ -192,6 +200,13 @@ int Apu::lengthControlChannel(u16 address) {
 
 u8 Apu::read(u16 address) const {
     if (address >= kWaveFirst) {
+        // While channel 3 plays, the address the CPU asked for is not the one
+        // it gets: the channel has the sixteen bytes, and hands over the one
+        // it is reading, on the one T-cycle it reads it. Every other T-cycle
+        // the CPU sees nothing at all.
+        if (channelOn_[2]) {
+            return waveRamReachable() ? wave_[wave3_.readIndex()] : 0xFF;
+        }
         return wave_[address - kWaveFirst];
     }
     if (address > kNr52) {
@@ -206,8 +221,16 @@ u8 Apu::read(u16 address) const {
 
 void Apu::write(u16 address, u8 value) {
     // Wave RAM is on the far side of the power switch: it neither loses its
-    // contents when the APU goes down nor stops answering.
+    // contents when the APU goes down nor stops answering. A playing channel 3
+    // is the one thing that comes between it and the CPU, and it does so for
+    // writes exactly as it does for reads.
     if (address >= kWaveFirst) {
+        if (channelOn_[2]) {
+            if (waveRamReachable()) {
+                wave_[wave3_.readIndex()] = value;
+            }
+            return;
+        }
         wave_[address - kWaveFirst] = value;
         return;
     }
@@ -241,6 +264,7 @@ void Apu::write(u16 address, u8 value) {
         length_[static_cast<std::size_t>(loads)].load(value);
     }
     writePulse(address, value);
+    writeWave(address, value);
     // A DAC that goes off takes its channel with it. One that comes on does
     // not bring the channel back: only a trigger does that.
     if (const int dac = dacChannel(address); dac >= 0) {
@@ -266,6 +290,45 @@ void Apu::write(u16 address, u8 value) {
         if (triggered) {
             trigger(channel);
         }
+    }
+}
+
+// The CPU reaches wave RAM on the T-cycle channel 3 reads a byte out of it,
+// and on no other. The channel reads on the last T-cycle of the M-cycles it
+// reads in, which is the one the CPU's own access falls on.
+bool Apu::waveRamReachable() const {
+    return wave3_.readingNow();
+}
+
+// Retriggering channel 3 while it is about to read a sample byte, on a
+// monochrome console, rewrites the front of wave RAM with the bytes that read
+// was going to come from: the first byte alone if it was one of the first
+// four, and otherwise the whole aligned group of four it was inside.
+void Apu::corruptWaveRam() {
+    const std::size_t index = wave3_.nextReadIndex();
+    if (index < 4) {
+        wave_[0] = wave_[index];
+        return;
+    }
+    const std::size_t base = index & ~std::size_t{3};
+    for (std::size_t offset = 0; offset < 4; ++offset) {
+        wave_[offset] = wave_[base + offset];
+    }
+}
+
+void Apu::writeWave(u16 address, u8 value) {
+    if (address < kWaveFirstRegister || address > kWaveLastRegister) {
+        return;
+    }
+    switch (address) {
+    case 0xFF1C: wave3_.writeLevel(value); break;          // NR32
+    case 0xFF1D: wave3_.writeFrequencyLow(value); break;   // NR33
+    case 0xFF1E: wave3_.writeFrequencyHigh(value); break;  // NR34
+    default:
+        // NR30, the DAC bit, which the APU reads out of the stored byte for
+        // all four channels alike, and NR31, the length load, which the
+        // length counter has already taken.
+        break;
     }
 }
 
@@ -297,6 +360,14 @@ void Apu::writePulse(u16 address, u8 value) {
 void Apu::trigger(std::size_t channel) {
     if (channel < pulse_.size()) {
         pulse_[channel].trigger();
+    }
+    if (channel == 2) {
+        // Before the trigger, because the corruption is of the byte the
+        // channel was about to read and the trigger throws that index away.
+        if (channelOn_[2] && wave3_.aboutToRead()) {
+            corruptWaveRam();
+        }
+        wave3_.trigger();
     }
     channelOn_[channel] = dacOn(channel);
     // Channel 1's sweep takes its copy of the frequency here, and with a
@@ -359,12 +430,16 @@ void Apu::powerOff() {
     // NR10 goes to zero with the rest, and the unit behind it -- shadow
     // register, timer, enabled flag and the negate latch -- goes with it.
     sweep_.powerOff();
+    wave3_.powerOff();
     powered_ = false;
 }
 
 void Apu::powerOn() {
     powered_ = true;
     step_ = 0;
+    // Channel 3's sample buffer is cleared by the power coming back, so a
+    // freshly powered APU emits a digital zero until the channel reads.
+    wave3_.powerOn();
 }
 
 } // namespace fourshades

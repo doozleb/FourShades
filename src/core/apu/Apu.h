@@ -5,6 +5,7 @@
 #include "core/apu/FrequencySweep.h"
 #include "core/apu/LengthCounter.h"
 #include "core/apu/PulseChannel.h"
+#include "core/apu/WaveChannel.h"
 
 #include <array>
 #include <cstddef>
@@ -55,6 +56,9 @@ public:
     // Channels 1 and 2, in that order, for the same onlookers.
     const PulseChannel& pulse(std::size_t index) const { return pulse_[index]; }
 
+    // Channel 3, for the same onlookers again.
+    const WaveChannel& wave() const { return wave3_; }
+
 private:
     static constexpr u16 kFirst = 0xFF10;     // NR10
     static constexpr u16 kNr13 = 0xFF13;      // channel 1's frequency, the low byte
@@ -77,6 +81,18 @@ private:
     // FF10-FF19: the two pulse channels' five registers each, which is why
     // FF15 is a hole -- channel 2 has no sweep register to put there.
     void writePulse(u16 address, u8 value);
+    // FF1A-FF1E: the wave channel's five registers. NR31 is the length load,
+    // which the length counter has already taken, and NR30 is the DAC bit,
+    // which is read straight out of the stored byte.
+    void writeWave(u16 address, u8 value);
+    // FF30-FF3F. While channel 3 is playing, the CPU reaches those sixteen
+    // bytes only on the T-cycle the channel reads one of them, and reaches
+    // the byte the channel is reading rather than the one it asked for.
+    bool waveRamReachable() const;
+    // Retriggering channel 3 while it is about to read a sample byte rewrites
+    // the first bytes of wave RAM with the ones that read was going to be
+    // from.
+    void corruptWaveRam();
     void trigger(std::size_t channel);
     // Whether a channel's DAC is on. A channel whose DAC is off is switched
     // off and cannot be triggered back on -- that much is true of all four,
@@ -101,6 +117,7 @@ private:
     };
     std::array<u8, 0x10> wave_{};
     std::array<PulseChannel, 2> pulse_{};
+    WaveChannel wave3_{};
     // Channel 1's, and only channel 1's: there is no NR20 for channel 2 to
     // put a second one behind.
     FrequencySweep sweep_{};

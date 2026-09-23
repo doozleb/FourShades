@@ -1146,6 +1146,101 @@ moved, SingleStepTests 499/500, every doctest case passing.
   instead of the expected 0x30) with the shift temporarily reverted to 5.
 - **Checked:** 2026-09-23.
 
+## Channel 3's wave RAM window: the two figures Pan Docs does not give (2026-09-23)
+
+While channel 3 is playing, a monochrome console's CPU cannot reach wave RAM
+freely. Pan Docs describes the three consequences and gives no number for any
+of them:
+
+- **The access window.** "On monochrome consoles, wave RAM can only be
+  accessed on the same cycle that CH3 does. Otherwise, reads return $FF, and
+  writes are ignored", and "the byte accessed will be the one CH3 is currently
+  reading ... regardless of the address being used",
+  [Audio Registers: FF30-FF3F](https://gbdev.io/pandocs/Audio_Registers.html#ff30ff3f--wave-pattern-ram).
+  "The same cycle" is the whole of it.
+- **The corruption.** "Triggering the wave channel on the DMG while it reads a
+  sample byte will alter the first four bytes of wave RAM. If the channel was
+  reading one of the first four bytes, the only first byte will be rewritten
+  with the byte being read. If the channel was reading one of the later 12
+  bytes, the first FOUR bytes of wave RAM will be rewritten with the four
+  aligned bytes that the read was from",
+  [Audio Details: Obscure Behavior](https://gbdev.io/pandocs/Audio_details.html#obscure-behavior).
+  The NR34 note calls the same moment "retriggering CH3 while it's *about to
+  read* a byte from wave RAM". Which of the two it is — the read, or the
+  moment before it — is the difference this entry had to settle.
+- **The trigger's own reload.** "The period divider is set to the contents of
+  NR33 and NR34",
+  [Audio Registers: FF1E](https://gbdev.io/pandocs/Audio_Registers.html#ff1e--nr34-channel-3-period-high--control),
+  with no extra wait mentioned.
+
+blargg's own write-up of the same hardware ends its to-do list with "Document
+exact timing for DMG wave issues"
+([Game Boy sound hardware](https://gbdev.gg8.se/wiki/articles/Gameboy_sound_hardware)),
+so the figures were never written down anywhere; the same page records that he
+measured this behaviour on DMG-03, DMG-05, DMG-06 and MGB-01, which makes the
+three ROMs that measure it hardware-verified and the only arbiter there is.
+
+**What FourShades does.** `GameBoy::tick` advances the hardware by one M-cycle
+and then performs the CPU's access, so an access sits on the last T-cycle of
+its M-cycle, and the channel's reads are placed against it:
+
+- The CPU reaches wave RAM only when channel 3's own read lands on that same
+  last T-cycle (`WaveChannel::readingNow`). Every other M-cycle reads 0xFF and
+  drops the write. The byte reached is the one the channel last read, whatever
+  address the CPU named.
+- A trigger corrupts wave RAM when the channel's next read is **two T-cycles
+  away** (`WaveChannel::aboutToRead`) — two T-cycles *earlier* than the access
+  window, which is Pan Docs' "about to read" rather than its "while it reads"
+  — and the bytes copied to the front are the ones **that** read was going to
+  come out of (`WaveChannel::nextReadIndex`), one sample past the one last
+  read.
+- The first period after a trigger is **six T-cycles longer** than the ones
+  after it (`WaveChannel::kTriggerDelay`). Nothing in either document says so.
+
+**How the three ROMs pin all of it down.** Each of them runs the same 69
+iterations: it loads wave RAM, triggers channel 3 with a period of
+(256 - b) * 2 T-cycles where b counts up by one per iteration, and then
+immediately writes a period of 4. That second period only takes effect at the
+following reload — Pan Docs' "Period changes (written to NR33 or NR34) only
+take effect after the following time wave RAM is read" — so the channel's
+first read, and with it the phase of every read after it, moves two T-cycles
+earlier each iteration while the CPU's own access stays a fixed 208 T-cycles
+after the trigger. Each iteration then prints what it saw: the byte a read of
+$FF30 returned (09), wave RAM after a retrigger (10), or wave RAM after a
+write of $F7 (12). Sixty-nine phases, two T-cycles apart, checksummed. Any of
+the three figures above being wrong moves the whole sequence and fails the
+checksum.
+
+**Measured, 2026-09-23** (one change at a time, rebuilt, `--only dmg_sound`,
+then reverted):
+
+- `kTriggerDelay` 6 → 0 (the reload Pan Docs describes, with no extra wait):
+  sound 9/12, all three wave ROMs failing.
+- `kAboutToRead` 2 → 4, moving the corruption onto the read itself rather than
+  the moment before it: sound 11/12, the retrigger ROM alone failing. This is
+  the measurement that chooses Pan Docs' "about to read" wording over its
+  "while it reads" wording.
+- `Apu::waveRamReachable` forced to true, which is the CGB rule (Pan Docs: "On
+  other consoles, the byte accessed will be the one CH3 is currently reading"):
+  sound 10/12, the read and write ROMs failing, the retrigger ROM unaffected.
+- Period `(2048 - frequency) * 2` → `* 4`, a pulse channel's: sound 9/12, all
+  three failing, and the 392-case unit suite red.
+- Low nibble read before high: unit suite red; sound 12/12, because the ROMs
+  read bytes out of wave RAM and never listen to a nibble.
+- Output level 3 shifting by 3 instead of 2: unit suite red; sound 12/12, for
+  the same reason.
+
+**What is fitted rather than derived.** The two figures are expressed against
+this emulator's own advance-then-access order, so what they really fix is the
+distance between the CPU's access and the channel's read — six T-cycles of
+trigger delay and a two T-cycle lead for the corruption. A model that put the
+CPU's access two T-cycles earlier in the M-cycle and shortened the trigger
+delay to four would produce the identical 69 sequences; the ROMs cannot tell
+the two apart, and neither can this entry. What the ROMs do settle is the
+relative spacing, and that is what the two constants carry.
+
+- **Checked:** 2026-09-23.
+
 ## Timing model (not a divergence: where Pan Docs is silent)
 
 Pan Docs gives cycle counts but not every within-M-cycle order. These are the
