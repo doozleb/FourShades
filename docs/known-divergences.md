@@ -1207,11 +1207,13 @@ first read, and with it the phase of every read after it, moves two T-cycles
 earlier each iteration while the CPU's own access stays a fixed 208 T-cycles
 after the trigger. Each iteration then prints what it saw: the byte a read of
 $FF30 returned (09), wave RAM after a retrigger (10), or wave RAM after a
-write of $F7 (12). Sixty-nine phases, two T-cycles apart, checksummed. The trigger delay and the
-access window move all three sequences, so getting either wrong fails all
-three checksums. The corruption window moves only one: of the three ROMs only
-the retrigger one retriggers, so that figure is checked by that ROM alone --
-the sentence this entry used to carry, that any of the three figures being
+write of $F7 (12). Sixty-nine phases, two T-cycles apart, checksummed. The
+trigger delay moves all three sequences, so getting it wrong fails all three
+checksums. The access window moves two of the three: forcing it open costs the
+read ROM and the write ROM and leaves the retrigger ROM passing, which is the
+10/12 measured below. The corruption window moves only one: of the three ROMs
+only the retrigger one retriggers, so that figure is checked by that ROM alone
+-- the sentence this entry used to carry, that any of the three figures being
 wrong fails the checksum, was too broad.
 
 **How the expected sequences were obtained.** Not by guessing a phase and

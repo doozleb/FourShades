@@ -10,14 +10,17 @@ test roms         █████████████░░░   138 / 165
 ```
 <!-- scoreboard:end -->
 
-**Status: there is a window, and you can play in it (piece 3b of 6).**
-FourShades is a Game Boy that runs real test ROMs headless - memory map, MBC1
-cartridge, timer, interrupts, serial, OAM DMA, and a dot-by-dot
-picture-processing unit that draws background, window and objects into a
-160x144 frame in memory. It passes dmg-acid2. That frame now goes to an SDL3
-window at the DMG's own 59.727 Hz, the keyboard reaches the joypad register,
-and a cartridge with a battery keeps its save. There is still no sound (piece
-5) and no cartridge controller beyond MBC1 (piece 4).
+**Status: it plays, with every cartridge chip and a sound unit (piece 5 of 6).**
+FourShades is a Game Boy that runs real test ROMs headless - memory map, the
+MBC1, MBC2, MBC3-with-clock and MBC5 cartridge controllers, timer, interrupts,
+serial, OAM DMA, and a dot-by-dot picture-processing unit that draws
+background, window and objects into a 160x144 frame in memory. It passes
+dmg-acid2. That frame goes to an SDL3 window at the DMG's own 59.727 Hz, the
+keyboard reaches the joypad register, and a cartridge with a battery keeps its
+save. The sound hardware is emulated as well - all four channels, the frame
+sequencer, the envelopes, the sweep and the DMG's wave RAM window - and passes
+12 of the 12 sound test ROMs. It is not audible through a speaker yet: that is
+piece 5b, and it is in progress.
 
 The two lines above mean:
 
@@ -37,7 +40,7 @@ someone other than SingleStepTests' author, so it is the independent check
 that the CPU wasn't fitted to one suite), `cpu timing`, `cpu & interrupts`,
 `serial`, `timer`, `oam bug` and `ppu timing`.
 
-What still fails is three separate things:
+What still fails is two separate things:
 
 - **`screen`, 4 of 30.** The picture is drawn, and dmg-acid2 — the best-known
   single correctness image for a DMG — passes. The 26 that remain are 22
@@ -47,12 +50,13 @@ What still fails is three separate things:
   pixel difference is listed, test by test, in the divergences document,
   along with the decisions behind the drawing; the group table below has one
   row per group, not per test.
-- **`sound`, 0 of 12, and one `boot state` test.** There is no APU: the sound
-  registers read $FF. `boot_hwio-dmgABCmgb` stops at the first of them,
-  $FF10. Sound is piece 5.
-- **`mbc2 / mbc5` 0 of 15, `mbc3 / rtc` 0 of 3, one `mbc1` and one `oam dma`
-  test.** Those ROMs declare cartridge types this build refuses to load. The
-  other cartridge chips are piece 4.
+- **`boot state`, 2 of 3.** `boot_hwio-dmgABCmgb` reads every hardware
+  register at power-on. It used to stop at $FF10, the first sound register;
+  with the APU in, it gets past all of those and stops at $FF44 — LY —
+  reading 09 where it wants 0A. That is a PPU power-on phase error of about
+  63 M-cycles that the missing sound block had been hiding. Correcting it
+  means moving a phase that `ppu timing` 12 / 12 and the `screen` group
+  currently pin, so this ROM belongs with the picture, not with the sound.
 
 Where a test and the hardware documentation disagree, the decision and its
 evidence are in [docs/known-divergences.md](docs/known-divergences.md), along
@@ -256,13 +260,16 @@ Six pieces, each gated on the test ROMs rather than on looking right:
 | 2 | **The machine** — memory map, MBC1, timer, interrupts, serial, DMA, and the test-ROM scoreboard | done: 85 / 165 |
 | 3 | **The PPU** — background, window, sprites, and the mid-scanline behaviour that makes this hard | done: 106 / 165 |
 | 3b | **A window** — SDL3, so the frame can be seen and the buttons pressed | done |
-| 4 | **Cartridge chips** — MBC2, MBC3 with its clock, MBC5 | next |
-| 5 | **Sound** | |
+| 4 | **Cartridge chips** — MBC2, MBC3 with its clock, MBC5 | done: 126 / 165 |
+| 5 | **Sound** — the four channels, scored against blargg's twelve ROMs | done: 138 / 165 |
+| 5b | **Audible output** — SDL3 audio, so the sound can be heard | in progress |
 | 6 | **In the browser** — the same core compiled to WebAssembly, playable on the site | |
 
-The picture is on screen and the buttons work, so the next milestone is the
-cartridges: of the 59 test ROMs still failing, 19 are refused at the door for
-declaring a cartridge type this build does not support.
+Every cartridge chip is in and the sound unit scores 12 / 12, so what is left
+on the roadmap is making that sound audible and then the browser build. Of the
+27 test ROMs still failing, 26 are `screen` tests and the twenty-seventh —
+`boot_hwio` — is a PPU power-on phase error, so the remaining ROM work is all
+in the picture.
 
 ## Licence
 
