@@ -3,6 +3,7 @@
 namespace fourshades {
 
 bool Timer::tick() {
+    fell_ = 0; // a new M-cycle: last cycle's edges are over
     reloading_ = false;
     bool interrupt = false;
     if (overflowed_) {
@@ -11,8 +12,10 @@ bool Timer::tick() {
         reloading_ = true;
         interrupt = true;
     }
+    const u16 counterBefore = counter_;
     const bool before = input();
     counter_ = static_cast<u16>(counter_ + 4);
+    noteFalls(counterBefore);
     if (before && !input()) {
         increment();
     }
@@ -31,8 +34,10 @@ u8 Timer::read(u16 address) const {
 void Timer::write(u16 address, u8 value) {
     switch (address) {
     case 0xFF04: {
+        const u16 counterBefore = counter_;
         const bool before = input();
         counter_ = 0;
+        noteFalls(counterBefore);
         if (before && !input()) {
             increment();
         }

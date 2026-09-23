@@ -101,3 +101,54 @@ TEST_CASE("during cycle B a TIMA write is ignored and a TMA write lands in TIMA"
     timer.write(0xFF06, 0x77); // lands in TIMA too
     CHECK(timer.read(0xFF05) == 0x77);
 }
+
+TEST_CASE("a falling counter bit is reported on the M-cycle it falls, and not after") {
+    Timer timer;
+    timer.setCounter(0x01FC); // bit 8 set; the next tick carries it out
+    timer.tick();
+    CHECK(timer.counter() == 0x0200);
+    CHECK(timer.counterBitFell(8));
+    timer.tick();
+    CHECK_FALSE(timer.counterBitFell(8)); // the edge belongs to one M-cycle only
+}
+
+TEST_CASE("a rising counter bit is not a falling edge") {
+    Timer timer;
+    timer.setCounter(0x00FC);
+    timer.tick();
+    CHECK(timer.counter() == 0x0100); // bit 8 went 0 -> 1
+    CHECK_FALSE(timer.counterBitFell(8));
+}
+
+TEST_CASE("every bit a DIV write clears falls in that M-cycle") {
+    Timer timer;
+    timer.setCounter(0x1100);
+    timer.tick();
+    CHECK(timer.counter() == 0x1104); // the tick itself crosses nothing
+    CHECK_FALSE(timer.counterBitFell(12));
+    CHECK_FALSE(timer.counterBitFell(8));
+    timer.write(0xFF04, 0x00); // the counter is cleared: 0x1104 -> 0x0000
+    CHECK(timer.counterBitFell(12));
+    CHECK(timer.counterBitFell(8));
+    CHECK(timer.counterBitFell(2));
+    CHECK_FALSE(timer.counterBitFell(0)); // bit 0 was already clear
+    CHECK_FALSE(timer.counterBitFell(15));
+}
+
+TEST_CASE("a counter that crosses nothing reports no falling edge at all") {
+    Timer timer;
+    timer.setCounter(0x0000);
+    timer.tick();
+    CHECK(timer.counter() == 0x0004);
+    for (int bit = 0; bit < 16; ++bit) {
+        INFO("bit " << bit);
+        CHECK_FALSE(timer.counterBitFell(bit));
+    }
+}
+
+TEST_CASE("the same question can be asked of a counter pair held elsewhere") {
+    CHECK(Timer::counterBitFell(0x01FC, 0x0200, 8));
+    CHECK_FALSE(Timer::counterBitFell(0x00FC, 0x0100, 8));
+    CHECK_FALSE(Timer::counterBitFell(0x0200, 0x0204, 8));
+    CHECK(Timer::counterBitFell(0x1104, 0x0000, 12)); // a DIV write's pair
+}
