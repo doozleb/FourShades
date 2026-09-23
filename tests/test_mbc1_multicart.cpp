@@ -146,6 +146,27 @@ TEST_CASE("MBC1 multicart: the fifth bit of the low register is not wired") {
     CHECK(bankAt(cart, 0x4000) == 0x0F);
 }
 
+TEST_CASE("MBC1 multicart: mode 1 also narrows to bits 4-5 in the low region, not just 5-6") {
+    // Pan Docs' MBC1M wiring puts the 2-bit register on bits 4-5 of the bank
+    // number everywhere, not only for 0x4000-0x7FFF: mode 1's mapping of
+    // 0x0000-0x3FFF moves too. An earlier reviewed version of this task
+    // reverted Mbc1::romBank's multicart shift from 4 back to 5, and the
+    // 308-case unit suite (as it stood then) still passed 308/308 — only the
+    // Mooneye multicart test ROM caught it. This case pins the low-region
+    // shift directly: with the ordinary 5-bit shift, bank 0x03 << 5 gives
+    // 0x60 (masked to 0x20 by this ROM's 64-bank count); the multicart's 4-bit
+    // shift gives 0x30.
+    auto rom = makeRom(64, 0x01, 0x05, 0x00); // 1 MiB
+    putLogo(rom, 0x00104);
+    putLogo(rom, 0x40104);
+    putLogo(rom, 0x80104);
+    putLogo(rom, 0xC0104);
+    Cartridge cart = loadOk(rom);
+    cart.write(0x6000, 0x01); // mode 1
+    cart.write(0x4000, 0x03);
+    CHECK(bankAt(cart, 0x0000) == 0x30);
+}
+
 TEST_CASE("MBC1 multicart: the zero substitution reads the full 5-bit register, "
           "not the 4-bit value the bit drop leaves behind") {
     // Mooneye's multicart_rom_8Mb.gb (verified against a genuine MBC1B1 chip)

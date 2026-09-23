@@ -1012,9 +1012,11 @@ moved, SingleStepTests 499/500, every doctest case passing.
 - **The detection rule FourShades uses — a heuristic, not a measurement.**
   `Cartridge::load` (`looksLikeMulticart` in `src/core/Cartridge.cpp`) treats a
   cartridge type of 0x01, 0x02 or 0x03 as a multicart when the ROM is exactly
-  1 MiB (0x100000 bytes) *and* the 48-byte Nintendo logo that every header
-  carries at 0x0104-0x0133 also appears at three or more of the four 256 KiB
-  quarter-boundaries (0x00104, 0x40104, 0x80104, 0xC0104). Pan Docs names the
+  1 MiB (0x100000 bytes) — the header's own declared size after
+  `Cartridge::load` has resized the image to `0x8000 << sizeCode`, not
+  necessarily the file's length on disk — *and* the 48-byte Nintendo logo that
+  every header carries at 0x0104-0x0133 also appears at three or more of the
+  four 256 KiB quarter-boundaries (0x00104, 0x40104, 0x80104, 0xC0104). Pan Docs names the
   same signal for the general case — "These carts can normally be identified
   by having a Nintendo copyright header in bank $10" (same section) — but
   gives no threshold; three of four, not four of four, is FourShades' own
@@ -1075,6 +1077,22 @@ moved, SingleStepTests 499/500, every doctest case passing.
   during the task, in the same spirit as the MBC3 latch entry above, not as a
   live divergence — Pan Docs, the hardware-verified ROM and FourShades all
   agree.
+- **A second, undocumented departure the same review found: mode 1 narrows
+  too.** The task brief for this piece said "everything else, including mode
+  1, is unchanged", but Pan Docs' quoted sentence above puts the 2-bit
+  register on bits 4-5 "of the bank number" without carving out an exception
+  for mode 1's mapping of 0x0000-0x3FFF — the narrowed register drives the
+  whole bank number, not only the 0x4000-0x7FFF half, so mode 1 moves too.
+  `Mbc1::romBank` already did this correctly (`highShift` is 4 for a
+  multicart in both branches of the `address < 0x4000` check), but nothing
+  said so and nothing tested it: the reviewer of this task mutated the
+  multicart shift back to 5 (the ordinary, non-multicart width) and the
+  308-case unit suite still passed 308/308, because no unit test exercised
+  mode 1 on a detected multicart — only Mooneye's hardware-verified multicart
+  ROM caught the mutation, since its own test steps mode 1. Covered now by
+  `tests/test_mbc1_multicart.cpp`'s "mode 1 also narrows to bits 4-5 in the
+  low region, not just 5-6" case, which was verified to fail (bank 0x20
+  instead of the expected 0x30) with the shift temporarily reverted to 5.
 - **Checked:** 2026-09-23.
 
 ## Timing model (not a divergence: where Pan Docs is silent)
