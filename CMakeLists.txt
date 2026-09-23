@@ -29,6 +29,7 @@ add_library(fourshades_core STATIC
     src/core/mbc/Mbc2.cpp
     src/core/mbc/Mbc3.cpp
     src/core/mbc/Mbc5.cpp
+    src/core/mbc/Rtc.cpp
     src/core/Timer.cpp
     src/core/Serial.cpp
     src/core/Joypad.cpp
