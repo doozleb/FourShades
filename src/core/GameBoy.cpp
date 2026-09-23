@@ -34,6 +34,14 @@ void GameBoy::setButtons(u8 pressed) {
 
 void GameBoy::tick() {
     ++cycles_;
+    // The CPU is the only thing that can enter or leave STOP mode, so the
+    // machine learns about it here, at the top of every M-cycle. Pan Docs
+    // (Reducing Power Consumption) calls STOP mode "VERY low power standby
+    // mode"; the PPU is the part of that this models, and it is the part
+    // anyone can see. What the timer, the serial port and the sound chip do
+    // while the machine is stopped is still not modelled: they keep
+    // advancing. See docs/known-divergences.md, the STOP entry.
+    ppu_.setClockStopped(cpu_.state() == Cpu::State::Stopped);
     const u16 before = timer_.counter();
     if (timer_.tick()) {
         if_ = static_cast<u8>(if_ | irq::Timer);

@@ -66,14 +66,16 @@ decision and its date.
     leaves it again on the first step, as the level rule above says.
     (Rewritten 2026-09-22, when the wake-up landed.)
 - **Scored test affected:** `daid/stop_instr.gb (DMG)` is one of the 165
-  scored test ROMs (screen group). It is a screenshot test; with the PPU
-  built (piece 3) it still fails, its image differing from the reference in
-  22,739 of 23,040 pixels as of 2026-09-22 — a whole-screen difference, so
-  what it says about STOP itself is still not being read. The wake-up landing
-  on 2026-09-22 did not move that number by a single pixel, which is all that
-  is known about why it fails: it is not the wake-up alone. (Updated
-  2026-09-22; it previously said the PPU was missing, and before that that
-  the wake-up was what it needed.)
+  scored test ROMs (screen group). It is a screenshot test, and it passes as of
+  2026-09-24, with 0 of 23,040 pixels differing. It had differed in 22,739 of
+  them: the whole-screen difference was that the PPU kept drawing while the
+  machine was stopped, not anything about STOP's decoding, its length or its
+  wake-up (the wake-up landed on 2026-09-22 and did not move the count by a
+  single pixel). See "STOP stops the PPU and blanks the LCD" below. The ROM
+  never reads DIV and does not depend on STOP's length — its second byte is
+  `00` — so it does not arbitrate the divergence above, and the
+  SingleStepTests figure did not move when it started passing. (Updated
+  2026-09-24.)
 - **Also noted by Pan Docs itself:** "stop is often considered a two-byte
   instruction, though the second byte is not always ignored.",
   [CPU Instruction Set](https://gbdev.io/pandocs/CPU_Instruction_Set.html#stop).
@@ -81,6 +83,62 @@ decision and its date.
   STOP behaves differently — the branches listed as still missing above.
 - **Checked:** 2026-09-11; the wake-up re-checked against Pan Docs and
   implemented 2026-09-22.
+
+## STOP stops the PPU and blanks the LCD (decided 2026-09-24)
+
+Pan Docs does not say, in so many words, what a DMG's screen shows while the
+machine sits in STOP mode with the LCD still enabled. Everything around that
+sentence points one way, and a hardware photograph settles it.
+
+- **What Pan Docs says**
+  ([Reducing Power Consumption: Using the STOP Instruction](https://gbdev.io/pandocs/Reducing_Power_Consumption.html#using-the-stop-instruction)):
+  "The STOP instruction is intended to switch the Game Boy into VERY low power
+  standby mode." For CGB it is explicit that the picture goes: "On CGB, leaving
+  the LCD enabled when invoking STOP will result in a black screen. Except if
+  the LCD is in Mode 3, where it will keep drawing the current screen." For DMG
+  it warns only about the opposite order — "On a DMG, disabling the LCD before
+  invoking STOP leaves the LCD enabled, drawing a horizontal black line on the
+  screen and very likely damaging the hardware" — which is the panel left
+  undriven, the same picture as switching the machine off mid-frame.
+- **And what a blank DMG panel reads** ([LCDC](https://gbdev.io/pandocs/LCDC.html)):
+  "When the display is disabled the screen is blank, which on DMG is displayed
+  as a white 'whiter' than color #0." Shade 0 is what FourShades already puts
+  in the frame when LCDC bit 7 is cleared.
+- **The inference, and it is one.** A DMG has one oscillator; the PPU has no
+  clock of its own. Standby stops that clock, so the PPU stops with it and the
+  panel gets no drive, which reads blank. Pan Docs states the stopped picture
+  for CGB and the blank-panel shade for DMG, but never joins them for a DMG
+  with the LCD left on.
+- **The hardware evidence that settles it.** One of the 165 scored ROMs prints
+  its status text, sets BGP so that colour 0 is dark, and enters STOP mode with
+  no button held (screen group; see the entry for it below). Its reference is
+  photographed from a DMG and is 23,040 pixels of shade 0 — an entirely white
+  screen, the text included. Before this change FourShades kept the last frame
+  on the screen and matched 301 of those pixels, exactly the white text; with
+  the PPU stopped and the frame blanked it matches all 23,040.
+- **What FourShades does (2026-09-24).** `GameBoy::tick` tells the PPU, every
+  M-cycle, whether the CPU is in STOP mode. `Ppu::setClockStopped(true)` blanks
+  the frame to shade 0 once, on the edge, and `Ppu::tick` then does nothing at
+  all: no dot runs, no mode changes, no line advances, no frame is counted.
+  Starting the clock again does not clear anything — the PPU picks up on the
+  line and dot it stood on and draws over the blank frame.
+- **HALT is not this.** HALT stops the CPU, not the clock, and Pan Docs' HALT
+  page says nothing about the display; the PPU keeps running and the screen
+  keeps its picture. A unit case pins that, because blanking on HALT too would
+  be the easy mistake.
+- **Not modelled: the rest of the standby.** "VERY low power standby mode"
+  would stop the timer, the serial port and the sound chip as well, and this
+  models only the PPU. They keep advancing while the machine is stopped. No
+  scored test reaches that (the one ROM above reads no counter, and
+  SingleStepTests runs a single instruction per case, so it never steps a
+  stopped CPU), and DIV's reset on STOP is still owed — see the STOP entry
+  above.
+- **This changed nothing about STOP itself.** Not its decoding, not its length,
+  not when it wakes. The SingleStepTests figure was 499/500 before and after,
+  with the same single failure on `10`'s `pc`.
+- **What would overturn this.** A DMG photograph of a machine in STOP mode with
+  the LCD enabled showing anything other than a blank screen, or a Pan Docs
+  sentence that gives the DMG case directly.
 
 ## HALT (0x76): matches Pan Docs
 
@@ -778,10 +836,13 @@ Notes on the ones that are more than "a behaviour not written yet":
     puts it, which would move the seven dots rather than this entry. Until
     one of those exists the seven dots stand as `m3_bgp_change` measures
     them.
-- **`daid/stop_instr` (22739).** Out of scope for this task, which built the
-  PPU. It was recorded here as needing STOP's wake-up; the wake-up landed on
-  2026-09-22 and the count stayed at 22,739 exactly, so that was not the
-  whole story and the failure is undiagnosed. See the STOP entry at the top
+- **`daid/stop_instr` (was 22739, now 0).** Diagnosed and fixed on 2026-09-24:
+  it was not a pixel-pipeline failure at all. The PPU kept drawing while the
+  CPU sat in STOP mode, so the screen held the pre-STOP frame instead of going
+  blank. It was out of scope for the task that built the PPU, and it was
+  recorded here as needing STOP's wake-up; the wake-up landed on 2026-09-22 and
+  the count stayed at 22,739 exactly, which is what pointed at the screen
+  rather than at STOP. See "STOP stops the PPU and blanks the LCD" near the top
   of this file.
 - **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (346).** Neither's
   verdict is diagnosed, and both were failing before the pixel pipeline was
