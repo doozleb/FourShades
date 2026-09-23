@@ -32,6 +32,7 @@ add_library(fourshades_core STATIC
     src/core/mbc/Rtc.cpp
     src/core/apu/Apu.cpp
     src/core/apu/PulseChannel.cpp
+    src/core/apu/FrequencySweep.cpp
     src/core/Timer.cpp
     src/core/Serial.cpp
     src/core/Joypad.cpp

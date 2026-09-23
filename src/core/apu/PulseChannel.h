@@ -22,6 +22,10 @@ public:
     void writeFrequencyLow(u8 value);  // NRx3: the low eight bits
     void writeFrequencyHigh(u8 value); // NRx4: bits 2-0 are the high three
 
+    // All eleven bits at once. Channel 1's sweep writes its new frequency
+    // here, which is the same thing as writing NR13 and NR14.
+    void setFrequency(int frequency);
+
     // Bit 7 of NRx4. Reloads the frequency timer and, from NRx2, the
     // envelope's timer and volume. The duty position is not reset: of the
     // four channels only the wave channel's position is.

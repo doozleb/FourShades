@@ -2,6 +2,7 @@
 
 #include "core/Timer.h"
 #include "core/Types.h"
+#include "core/apu/FrequencySweep.h"
 #include "core/apu/LengthCounter.h"
 #include "core/apu/PulseChannel.h"
 
@@ -56,6 +57,8 @@ public:
 
 private:
     static constexpr u16 kFirst = 0xFF10;     // NR10
+    static constexpr u16 kNr13 = 0xFF13;      // channel 1's frequency, the low byte
+    static constexpr u16 kNr14 = 0xFF14;      // and its high three bits
     static constexpr u16 kNr30 = 0xFF1A;      // the wave channel's DAC bit
     static constexpr u16 kNr42 = 0xFF21;      // the noise channel's envelope
     static constexpr u16 kNr52 = 0xFF26;
@@ -68,6 +71,7 @@ private:
     void clockFromCounter(const Timer& timer);
     void stepSequencer();
     void clockLengths();
+    void clockSweep();
     void clockEnvelopes();
     void tickChannels();
     // FF10-FF19: the two pulse channels' five registers each, which is why
@@ -97,6 +101,9 @@ private:
     };
     std::array<u8, 0x10> wave_{};
     std::array<PulseChannel, 2> pulse_{};
+    // Channel 1's, and only channel 1's: there is no NR20 for channel 2 to
+    // put a second one behind.
+    FrequencySweep sweep_{};
     // Pan Docs' power-up table reads NR52 as 0xF1 on DMG, so channel 1 is
     // already running when the boot ROM hands the machine over. A trigger
     // switches one on, a length counter running out or a DAC going off

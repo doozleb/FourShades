@@ -51,6 +51,10 @@ constexpr int kPulseRegisters = 5;
 // those rates are what the table produces, not three separate timers.
 bool stepClocksLength(int step) { return (step & 1) == 0; }
 
+// Steps 2 and 6, which are also length steps: the sweep runs at half the
+// length counter's rate off the same sequence.
+bool stepClocksSweep(int step) { return step == 2 || step == 6; }
+
 // NR11, NR21, NR31 and NR41: the register whose low bits load a channel's
 // length counter. Returns the mask of the bits that load it, or 0 for the
 // rest. Channel 3 counts to 256, so its load is the whole byte.
@@ -109,11 +113,12 @@ void Apu::stepSequencer() {
     if (stepClocksLength(step)) {
         clockLengths();
     }
+    if (stepClocksSweep(step)) {
+        clockSweep();
+    }
     if (step == 7) {
         clockEnvelopes();
     }
-    // Steps 2 and 6 clock the sweep, which arrives with the channel that
-    // owns it.
 }
 
 void Apu::clockLengths() {
@@ -122,6 +127,20 @@ void Apu::clockLengths() {
             channelOn_[channel] = false;
         }
     }
+}
+
+// Channel 1's sweep, and the two ways it reaches the rest of the APU: it
+// switches the channel off through the same flag every other channel is
+// switched off by, and its new frequency is a write to NR13 and NR14, so the
+// stored bytes follow the channel's frequency.
+void Apu::clockSweep() {
+    if (sweep_.clock(pulse_[0])) {
+        channelOn_[0] = false;
+    }
+    const int frequency = pulse_[0].frequency();
+    nr_[kNr13 - kFirst] = static_cast<u8>(frequency & 0xFF);
+    nr_[kNr14 - kFirst] =
+        static_cast<u8>((nr_[kNr14 - kFirst] & 0xF8) | ((frequency >> 8) & 0x07));
 }
 
 void Apu::clockEnvelopes() {
@@ -261,7 +280,13 @@ void Apu::writePulse(u16 address, u8 value) {
     case 2: channel.writeEnvelope(value); break;
     case 3: channel.writeFrequencyLow(value); break;
     case 4: channel.writeFrequencyHigh(value); break;
-    default: break; // NRx0 is the sweep, which channel 1 does not own yet
+    default:
+        // NR10, the sweep, which only channel 1 has. FF15 -- where channel
+        // 2's would be -- is not a register and never reaches here.
+        if (sweep_.write(value)) {
+            channelOn_[0] = false;
+        }
+        break;
     }
 }
 
@@ -274,6 +299,12 @@ void Apu::trigger(std::size_t channel) {
         pulse_[channel].trigger();
     }
     channelOn_[channel] = dacOn(channel);
+    // Channel 1's sweep takes its copy of the frequency here, and with a
+    // non-zero shift runs its overflow check at once -- so the write that
+    // triggered the channel can be the write that switches it back off.
+    if (channel == 0 && sweep_.trigger(pulse_[0])) {
+        channelOn_[0] = false;
+    }
 }
 
 // Three of the four DACs are off when the top five bits of an envelope
@@ -325,6 +356,9 @@ void Apu::powerOff() {
     for (LengthCounter& length : length_) {
         length.powerOff();
     }
+    // NR10 goes to zero with the rest, and the unit behind it -- shadow
+    // register, timer, enabled flag and the negate latch -- goes with it.
+    sweep_.powerOff();
     powered_ = false;
 }
 

@@ -35,6 +35,10 @@ void PulseChannel::writeFrequencyHigh(u8 value) {
     frequency_ = ((value & 0x07) << 8) | (frequency_ & 0x0FF);
 }
 
+void PulseChannel::setFrequency(int frequency) {
+    frequency_ = frequency & 0x7FF;
+}
+
 void PulseChannel::trigger() {
     timer_ = period();
     envelope_.trigger();
