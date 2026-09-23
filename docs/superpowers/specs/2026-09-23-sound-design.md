@@ -19,6 +19,25 @@ answer 0xFF instead of their real values.
 126 / 165 → **139 / 165**. After this piece every remaining failure in the
 suite is a screen test.
 
+> **Correction, 2026-09-23, after the piece landed.** The four claims above
+> this line are left as they were written, so the record shows what was
+> predicted; what happened is this.
+>
+> The piece landed at **138 / 165**, not 139, and `boot state` stayed at
+> **2 / 3**, not 3 / 3. `boot_hwio-dmgABCmgb` does not fail on sound at all.
+> With every audio register answering correctly it fails at **FF44 — LY**,
+> reading 09 where the ROM wants 0A: about 63 M-cycles of PPU power-on phase
+> error that the unimplemented sound block had been hiding. Fixing it means
+> moving a PPU phase that `ppu timing` 12 / 12 and the `screen` group
+> currently pin, so **`boot_hwio` moved to the screen piece**, where the PPU
+> is being worked on anyway. The same correction is in the plan, dated the
+> same day, made when Task 2 ran.
+>
+> So this piece is **12 ROMs, not 13**, and the sentence "after this piece
+> every remaining failure in the suite is a screen test" is wrong by one:
+> `boot_hwio` remains, and it is a PPU failure. The screen piece picks up 26
+> screen tests plus `boot_hwio` to reach 165.
+
 ## Two stages
 
 Piece 3 built the picture and piece 3b put it in a window. That split worked
