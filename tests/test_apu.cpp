@@ -544,7 +544,12 @@ TEST_CASE("NR50 scales each side by (volume + 1) / 8") {
     CHECK(apu.sample().right == doctest::Approx(without.right));
 }
 
-TEST_CASE("a channel that is off, or whose DAC is off, contributes nothing") {
+TEST_CASE("only a DAC that is off contributes nothing; a channel that is off is +1") {
+    // Pan Docs "Audio Details": "A disabled channel outputs 0, which an
+    // enabled DAC will dutifully convert into 'analog 1'", while a disabled
+    // DAC "fades to an analog value of 0". So the DAC alone decides whether a
+    // channel reaches the mix, and a channel switched off behind a live DAC
+    // is held at the analog +1 that a digital 0 maps to.
     SUBCASE("a DAC that goes off takes its channel's contribution with it") {
         Apu apu;
         hush(apu);
@@ -554,15 +559,18 @@ TEST_CASE("a channel that is off, or whose DAC is off, contributes nothing") {
         CHECK(apu.sample().left == doctest::Approx(0.0f));
         CHECK(apu.sample().right == doctest::Approx(0.0f));
     }
-    SUBCASE("a DAC on with no trigger behind it is still silence") {
+    SUBCASE("a DAC on with no trigger behind it still drives its side to +1") {
         Apu apu;
         hush(apu);
         apu.write(0xFF16, 0x40); // NR21: duty 1, high at position 0
         apu.write(0xFF17, 0xF0); // NR22: volume 15, DAC on -- but no trigger
         REQUIRE((apu.read(0xFF26) & 0x02) == 0);
-        CHECK(apu.sample().left == doctest::Approx(0.0f));
+        // The duty output is high and the volume is 15, so a channel that was
+        // on would be at a digital 15. It is off, so its DAC gets a digital 0.
+        CHECK(apu.sample().left == doctest::Approx(quarter(0)));
+        CHECK(apu.sample().right == doctest::Approx(quarter(0)));
     }
-    SUBCASE("a length counter running out silences the channel") {
+    SUBCASE("a length counter running out steps the channel to +1, not to 0") {
         Timer timer;
         Apu apu;
         hush(apu);
@@ -572,7 +580,12 @@ TEST_CASE("a channel that is off, or whose DAC is off, contributes nothing") {
         REQUIRE(apu.sample().left == doctest::Approx(quarter(15)));
         cycleTo(timer, apu, 0x2000);
         REQUIRE((apu.read(0xFF26) & 0x01) == 0);
-        CHECK(apu.sample().left == doctest::Approx(0.0f));
+        // NR12 is untouched, so the DAC is still on: the channel goes from a
+        // digital 15 to a digital 0, which is the whole analog range in one
+        // step. That step, and the high-pass filter decaying away from it, is
+        // what a length counter running out sounds like.
+        CHECK(apu.sample().left == doctest::Approx(quarter(0)));
+        CHECK(apu.sample().right == doctest::Approx(quarter(0)));
     }
     SUBCASE("a powered-down APU is silent on both sides") {
         Apu apu;

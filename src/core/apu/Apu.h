@@ -73,8 +73,10 @@ public:
 
 private:
     static constexpr u16 kFirst = 0xFF10;     // NR10
+    static constexpr u16 kNr12 = 0xFF12;      // channel 1's envelope, and its DAC
     static constexpr u16 kNr13 = 0xFF13;      // channel 1's frequency, the low byte
     static constexpr u16 kNr14 = 0xFF14;      // and its high three bits
+    static constexpr u16 kNr22 = 0xFF17;      // channel 2's envelope, and its DAC
     static constexpr u16 kNr30 = 0xFF1A;      // the wave channel's DAC bit
     static constexpr u16 kNr42 = 0xFF21;      // the noise channel's envelope
     static constexpr u16 kNr50 = 0xFF24;      // the two master volumes
@@ -114,9 +116,10 @@ private:
     // from.
     void corruptWaveRam();
     void trigger(std::size_t channel);
-    // Whether a channel's DAC is on. A channel whose DAC is off is switched
-    // off and cannot be triggered back on -- that much is true of all four,
-    // so it lives here rather than with the two channels that exist.
+    // Whether a channel's DAC is on, read for all four out of the stored
+    // register byte. A channel whose DAC is off is switched off and cannot be
+    // triggered back on -- that much is true of all four, so it lives here
+    // rather than with the two channels that exist.
     bool dacOn(std::size_t channel) const;
     // Which channel's DAC an address holds, or -1.
     static int dacChannel(u16 address);

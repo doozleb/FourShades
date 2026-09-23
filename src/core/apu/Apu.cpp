@@ -32,6 +32,10 @@ constexpr u8 kReadMask[] = {
     0xBF, // FF23 NR44
     0x00, // FF24 NR50
     0x00, // FF25 NR51
+    // NR52 is never indexed here: read() builds it out of the power bit and
+    // the four channel flags rather than out of a stored byte, and returns
+    // before it reaches this table. The entry stays so the table still covers
+    // the whole range it claims to.
     0x70, // FF26 NR52
 };
 
@@ -385,12 +389,19 @@ u8 Apu::channelLevel(std::size_t channel) const {
     }
 }
 
-// The mixer. Pan Docs "Audio Details": each channel's DAC turns a digital 0
-// into an analog +1 and a digital 15 into an analog -1; a DAC that is off, or
-// a channel that is switched off, is 0 instead, which is what makes turning
-// one off audible. NR51 then routes each channel to the left, the right, both
-// or neither, and NR50's two three-bit volumes scale each side by
-// (volume + 1) / 8.
+// The mixer. Pan Docs "Audio Details": a DAC that is on turns a digital 0 into
+// an analog +1 and a digital 15 into an analog -1 -- the slope is negative --
+// and one that is off "fades to an analog value of 0, which corresponds to
+// 'digital 7.5'". So only a DAC decides whether a channel reaches the mix.
+//
+// A channel that is switched off is not the same thing as a DAC that is off:
+// "a disabled channel outputs 0, which an enabled DAC will dutifully convert
+// into 'analog 1'". It holds its side at +1, not at silence. Switching a
+// channel off is audible because of that step to +1 and the high-pass
+// filter's decay back down from it, not because the contribution vanishes.
+//
+// NR51 then routes each channel to the left, the right, both or neither, and
+// NR50's two three-bit volumes scale each side by (volume + 1) / 8.
 //
 // The sum of four channels within [-1, +1] is divided by four, so a side of
 // this pair is within [-1, +1] too: that is this emulator's unit for a sample
@@ -405,11 +416,13 @@ Apu::Sample Apu::sample() const {
     float right = 0.0f;
     const u8 routing = nr_[kNr51 - kFirst];
     for (std::size_t channel = 0; channel < channelOn_.size(); ++channel) {
-        if (!channelOn_[channel] || !dacOn(channel)) {
+        if (!dacOn(channel)) {
             continue;
         }
-        const float analog =
-            1.0f - static_cast<float>(channelLevel(channel)) / kHalfScale;
+        // A channel that is switched off hands its DAC a digital 0, which the
+        // mapping below turns into the +1 that DAC is still driving.
+        const u8 level = channelOn_[channel] ? channelLevel(channel) : 0;
+        const float analog = 1.0f - static_cast<float>(level) / kHalfScale;
         const unsigned bit = 1u << channel;
         if ((routing & (bit << kLeftShift)) != 0) {
             left += analog;
@@ -441,8 +454,12 @@ void Apu::writePulse(u16 address, u8 value) {
     case 4: channel.writeFrequencyHigh(value); break;
     default:
         // NR10, the sweep, which only channel 1 has. FF15 -- where channel
-        // 2's would be -- is not a register and never reaches here.
-        if (sweep_.write(value)) {
+        // 2's would be -- lands in this same case, because it is five along
+        // from NR10, and both callers filter it out two frames further up.
+        // The address is checked here as well rather than relying on that:
+        // a gap reaching the sweep would rewrite channel 1's shadow frequency
+        // and could switch channel 1 off.
+        if (offset == 0 && sweep_.write(value)) {
             channelOn_[0] = false;
         }
         break;
@@ -479,12 +496,15 @@ void Apu::trigger(std::size_t channel) {
 
 // Three of the four DACs are off when the top five bits of an envelope
 // register are zero. The wave channel has no envelope, so its DAC is a bit of
-// its own: NR30 bit 7.
+// its own: NR30 bit 7. All four are read out of the stored byte and nowhere
+// else, so there is no second copy of a DAC bit to fall out of step with the
+// register -- clockSweep already writes nr_ without going through a channel.
 bool Apu::dacOn(std::size_t channel) const {
     switch (channel) {
+    case 0: return (nr_[kNr12 - kFirst] & 0xF8) != 0;
+    case 1: return (nr_[kNr22 - kFirst] & 0xF8) != 0;
     case 2: return (nr_[kNr30 - kFirst] & 0x80) != 0;
-    case 3: return (nr_[kNr42 - kFirst] & 0xF8) != 0;
-    default: return pulse_[channel].dacOn();
+    default: return (nr_[kNr42 - kFirst] & 0xF8) != 0;
     }
 }
 

@@ -10,9 +10,10 @@ namespace fourshades {
 // frequency sweep on top of this and channel 2 does not; nothing else differs,
 // so this is one type used twice.
 //
-// The length counter and the channel-enabled flag are deliberately not here.
-// All four channels have them, so the APU owns them for all four and this
-// class answers the one question they need of it: whether the DAC is on.
+// The length counter, the channel-enabled flag and the DAC are deliberately
+// not here. All four channels have them, so the APU owns them for all four --
+// and it reads every DAC out of the stored register byte, so there is no
+// second copy of NRx2's top five bits here to fall out of step with it.
 class PulseChannel {
 public:
     // NRx1 bits 7-6. The rest of the byte is the length load, which belongs
@@ -41,11 +42,6 @@ public:
     // back to everything those registers describe being zero.
     void powerOff();
 
-    // The DAC is off when the top five bits of NRx2 are zero -- volume zero
-    // counting down. Turning it off switches the channel off; turning it on
-    // does not switch the channel on, and a trigger with it off is refused.
-    bool dacOn() const { return dacOn_; }
-
     int frequency() const { return frequency_; }
     int position() const { return position_; }
     bool dutyOutput() const;
@@ -63,7 +59,6 @@ private:
     int frequency_ = 0;
     int position_ = 0;
     int timer_ = kMaxPeriod;
-    bool dacOn_ = false;
     VolumeEnvelope envelope_;
 };
 
