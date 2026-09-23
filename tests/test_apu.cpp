@@ -361,3 +361,226 @@ TEST_CASE("the frame sequencer clocks length on four of its eight steps") {
     cycleTo(timer, apu, 0x2000);
     CHECK((apu.read(0xFF26) & 0x01) == 0);
 }
+
+// ---------------------------------------------------------------------------
+// The mixer: NR50, NR51 and what Apu::sample() hands the output stage.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr u16 kNr50 = 0xFF24;
+constexpr u16 kNr51 = 0xFF25;
+
+// Pan Docs "Audio Details -- DACs": "a digital value of $0 is transformed
+// into an analog +1 and a value of $F into an analog -1", linearly between.
+float dac(int level) { return 1.0f - static_cast<float>(level) / 7.5f; }
+
+// The mix divides by the four channels, so one channel alone, with both sides
+// at full master volume, comes to this.
+float quarter(int level) { return dac(level) / 4.0f; }
+
+// Every channel off, both sides at full volume, every channel routed to both.
+// The state each mixer case switches exactly what it is about back on from:
+// the boot ROM leaves channel 1 playing, so its DAC has to go first.
+void hush(Apu& apu) {
+    apu.write(0xFF12, 0x00); // NR12: channel 1's DAC, and the channel with it
+    apu.write(0xFF17, 0x00); // NR22
+    apu.write(0xFF1A, 0x00); // NR30
+    apu.write(0xFF21, 0x00); // NR42
+    apu.write(kNr50, 0x77);
+    apu.write(kNr51, 0xFF);
+}
+
+// Channel 1 or 2 at a known digital level. Duty 1 is high at position 0 and
+// duty 0 is low there, and a fresh APU that has not been ticked is at
+// position 0, so `high` picks between a level of `volume` and a level of 0.
+void startPulse(Apu& apu, int channel, u8 volume, bool high) {
+    const u16 base = channel == 0 ? 0xFF10 : 0xFF15;
+    apu.write(static_cast<u16>(base + 1), high ? 0x40 : 0x00);
+    apu.write(static_cast<u16>(base + 2), static_cast<u8>(volume << 4));
+    apu.write(static_cast<u16>(base + 4), 0x80);
+}
+
+// Channel 3 with 0xF in its sample buffer: wave RAM all ones, the shortest
+// period, and four M-cycles for it to read one.
+void startWave(Apu& apu, Timer& timer, u8 outputLevel) {
+    for (u16 address = 0xFF30; address <= 0xFF3F; ++address) {
+        apu.write(address, 0xFF);
+    }
+    apu.write(0xFF1A, 0x80);                              // NR30: the DAC
+    apu.write(0xFF1C, static_cast<u8>(outputLevel << 5)); // NR32
+    apu.write(0xFF1D, 0xFF);                              // NR33
+    apu.write(0xFF1E, 0x87);                              // NR34: frequency 2047, trigger
+    for (int mCycle = 0; mCycle < 4; ++mCycle) {
+        cycle(timer, apu);
+    }
+}
+
+// Channel 4 after `steps` LFSR steps. NR43 zero is a period of eight
+// T-cycles, which is two M-cycles a step.
+void startNoise(Apu& apu, Timer& timer, u8 volume, int steps) {
+    apu.write(0xFF22, 0x00);                         // NR43
+    apu.write(0xFF21, static_cast<u8>(volume << 4)); // NR42
+    apu.write(0xFF23, 0x80);                         // NR44: trigger
+    for (int mCycle = 0; mCycle < steps * 2; ++mCycle) {
+        cycle(timer, apu);
+    }
+}
+
+} // namespace
+
+TEST_CASE("each channel reaches the mix through its own DAC") {
+    // One channel at a time, at a digital level only it can be producing.
+    SUBCASE("channel 1") {
+        Apu apu;
+        hush(apu);
+        startPulse(apu, 0, 15, true); // duty high, volume 15
+        CHECK(apu.sample().left == doctest::Approx(quarter(15)));
+        CHECK(apu.sample().right == doctest::Approx(quarter(15)));
+    }
+    SUBCASE("channel 2") {
+        Apu apu;
+        hush(apu);
+        startPulse(apu, 1, 9, true);
+        CHECK(apu.sample().left == doctest::Approx(quarter(9)));
+    }
+    SUBCASE("channel 3") {
+        Timer timer;
+        Apu apu;
+        hush(apu);
+        startWave(apu, timer, 2); // output level 2: the sample shifted right by 1
+        REQUIRE(apu.wave().sample() == 0x0F);
+        CHECK(apu.sample().left == doctest::Approx(quarter(7)));
+    }
+    SUBCASE("channel 4") {
+        Timer timer;
+        Apu apu;
+        hush(apu);
+        // Fifteen steps is the first one that leaves bit 0 of the LFSR clear,
+        // and the output is the inverted bit 0.
+        startNoise(apu, timer, 12, 15);
+        REQUIRE(apu.noise().output());
+        CHECK(apu.sample().left == doctest::Approx(quarter(12)));
+    }
+    SUBCASE("all four at once") {
+        Apu apu;
+        hush(apu);
+        startPulse(apu, 0, 15, false); // duty low: a digital zero
+        startPulse(apu, 1, 15, false);
+        apu.write(0xFF1A, 0x80); // channel 3's DAC ...
+        apu.write(0xFF1E, 0x80); // ... and a trigger, with an empty buffer
+        apu.write(0xFF21, 0xF0); // channel 4's DAC ...
+        apu.write(0xFF23, 0x80); // ... and a trigger, with the LFSR all ones
+        REQUIRE(apu.read(0xFF26) == 0xFF);
+        CHECK(apu.sample().left == doctest::Approx(4.0f * quarter(0)));
+        CHECK(apu.sample().right == doctest::Approx(4.0f * quarter(0)));
+    }
+}
+
+TEST_CASE("NR51 routes each channel to the left, the right, both or neither") {
+    // Pan Docs, NR51: bits 0-3 are the four channels on the right and bits
+    // 4-7 the same four on the left.
+    struct Case {
+        int channel;
+        u8 flag; // the channel's bit within a nibble
+    };
+    const std::vector<Case> channels = {{0, 0x01}, {1, 0x02}, {2, 0x04}, {3, 0x08}};
+    for (const Case& entry : channels) {
+        CAPTURE(entry.channel);
+        Timer timer;
+        Apu apu;
+        hush(apu);
+        switch (entry.channel) {
+        case 0: startPulse(apu, 0, 15, true); break;
+        case 1: startPulse(apu, 1, 15, true); break;
+        case 2: startWave(apu, timer, 1); break; // the sample, unshifted
+        default: startNoise(apu, timer, 15, 15); break;
+        }
+        const float one = quarter(15);
+
+        apu.write(kNr51, static_cast<u8>(entry.flag << 4)); // left alone
+        CHECK(apu.sample().left == doctest::Approx(one));
+        CHECK(apu.sample().right == doctest::Approx(0.0f));
+
+        apu.write(kNr51, entry.flag); // right alone
+        CHECK(apu.sample().left == doctest::Approx(0.0f));
+        CHECK(apu.sample().right == doctest::Approx(one));
+
+        apu.write(kNr51, static_cast<u8>((entry.flag << 4) | entry.flag));
+        CHECK(apu.sample().left == doctest::Approx(one));
+        CHECK(apu.sample().right == doctest::Approx(one));
+
+        apu.write(kNr51, static_cast<u8>(~((entry.flag << 4) | entry.flag)));
+        CHECK(apu.sample().left == doctest::Approx(0.0f));
+        CHECK(apu.sample().right == doctest::Approx(0.0f));
+    }
+}
+
+TEST_CASE("NR50 scales each side by (volume + 1) / 8") {
+    // Pan Docs, NR50: bits 6-4 are the left master volume and bits 2-0 the
+    // right. "A value of 0 is treated as a volume of 1 (very quiet) and a
+    // value of 7 is treated as a volume of 8 (no volume reduction)."
+    Apu apu;
+    hush(apu);
+    startPulse(apu, 0, 15, true);
+    const float one = quarter(15);
+    for (int left = 0; left < 8; ++left) {
+        for (int right = 0; right < 8; ++right) {
+            CAPTURE(left);
+            CAPTURE(right);
+            apu.write(kNr50, static_cast<u8>((left << 4) | right));
+            CHECK(apu.sample().left ==
+                  doctest::Approx(one * static_cast<float>(left + 1) / 8.0f));
+            CHECK(apu.sample().right ==
+                  doctest::Approx(one * static_cast<float>(right + 1) / 8.0f));
+        }
+    }
+    // Bit 7 and bit 3 are the Vin mixers. Nothing in the cartridges this
+    // emulator runs drives that pin, so setting them changes nothing.
+    apu.write(kNr50, 0x77);
+    const Apu::Sample without = apu.sample();
+    apu.write(kNr50, 0xFF);
+    CHECK(apu.sample().left == doctest::Approx(without.left));
+    CHECK(apu.sample().right == doctest::Approx(without.right));
+}
+
+TEST_CASE("a channel that is off, or whose DAC is off, contributes nothing") {
+    SUBCASE("a DAC that goes off takes its channel's contribution with it") {
+        Apu apu;
+        hush(apu);
+        startPulse(apu, 0, 15, true);
+        REQUIRE(apu.sample().left == doctest::Approx(quarter(15)));
+        apu.write(0xFF12, 0x00);
+        CHECK(apu.sample().left == doctest::Approx(0.0f));
+        CHECK(apu.sample().right == doctest::Approx(0.0f));
+    }
+    SUBCASE("a DAC on with no trigger behind it is still silence") {
+        Apu apu;
+        hush(apu);
+        apu.write(0xFF16, 0x40); // NR21: duty 1, high at position 0
+        apu.write(0xFF17, 0xF0); // NR22: volume 15, DAC on -- but no trigger
+        REQUIRE((apu.read(0xFF26) & 0x02) == 0);
+        CHECK(apu.sample().left == doctest::Approx(0.0f));
+    }
+    SUBCASE("a length counter running out silences the channel") {
+        Timer timer;
+        Apu apu;
+        hush(apu);
+        startPulse(apu, 0, 15, true);
+        apu.write(0xFF11, 0x7F); // NR11: duty 1 still, one length step left
+        apu.write(0xFF14, 0xC0); // length enabled, and triggered again
+        REQUIRE(apu.sample().left == doctest::Approx(quarter(15)));
+        cycleTo(timer, apu, 0x2000);
+        REQUIRE((apu.read(0xFF26) & 0x01) == 0);
+        CHECK(apu.sample().left == doctest::Approx(0.0f));
+    }
+    SUBCASE("a powered-down APU is silent on both sides") {
+        Apu apu;
+        hush(apu);
+        startPulse(apu, 0, 15, true);
+        REQUIRE(apu.sample().left == doctest::Approx(quarter(15)));
+        powerOff(apu);
+        CHECK(apu.sample().left == doctest::Approx(0.0f));
+        CHECK(apu.sample().right == doctest::Approx(0.0f));
+    }
+}

@@ -92,7 +92,7 @@ TEST_CASE("the 32 samples are read in order, high nibble first, and wrap") {
     // upper nibble." The index is reset to 0 by the trigger and the channel
     // reads only after it increments.
     CHECK(channel.position() == 0);
-    channel.tick(2 + kTriggerDelay, wave);
+    channel.tick(2 + kTriggerDelay, wave, true);
     for (int sample = 1; sample <= 64; ++sample) {
         const int index = sample & 31;
         CAPTURE(sample);
@@ -102,7 +102,7 @@ TEST_CASE("the 32 samples are read in order, high nibble first, and wrap") {
         const u8 expected = (index % 2 == 0) ? static_cast<u8>(byte >> 4)
                                              : static_cast<u8>(byte & 0x0F);
         CHECK(channel.sample() == expected);
-        channel.tick(2, wave);
+        channel.tick(2, wave, true);
     }
 }
 
@@ -120,18 +120,18 @@ TEST_CASE("the frequency timer period is (2048 - frequency) * 2") {
         channel.trigger();
         // One T-cycle short of the first period, the channel has not read yet.
         for (int cycle = 0; cycle < period + kTriggerDelay - 1; ++cycle) {
-            channel.tick(1, wave);
+            channel.tick(1, wave, true);
         }
         CHECK(channel.position() == 0);
-        channel.tick(1, wave);
+        channel.tick(1, wave, true);
         CHECK(channel.position() == 1);
         // And the second sample is one plain period after the first: only the
         // period a trigger starts carries the extra six T-cycles.
         for (int cycle = 0; cycle < period - 1; ++cycle) {
-            channel.tick(1, wave);
+            channel.tick(1, wave, true);
         }
         CHECK(channel.position() == 1);
-        channel.tick(1, wave);
+        channel.tick(1, wave, true);
         CHECK(channel.position() == 2);
     }
 }
@@ -149,8 +149,8 @@ TEST_CASE("the four output levels shift the sample by 4, 0, 1 and 2") {
         channel.writeFrequencyLow(0xFF);
         channel.writeFrequencyHigh(0x07);
         channel.trigger();
-        channel.tick(2 + kTriggerDelay, wave); // index 1: the low nibble, 0x0
-        channel.tick(2, wave);                 // index 2: a high nibble, 0xC
+        channel.tick(2 + kTriggerDelay, wave, true); // index 1: the low nibble, 0x0
+        channel.tick(2, wave, true);                 // index 2: a high nibble, 0xC
         REQUIRE(channel.sample() == 0x0C);
         CHECK(channel.output() == static_cast<u8>(0x0C >> shifts[static_cast<std::size_t>(level)]));
     }
@@ -341,4 +341,105 @@ TEST_CASE("powering the APU down clears the wave channel's registers") {
     }
     apu.write(kNr52, 0x80);
     CHECK(apu.wave().sample() == 0x0);
+}
+
+TEST_CASE("the wave RAM window is a T-cycle of the M-cycle, not of the tick call") {
+    // `readingNow()` means "the channel's read coincided with the CPU's
+    // access", and the CPU's access is the last T-cycle of an M-cycle. That
+    // has to stay true however the caller divides an M-cycle up: a channel
+    // ticked one T-cycle at a time must not report a window on each of its
+    // reads, and one ticked two T-cycles at a time must not report one on the
+    // second T-cycle of an M-cycle.
+    const std::array<u8, 16> wave = pattern();
+
+    SUBCASE("one T-cycle at a time: only every fourth T-cycle can be a window") {
+        WaveChannel channel;
+        channel.writeFrequencyLow(0xFF);
+        channel.writeFrequencyHigh(0x07); // frequency 2047: two T-cycles a sample
+        channel.trigger();
+        int previous = channel.position();
+        for (int tCycle = 1; tCycle <= 40; ++tCycle) {
+            CAPTURE(tCycle);
+            channel.tick(1, wave, true);
+            const bool read = channel.position() != previous;
+            previous = channel.position();
+            CHECK(channel.readingNow() == (read && tCycle % 4 == 0));
+        }
+    }
+
+    SUBCASE("two T-cycles at a time: the first half of an M-cycle is never one") {
+        WaveChannel channel;
+        channel.writeFrequencyLow(0xFF);
+        channel.writeFrequencyHigh(0x07);
+        channel.trigger();
+        // The trigger's period is 2 + 6 = 8 T-cycles, so the first read is on
+        // the last T-cycle of the second M-cycle and the second read is on the
+        // second T-cycle of the third -- a read either way, a window only once.
+        for (int half = 0; half < 3; ++half) {
+            CAPTURE(half);
+            channel.tick(2, wave, true);
+            CHECK_FALSE(channel.readingNow());
+        }
+        channel.tick(2, wave, true); // T-cycles 7 and 8: the read is on the 8th
+        REQUIRE(channel.position() == 1);
+        CHECK(channel.readingNow());
+        channel.tick(2, wave, true); // 9 and 10: a read on the 10th, halfway in
+        REQUIRE(channel.position() == 2);
+        CHECK_FALSE(channel.readingNow());
+    }
+
+    SUBCASE("four at a time and one at a time agree at every M-cycle boundary") {
+        WaveChannel whole;
+        WaveChannel split;
+        for (WaveChannel* channel : {&whole, &split}) {
+            channel->writeFrequencyLow(static_cast<u8>(kPeriodSix & 0xFF));
+            channel->writeFrequencyHigh(static_cast<u8>((kPeriodSix >> 8) & 0x07));
+            channel->trigger();
+        }
+        for (int mCycle = 1; mCycle <= 24; ++mCycle) {
+            CAPTURE(mCycle);
+            whole.tick(4, wave, true);
+            for (int tCycle = 0; tCycle < 4; ++tCycle) {
+                split.tick(1, wave, true);
+            }
+            CHECK(split.position() == whole.position());
+            CHECK(split.readingNow() == whole.readingNow());
+        }
+    }
+}
+
+TEST_CASE("a channel 3 that is switched off stops reading wave RAM") {
+    // Pan Docs, NR34: "the last sample ever read from wave RAM is output
+    // until the channel next reads a sample" -- which holds only because a
+    // channel that is not playing does not read. A switched-off channel 3
+    // leaves its position and its sample buffer where they were.
+    Timer timer;
+    Apu apu;
+    loadWave(apu, pattern());
+    start(apu, kPeriodFour);
+    cycles(timer, apu, 4);
+    REQUIRE(channelOn(apu));
+    const int position = apu.wave().position();
+    const u8 sample = apu.wave().sample();
+    REQUIRE(position != 0);
+
+    apu.write(kNr30, 0x00); // the DAC goes, and the channel with it
+    REQUIRE_FALSE(channelOn(apu));
+    // 45 M-cycles, not a multiple of the 32 samples: a channel that kept
+    // reading would be somewhere else by now rather than back where it was.
+    cycles(timer, apu, 45);
+    CHECK(apu.wave().position() == position);
+    CHECK(apu.wave().sample() == sample);
+
+    // Bringing the DAC back does not start it reading either: only a trigger
+    // does, and then it reads from index 1 again.
+    apu.write(kNr30, 0x80);
+    cycles(timer, apu, 45);
+    CHECK(apu.wave().position() == position);
+    CHECK(apu.wave().sample() == sample);
+    apu.write(kNr34, 0x80 | 0x07);
+    CHECK(apu.wave().position() == 0);
+    CHECK(apu.wave().sample() == sample); // still the buffer from before
+    cycles(timer, apu, 4);
+    CHECK(apu.wave().position() != 0);
 }
