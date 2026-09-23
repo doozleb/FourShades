@@ -42,7 +42,7 @@ void GameBoy::tick() {
         if_ = static_cast<u8>(if_ | irq::Serial);
     }
     if_ = static_cast<u8>(if_ | ppu_.tick());
-    apu_.tick();
+    apu_.tick(timer_);
     // The cartridge's own clock, if it has one. Nothing above or below
     // depends on it, and nothing it does depends on them.
     cart_.tick();
@@ -240,7 +240,13 @@ void GameBoy::writeIo(u16 address, u8 value) {
     case 0xFF04:
     case 0xFF05:
     case 0xFF06:
-    case 0xFF07: timer_.write(address, value); break;
+    case 0xFF07:
+        timer_.write(address, value);
+        // Clearing the system counter can drop the bit the sound frame
+        // sequencer hangs off, and this write lands after the APU has already
+        // been ticked for this M-cycle, so it has to ask again.
+        apu_.counterWritten(timer_);
+        break;
     case 0xFF0F: if_ = static_cast<u8>(value & 0x1F); break;
     case 0xFF46:
         dmaRegister_ = value;

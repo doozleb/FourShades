@@ -42,6 +42,9 @@ public:
     Ppu& ppu() { return ppu_; }
     const Ppu& ppu() const { return ppu_; }
 
+    Apu& apu() { return apu_; }
+    const Apu& apu() const { return apu_; }
+
     // The cartridge in the slot. Whatever owns the machine needs this to
     // restore battery-backed RAM before the game runs and to read it back
     // afterwards; the machine itself neither knows nor cares whether anyone
