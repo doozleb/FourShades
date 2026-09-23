@@ -33,6 +33,15 @@ bool AppController::reset() {
         // the same cartridge's own, so it cannot fail here.
         cartridge.setRam(gameBoy_->cartridge().ram());
     }
+    if (gameBoy_->cartridge().hasTimer()) {
+        // The same battery keeps the clock running, which is the entire
+        // reason an MBC3 cartridge has one: a clock that went back to
+        // midnight every time the machine was switched off and on again
+        // would be no clock at all. Both copies go across, live and latched,
+        // because the program may be part-way through reading the latched
+        // one.
+        cartridge.setRtcState(gameBoy_->cartridge().rtcState());
+    }
     gameBoy_.emplace(std::move(cartridge));
     lastError_.clear();
     return true;
