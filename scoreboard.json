@@ -85,7 +85,7 @@
         "total": 30,
         "first_failure": {
           "test": "mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG)",
-          "reason": "differs from the reference in 3076 pixels"
+          "reason": "differs from the reference in 2104 pixels"
         }
       },
       {

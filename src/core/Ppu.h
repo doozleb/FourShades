@@ -69,6 +69,13 @@ public:
     // OAM DMA owns the bus while it runs, so it is never blocked.
     void dmaWriteOam(int index, u8 value) { oam_[static_cast<std::size_t>(index)] = value; }
 
+    // The contents power-on finds in VRAM. A freshly built Ppu has none: VRAM
+    // is zeroed, which is the state after the boot ROM's own clearing loop and
+    // before its drawing. What a whole machine's boot ROM leaves on top of
+    // that is GameBoy's business, and it puts it here. No bus cycle happens at
+    // power-on, so this is not a bus write: nothing blocks it.
+    void powerOnVramWrite(u16 address, u8 value) { vram_[address - 0x8000] = value; }
+
     // The debugger and harness view: never blocked, no side effects.
     u8 peekVram(u16 address) const { return vram_[address - 0x8000]; }
     u8 peekOam(u16 address) const { return oam_[address - 0xFE00]; }

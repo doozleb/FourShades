@@ -244,8 +244,9 @@ LY or STAT a fixed number of M-cycles after $0100 depends on it.
   is otherwise green, and the only assertion that moves is the one that names
   356 itself. 356 is recorded
   here as the value that was tried first and measured, and
-  `tests/test_ppu.cpp`'s "the PPU's power-on phase is the measured one, and
-  M-cycle aligned" pins it so that a future change to it is deliberate. The
+  `tests/test_ppu.cpp`'s "the PPU's power-on phase is the value chosen inside
+  the solved band, and M-cycle aligned" pins it so that a future change to it
+  is deliberate. The
   two constraints the ROM actually imposes are pinned separately, by M-cycle
   count rather than by the ROM's name, in "the power-on phase puts mode 0 at
   1139 M-cycles and LY 0x0A at 1190".
@@ -270,6 +271,65 @@ LY or STAT a fixed number of M-cycles after $0100 depends on it.
   rather than by the DMA the test is about. It now switches the LCD off first,
   exactly as its WRAM-source sibling immediately above it already did for the
   same reason. No assertion in it changed.
+- **Checked:** 2026-09-24.
+
+## The VRAM the boot ROM leaves behind: where Pan Docs is silent (2026-09-24)
+
+Not a divergence. Pan Docs documents the behaviour and FourShades now follows
+it; what Pan Docs does not give is *where* in VRAM the result lands, and that
+had to come from the boot ROM's own published code.
+
+- **Pan Docs:** [Power Up Sequence](https://gbdev.io/pandocs/Power_Up_Sequence.html)
+  says "The monochrome boot ROMs read the logo from the header, unpack it into
+  VRAM, and then start slowly scrolling it down", and gives the register values
+  that go with it - LCDC $91, BGP $FC, SCX $00, SCY $00, all of which this core
+  already had. It gives no addresses, no unpacking rule and nothing about the
+  background map.
+- **Where the rest came from:** the DMG boot ROM's own code, as disassembled at
+  [gbdev.gg8.se](https://gbdev.gg8.se/wiki/articles/Gameboy_Bootstrap_ROM).
+  $0021-$0032 walks the 48 header bytes at $0104-$0133 with HL starting at
+  $8010. The routine at $0095 doubles each of a nibble's four bits into two and
+  stores the result twice, two addresses apart, then leaves HL four on - which
+  is why only bit plane 0 is written, two tile rows at a time, and the logo
+  comes out in colour 1 (black under BGP = $FC). Two header bytes therefore
+  fill one tile, and 48 fill tiles $01-$18 from $8010 to $818F, twelve across
+  and two down. $0034 copies eight bytes of the boot ROM's *own* data the same
+  way - the (R) glyph, `3C 42 B9 A5 B9 A5 42 3C` - into tile $19 at $8190.
+  $0040-$0053 writes the background map: $01-$0C at $9904-$990F, $0D-$18 at
+  $9924-$992F, and the glyph at $9910, beside the top row. Everything else in
+  VRAM stays zero, because the boot ROM clears all of it at $0004 first.
+- **Derived from the cartridge, never stored here.** The 48 bytes are read
+  through `Cartridge::read`, from the cartridge in the slot, because that is
+  where the hardware reads them: the boot ROM unpacks them and only *afterwards*
+  compares them against its own copy. A cartridge whose logo area holds
+  something else therefore leaves something else in VRAM, and
+  `tests/test_gameboy.cpp`'s "the logo in VRAM follows the cartridge, byte for
+  byte" pins that. The (R) glyph and the map entries are the boot ROM's data,
+  not the cartridge's, and do not move with the header.
+- **What is not modelled: the comparison.** A DMG whose cartridge fails the
+  logo check hangs inside the boot ROM at $00E9 and never reaches $0100.
+  FourShades runs no boot ROM and starts every cartridge at $0100, so the
+  post-boot VRAM it gives a cartridge with a wrong logo is a state no DMG would
+  ever display. Nothing in the suite depends on the lockup.
+- **Effect.** Test ROMs stay at 140 of 165, but eleven screenshot counts moved
+  and none got worse:
+  - `ashiepaws/bully` stops at neither of its two VRAM subtests now - "Invalid
+    initial tile data" and "Invalid initial map data" - and fails a later one,
+    "DMA bus conflict always reads $FF", so its count rose from 346 to 421
+    differing pixels: a longer message on screen, further into the chain. Both
+    messages were read off the frames in `build/frames`, with the seeding
+    disabled and then enabled. It still fails, so the suite total does not
+    move; what the new subtest wants is not diagnosed here.
+  - Nine Mealybug tests and `daid/ppu_scanline_bgp` improved, and the `screen`
+    group's total error fell from 50,889 differing pixels to 47,799. The reason
+    is visible in the references: `m3_obp0_change` and `m3_lcdc_bg_map_change`
+    both draw objects whose tile is $19, the (R) glyph, and neither ROM ever
+    writes tile data for it - they were captured on hardware that still had the
+    boot ROM's VRAM, and FourShades was drawing those objects from zeros. The
+    per-test counts in "Screenshot tests still failing once the pixel pipeline
+    was finished" below are the post-change ones.
+  - SingleStepTests unchanged at 499/500, and every non-`screen` group
+    unchanged.
 - **Checked:** 2026-09-24.
 
 ## OAM DMA bus conflicts: resolved in favour of the hardware-verified tests (2026-09-11)
@@ -702,25 +762,25 @@ records for `m3_lcdc_win_en_change_multiple`.
 | `m3_window_timing` | 28 | the WX < 7 window start costs the wrong number of dots |
 | `ashiepaws/strikethrough` | 53 | not diagnosed |
 | `m3_scx_high_5_bits` | 80 | one background tile per affected line takes the wrong SCX |
-| `m3_lcdc_obj_en_change` | 146 | mid-line LCDC bit 1 changes |
+| `m3_lcdc_obj_en_change` | 100 | mid-line LCDC bit 1 changes |
+| `m3_obp0_change` | 108 | object pixels in the leftmost 18 columns |
 | `m3_wx_4_change` | 229 | window re-activation |
 | `m3_lcdc_obj_size_change_scx` | 270 | mid-line LCDC bit 2 changes |
-| `ashiepaws/bully` | 346 | not diagnosed; two subtests deep (see below) |
+| `m3_lcdc_bg_map_change` | 316 | mid-line LCDC bit 3 changes |
+| `m3_scx_low_3_bits` | 324 | mid-line SCX changes inside the fetch |
 | `m3_lcdc_obj_size_change` | 410 | mid-line LCDC bit 2 changes; 60 worse under the seven-dot shift, cause unknown (see below) |
-| `m3_obp0_change` | 432 | object pixels in the leftmost 18 columns |
-| `m3_scx_low_3_bits` | 540 | mid-line SCX changes inside the fetch |
-| `m3_lcdc_obj_en_change_variant` | 578 | mid-line LCDC bit 1 changes |
+| `ashiepaws/bully` | 421 | fails "DMA bus conflict always reads $FF"; the power-on VRAM subtests pass (see above) |
+| `m3_lcdc_obj_en_change_variant` | 532 | mid-line LCDC bit 1 changes |
 | `m3_window_timing_wx_0` | 584 | the WX < 7 window start costs the wrong number of dots |
 | `m3_wx_5_change` | 638 | window re-activation |
-| `m3_lcdc_bg_map_change` | 714 | mid-line LCDC bit 3 changes |
+| `m3_lcdc_tile_sel_change` | 688 | mid-line LCDC bit 4 changes |
 | `m3_lcdc_bg_en_change` | 855 | mid-line LCDC bit 0 changes |
-| `m3_lcdc_tile_sel_change` | 1070 | mid-line LCDC bit 4 changes |
 | `m3_scy_change` | 1256 | mid-line SCY changes inside the fetch |
-| `m3_lcdc_win_map_change` | 2044 | mid-line LCDC bit 6 changes |
-| `m3_lcdc_tile_sel_win_change` | 2286 | mid-line LCDC bit 4 changes, with a window |
-| `m3_bgp_change_sprites` | 3076 | as `m3_bgp_change`, plus objects |
+| `m3_lcdc_win_map_change` | 1646 | mid-line LCDC bit 6 changes |
+| `m3_lcdc_tile_sel_win_change` | 1904 | mid-line LCDC bit 4 changes, with a window |
+| `m3_bgp_change_sprites` | 2104 | as `m3_bgp_change`, plus objects |
 | `m3_lcdc_win_en_change_multiple_wx` | 5942 | window re-activation (LCDC bit 5) |
-| `daid/ppu_scanline_bgp` | 7187 | disagrees with the Mealybug references by 12 dots |
+| `daid/ppu_scanline_bgp` | 7186 | disagrees with the Mealybug references by 12 dots |
 | `m3_lcdc_win_en_change_multiple` | 8316 | window re-activation (LCDC bit 5) |
 | `m3_wx_6_change` | 13799 | WX = 6 is not a one-pixel shift of WX = 7 |
 | `daid/stop_instr` | 22739 | undiagnosed; the wake-up landed 2026-09-22 and the count did not move |
@@ -844,11 +904,11 @@ Notes on the ones that are more than "a behaviour not written yet":
   the count stayed at 22,739 exactly, which is what pointed at the screen
   rather than at STOP. See "STOP stops the PPU and blanks the LCD" near the top
   of this file.
-- **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (346).** Neither's
+- **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (421).** Neither's
   verdict is diagnosed, and both were failing before the pixel pipeline was
   finished and still are. Their counts did not both stand still, though, and an
   earlier version of this entry said they did. `strikethrough` has been 53
-  throughout. `bully` has been 346, then 290, then 346 again:
+  throughout. `bully` has been 346, then 290, then 346 again, then 421:
   - it was 346 until the first power-on change (the PPU starting at line 153 in
     mode 1 rather than line 0 in mode 2) took it to 290 - measured on
     2026-09-22 by building the commit before that change and running the ROM
@@ -868,6 +928,19 @@ Notes on the ones that are more than "a behaviour not written yet":
     what a screenshot comparator does to a chain of serial-style subtests, and
     not a regression. Measured 2026-09-24: 290 -> 346, no other screenshot
     count in this table moved by a pixel.
+  - it went to 421 later the same day, when the post-boot VRAM landed (its own
+    entry above). The ROM now prints "DMA bus conflict always reads $FF" -
+    longer again, hence 421 - so it stops at neither of the two VRAM subtests
+    its strings carry, "Invalid initial tile data" and "Invalid initial map
+    data". Both messages were read off the frames in `build/frames`, with the
+    seeding disabled and then enabled, so the move is a reading and not an
+    inference. What the new one wants has not been diagnosed: the wording
+    suggests a read conflicting with OAM DMA is expected to return something
+    other than $FF, which is not what this core does, but that is a guess from
+    a message and the ROM has not been disassembled at that point. It is the
+    next thing to look at, not something this entry claims to know. That run
+    also moved ten other screenshot counts, all downwards; the post-boot VRAM
+    entry says why.
 
 - **Checked:** 2026-09-22; `bully`'s count and the group total re-measured
   2026-09-24. Every count in this section is from a full run of `rom_runner`; the per-pixel diff maps quoted above were taken from the
