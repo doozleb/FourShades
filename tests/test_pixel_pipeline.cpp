@@ -1167,3 +1167,124 @@ TEST_CASE("LCDC bit 5 set after the counter has gone past WX does not start the 
     const CharLine next = characteriseWrites(ppu, {});
     CHECK(next.pixels.substr(32, 8) == kEvenWindowRow); // still row 0
 }
+
+// ---------------------------------------------------------------------------
+// WX moved ahead of the counter while the window is already drawing
+//
+// Pan Docs, "Pixel FIFO":
+//
+//   "When the value of WX changes after the window has started rendering and
+//   the new value of WX is reached again, a pixel with color value of 0 and the
+//   lowest priority is pushed onto the background FIFO."
+//
+// Two things that sentence leaves to be measured, and that the DMG references
+// for the three WX-change ROMs settle (see docs/known-divergences.md, "A WX
+// changed while the window is drawing pushes one colour-0 pixel, and only onto
+// an empty FIFO"):
+//
+//   - it is a *push*, so the pixel is an extra one: the rest of the line moves
+//     one pixel right and its last pixel falls off the edge. It costs no dots,
+//     because the dot it is emitted on is the dot the fetcher's own push was
+//     going to use.
+//   - "pushed onto the background FIFO" means the FIFO's one push port, which
+//     takes a push only when the FIFO is empty - exactly as the fetcher's push
+//     does. A match that lands part-way through a tile is swallowed.
+//
+// The window row does *not* advance: this is not an activation.
+TEST_CASE("a WX moved ahead of the counter while the window draws pushes one colour-0 pixel") {
+    // WX = 39 starts the window at screen x = 32, so its tiles begin at
+    // x = 32, 40, 48 ... and the background FIFO is empty at the top of each of
+    // those dots. WX is then moved to 87, which the counter reaches at
+    // x = 87 - 7 = 80 - a tile boundary - so the push lands there.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x27, 0x00);
+    const CharLine got = characteriseWrites(ppu, {{160, 0xFF4B, 0x57}});
+    CHECK(got.pixels.substr(0, 32) == std::string(32, '1'));      // background
+    CHECK(got.pixels.substr(32, 8) == kEvenWindowRow);            // window row 0
+    CHECK(got.pixels.substr(72, 8) == kEvenWindowRow);            // still in step at x = 72
+    CHECK(got.pixels[80] == '0');                                 // the colour-0 pixel
+    CHECK(got.pixels.substr(81, 8) == kEvenWindowRow);            // and the line shifts right
+    CHECK(got.pixels.substr(153, 7) == std::string(kEvenWindowRow).substr(0, 7));
+    // One activation, one fetcher restart: 172 + 6 = 178 dots, sampled as 180.
+    // The pushed pixel costs nothing.
+    CHECK(got.dots == 180);
+}
+
+TEST_CASE("the pushed pixel is a background colour 0, so BGP decides its shade") {
+    // Mealybug Tearoom's m3_wx_4_change_sprites runs the same sequence under a
+    // reversed BGP, where background colour 0 shades to 3, and its DMG
+    // reference shows the pushed pixel as shade 3 on an otherwise flat band.
+    // So the pixel goes through the background palette like any other; it is
+    // not a shade written straight into the line.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x27, 0x00);
+    static_cast<void>(ppu.write(0xFF47, 0x1B)); // BGP: colour 0 -> 3, 1 -> 2, 2 -> 1, 3 -> 0
+    const CharLine got = characteriseWrites(ppu, {{160, 0xFF4B, 0x57}});
+    CHECK(got.pixels.substr(0, 32) == std::string(32, '2'));  // background colour 1
+    CHECK(got.pixels.substr(72, 8) == "01233210");            // the window row, repalettised
+    CHECK(got.pixels[80] == '3');                             // colour 0 under this palette
+    CHECK(got.pixels.substr(81, 8) == "01233210");
+}
+
+namespace {
+// The picture an ordinary WX = 39 line draws: background to x = 31, then the
+// given window row tiled to the right-hand edge. Spelled out rather than taken
+// from a neighbouring line, because consecutive lines draw alternating window
+// rows and a "nothing happened" case has to be compared against its own row.
+std::string plainWindowLine(const char* windowRow) {
+    std::string out(32, '1');
+    while (out.size() < 160) { out += windowRow; }
+    return out;
+}
+} // namespace
+
+TEST_CASE("a WX match part-way through a window tile pushes nothing") {
+    // WX = 84 is reached at x = 77, five pixels into the tile that started at
+    // x = 72: the FIFO still holds three of that tile's pixels, so the push
+    // finds no room and the line is the one an unchanged WX would have drawn.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x27, 0x00);
+    const CharLine got = characteriseWrites(ppu, {{160, 0xFF4B, 0x54}});
+    CHECK(got.pixels == plainWindowLine(kEvenWindowRow));
+    CHECK(got.dots == 180);
+}
+
+TEST_CASE("a WX lowered behind the counter while the window draws pushes nothing") {
+    // The comparison is an equality against a counter that only counts up, so
+    // a WX moved to a pixel already drawn is never reached again.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x27, 0x00);
+    const CharLine got = characteriseWrites(ppu, {{160, 0xFF4B, 0x28}}); // WX = 40, reached at x = 33
+    CHECK(got.pixels == plainWindowLine(kEvenWindowRow));
+    CHECK(got.dots == 180);
+}
+
+TEST_CASE("the pushed pixel is not an activation, so the window's row does not advance") {
+    // Pan Docs advances "the coordinate of the active Window row" when a match
+    // *resets background rendering*. A match that only pushes a pixel is not
+    // that, so the line after one with a push must draw the window's next row
+    // once, not twice: the odd row, not the even one two activations would give.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x27, 0x00);
+    const CharLine first = characteriseWrites(ppu, {{160, 0xFF4B, 0x57}});
+    REQUIRE(first.pixels.substr(32, 8) == kEvenWindowRow); // row 0
+    REQUIRE(first.pixels[80] == '0');                      // the push happened
+    static_cast<void>(ppu.write(0xFF4B, 0x27));            // WX back where it was
+    const CharLine second = characteriseWrites(ppu, {});
+    CHECK(second.pixels.substr(32, 8) == kOddWindowRow);   // row 1, not row 2
+    CHECK(second.dots == 180);
+}
+
+TEST_CASE("an activation does not push a colour-0 pixel of its own on the dots that follow it") {
+    // The match that starts the window and the match that pushes a pixel are
+    // the same comparison, and the counter does not move while the restarted
+    // fetcher spends its six dots - so a match has to be acted on once, not on
+    // every dot the counter sits on it. WX = 7 is the sharpest case: it is
+    // matched by the last of the counter's free increments, before any pixel is
+    // rendered, and the counter then stays at 7 until pixel 0 is emitted.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x07, 0x00); // WX = 7: window from x = 0
+    const CharLine got = characteriseWrites(ppu, {});
+    CHECK(got.pixels.substr(0, 8) == kEvenWindowRow);
+    CHECK(got.pixels.substr(152, 8) == kEvenWindowRow);
+}

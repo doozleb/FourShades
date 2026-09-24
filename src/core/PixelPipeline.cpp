@@ -21,6 +21,7 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     fetchWindow_ = false;
     windowX_ = 0;
     windowXHeadStart_ = false;
+    windowComparedX_ = -1;
     windowSkip_ = 0;
     objects_ = {};
     objectDots_ = 0;
@@ -347,15 +348,19 @@ int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
     return dots;
 }
 
+bool PixelPipeline::windowEnabled(const Ppu& ppu) const {
+    // Pan Docs, "Window behavior": a counter match acts only "if the Y
+    // condition is true and the Window enable bit is set in LCDC". Both are
+    // read here, on the dot the match is tested, not once per line.
+    return (ppu.lcdc() & 0x20) != 0 && ppu.windowReached();
+}
+
 bool PixelPipeline::windowConditions(const Ppu& ppu) const {
-    // Pan Docs, "Window behavior": a counter match starts the window only "if
-    // the Y condition is true and the Window enable bit is set in LCDC". Both
-    // are read here, on the dot the match is tested, not once per line. The
-    // third term is that the window is not already drawing, which is the one
-    // thing the equality comparison cannot express on its own; see window_ in
-    // the header for why nothing else is needed, and why a bare re-enable
+    // The third term is that the window is not already drawing, which is the
+    // one thing the equality comparison cannot express on its own; see window_
+    // in the header for why nothing else is needed, and why a bare re-enable
     // therefore does nothing without a WX that moved ahead of the counter.
-    return !window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached();
+    return !window_ && windowEnabled(ppu);
 }
 
 void PixelPipeline::startWindow(Ppu& ppu) {
@@ -390,6 +395,8 @@ void PixelPipeline::startWindow(Ppu& ppu) {
     // never ppu.windowLine() directly, so the just-bumped value doesn't leak
     // into this line's tiles.
     windowLineUsed_ = ppu.windowLine();
+    // This counter value has now been compared; see windowComparedX_.
+    windowComparedX_ = windowX_;
     // Pan Docs: "The coordinate of the active Window row is then
     // incremented." It is the activation that advances it, not the line: a
     // line that never matched WX leaves it where it was, and a line that
@@ -398,6 +405,18 @@ void PixelPipeline::startWindow(Ppu& ppu) {
     // window, on the same scanline". Reading windowLineUsed_ just above,
     // before the advance, is what makes that come out right for both bands.
     ppu.advanceWindowLine();
+}
+
+void PixelPipeline::pushWindowShiftPixel() {
+    // See the header for Pan Docs' sentence and the two things it leaves to be
+    // measured. Marked as compared whether or not the FIFO had room, because the
+    // comparator fired either way.
+    windowComparedX_ = windowX_;
+    if (queueSize_ != 0) {
+        return; // the FIFO's push port takes a push only when it is empty
+    }
+    queue_[static_cast<std::size_t>(queueHead_)] = 0;
+    queueSize_ = 1;
 }
 
 void PixelPipeline::takeWindowHeadStart(Ppu& ppu) {
@@ -424,6 +443,11 @@ void PixelPipeline::takeWindowHeadStart(Ppu& ppu) {
         }
         ++windowX_;
     }
+    // All of those values have now been compared against WX, on this one dot,
+    // so a WX written later cannot be "reached again" at any of them. Set after
+    // the loop, because a startWindow inside it leaves the value it matched
+    // here and that is the lower number. See windowComparedX_.
+    windowComparedX_ = kWindowCounterHeadStart;
 }
 
 void PixelPipeline::stopWindowIfDisabled(const Ppu& ppu) {
@@ -446,7 +470,7 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
         if (discard_ == 0) {
             takeWindowHeadStart(ppu);
         }
-    } else if (windowConditions(ppu) && windowX_ == static_cast<int>(ppu.wx())) {
+    } else if (windowEnabled(ppu) && windowX_ == static_cast<int>(ppu.wx())) {
         // Pan Docs: "When this counter is equal to WX ... background rendering
         // is reset". An equality, tested on every dot, and every match that
         // finds the window not already drawing is an activation - "this
@@ -455,7 +479,14 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
         // WX lowered behind the counter, does not start on that line, and
         // nothing on the line after a stop restarts the window until WX is
         // moved ahead of the counter again.
-        startWindow(ppu);
+        if (!window_) {
+            startWindow(ppu);
+        } else if (windowX_ > windowComparedX_) {
+            // The window is already drawing, so this is a WX that moved ahead
+            // of the counter mid-window rather than a second activation: it
+            // pushes one colour-0 pixel and leaves the window's row alone.
+            pushWindowShiftPixel();
+        }
     }
     // After the activation test, so that a line whose LCDC bit 5 is clear
     // throughout cannot start the window and stop it on the same dot, and
