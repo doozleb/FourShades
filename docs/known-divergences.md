@@ -920,19 +920,27 @@ available here: implement what both say.
 then one per pixel rendered. WX is compared against it rather than against
 `pixelX_` arithmetic, and a match runs `startWindow`.
 
+Since 2026-09-24 the first of the WIN_EN passages above **is** modelled: see
+"Clearing LCDC bit 5 part-way along a line stops the window" below.
+
 Three things about the model are deliberately **not** the hardware's yet, and
 each is a named later task, not an oversight:
 
-- The window still activates at most once per line (`window_` is a latch), so
-  the mid-line WIN_EN passages above and Pan Docs' "more than once per
-  scanline" are not modelled.
+- The window still *activates* at most once per line (`windowActivated_` is a
+  latch), so Pan Docs' "more than once per scanline" and the notes' "if WX has
+  been updated correctly and WIN_EN is set again ... it will start drawing the
+  next row of the window" are not modelled. A window stopped by a cleared
+  bit 5 therefore stays stopped for the rest of the line, which is what the
+  notes say a bare re-enable does; what is missing is the re-enable *with* WX
+  moved.
 - Because of that latch, the per-dot comparison in `stepDot` is
   greater-or-equal, not the equality the hardware uses: it is the only way the
   window can start at all on a line where LCDC bit 5 was set, or WX lowered,
   after the counter had already gone past WX, and that case is load-bearing
-  (making it a strict equality moves `m3_lcdc_win_en_change_multiple_wx` from
-  5942 differing pixels to 3759 and `m3_window_timing` from 28 to 33 — it
-  changes pictures, in both directions). The free increments *are* compared for
+  (measured on 2026-09-24, before the mid-line disable below landed: making it
+  a strict equality moved `m3_lcdc_win_en_change_multiple_wx` from 5942
+  differing pixels to 3759 and `m3_window_timing` from 28 to 33 — it changes
+  pictures, in both directions). The free increments *are* compared for
   equality.
 - The free increments are taken on the dot the SCX discard finishes, not at
   the top of the line, because this model spends the discard as
@@ -940,6 +948,66 @@ each is a named later task, not an oversight:
   discard. That is why `WX = 0` is not yet "shifted left by SCX % 8 pixels",
   and why `windowSkip_` (see the entry below) still exists.
 
+- **Checked:** 2026-09-24.
+
+## Clearing LCDC bit 5 part-way along a line stops the window, and where it does not say enough (2026-09-24)
+
+Not a divergence for the behaviour itself — the behaviour is implemented, and
+Mealybug's own notes are quoted for it in the section above. What is recorded
+here is one thing those notes do **not** pin, and the measurement.
+
+- **Evidence:** Mealybug Tearoom's PPU notes, `WIN_EN (bit 5)`, quoted whole in
+  the section above: "WIN_EN can be disabled during mode 3. The disabling will
+  take effect at the end of the current window tile being drawn. When the
+  current window tile has finished being drawn, the PPU will start drawing
+  background tiles again." / "When the background resumes drawing it is on a
+  tile boundary. The low 3 bits of SCX have no effect." / "Setting WIN_EN again
+  during mode 3 on the same scanline will have no effect unless WX has been
+  updated to set the window to activate on a pixel that hasn't been drawn
+  yet." These are the author's notes on his own hardware photographs, so under
+  the rule at the top of this file they stand.
+- **FourShades:** `PixelPipeline` now keeps two flags where it kept one.
+  `window_` means "the fetcher is drawing the window", and
+  `stopWindowIfDisabled` clears it on the dot LCDC bit 5 goes low;
+  `windowActivated_` is the once-per-line activation latch and is *not*
+  cleared, so a bare re-enable does nothing, which is the third sentence. The
+  queue is not cleared and the fetcher is not restarted, so the pixels of the
+  window tile already queued are drawn (the first sentence), the switch costs
+  no dots, and no fresh SCX fine-scroll discard is taken (the second).
+- **What the notes do not say: which background tile column resumes.** The
+  fetcher has one column counter, `fetcherX_`, which the window reset to 0 and
+  then counted window tiles with. FourShades lets it keep counting, so the
+  first background tile after the stop is the column the window's count
+  reached rather than the column that would have been there had the window
+  never drawn. The alternative — deriving the column from the screen position
+  instead, `SCX / 8 + (pixelX_ + queueSize_) / 8` — was built and measured on
+  2026-09-24: **every test in the `screen` group gives the identical pixel
+  count either way**, so nothing in the suite arbitrates it. The shared counter
+  shipped because it needs no extra state and because "the background resumes
+  on a tile boundary, the low 3 bits of SCX have no effect" reads like the
+  description of a counter that was reset rather than of a recomputed column.
+  If a later ROM does arbitrate it, this is the knob.
+- **A mid-fetch write mixes the two sources.** LCDC bit 5 is read on every dot,
+  so a clear that lands between the fetcher's tile-index step and its bitplane
+  steps leaves a tile index read from the window map being addressed with the
+  background's row. That is the same shape as the mixing Mealybug documents for
+  `TILE_SEL` and `SCY`, and it is what "read live, at the dot the fetcher needs
+  it" means throughout this pipeline; no reference decoded so far measures it.
+- **The `windowSkip_` clip follows the window tile, not the stop.** A WX below
+  7 leaves 7 - WX window pixels owed to the clip at the fetcher's next push (see
+  the entry below). If the clear of bit 5 arrives before the fetcher reads the
+  tilemap, the tile pushed is a background one and there is no window tile for
+  the clip to belong to, so the clip is dropped rather than taking three pixels
+  out of the background and shifting the rest of the line left by them;
+  `fetchWindow_` is what remembers which map the fetch in flight read. Only the
+  unit suite pins this - no test in the suite reaches it, and the pixel counts
+  below are identical with the clip ungated - but the alternative is a shift
+  caused by a window that drew nothing, which no reading of the notes supports.
+- **Effect:** `m3_lcdc_win_en_change_multiple` 8316 differing pixels -> 5760,
+  `m3_lcdc_win_en_change_multiple_wx` 5942 -> 1228. No other test in the suite
+  moved by a pixel, and neither of these two passes yet: both also need the
+  re-activation and the per-activation window row advance. `ppu timing` stays
+  12 / 12, `m3_bgp_change`, `dmg-acid2` and `m2_win_en_toggle` stay exact.
 - **Checked:** 2026-09-24.
 
 ## A WX below 7 pushes the window's leftmost pixels off the screen (2026-09-21)
@@ -986,10 +1054,14 @@ that the power-on and OAM DMA work of 2026-09-24 took from failing to exact,
 `daid/stop_instr` and `ashiepaws/bully`. Those two no longer have rows in the
 table below; the notes after it say what each was and what settled it. Every
 count here was re-measured on 2026-09-24 from a full run, and the twenty-four
-below come to 47,378 differing pixels.
+below come to 40,108 differing pixels. (They came to 47,378 until the mid-line
+LCDC bit 5 work of 2026-09-24; the two rows it moved carry their old figures
+alongside the new ones.)
 
-**The window re-activates mid-line, and FourShades never does** - the single
-largest unmodelled behaviour left, and the cause of five of the entries below.
+**The window re-activates mid-line, and FourShades still does not** - the
+single largest unmodelled behaviour left, and the cause of five of the entries
+below. Stopping the window mid-line landed on 2026-09-24; starting it again has
+not.
 Mealybug's own
 [PPU documentation](https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md)
 states it for LCDC bit 5: disabling the window during mode 3 takes effect at
@@ -999,9 +1071,12 @@ WX has been moved to a pixel not yet drawn - in which case the window starts
 again *on the next window row*, on the same scanline. `m3_wx_4_change`'s own
 comment shows the same thing happens for a WX write alone, with a "window
 reactivation zero pixel" appearing when the re-activation dot coincides with
-the window's tile-map read. FourShades starts the window at most once per
-line. This is the same behaviour the older "window line counter" note below
-records for `m3_lcdc_win_en_change_multiple`.
+the window's tile-map read. Since 2026-09-24 FourShades does the *stopping*
+part - see "Clearing LCDC bit 5 part-way along a line stops the window" above -
+but still activates the window at most once per line, so the re-activation and
+the window row advance that comes with it are what is left. This is the same
+behaviour the older "window line counter" note below records for
+`m3_lcdc_win_en_change_multiple`.
 
 | test | pixels | why it still fails |
 | --- | --- | --- |
@@ -1021,13 +1096,13 @@ records for `m3_lcdc_win_en_change_multiple`.
 | `m3_wx_5_change` | 638 | window re-activation |
 | `m3_lcdc_tile_sel_change` | 688 | mid-line LCDC bit 4 changes |
 | `m3_lcdc_bg_en_change` | 855 | mid-line LCDC bit 0 changes |
+| `m3_lcdc_win_en_change_multiple_wx` | 1228 | window re-activation (LCDC bit 5); 5942 before the mid-line disable landed |
 | `m3_scy_change` | 1256 | mid-line SCY changes inside the fetch |
 | `m3_lcdc_win_map_change` | 1646 | mid-line LCDC bit 6 changes |
 | `m3_lcdc_tile_sel_win_change` | 1904 | mid-line LCDC bit 4 changes, with a window |
 | `m3_bgp_change_sprites` | 2104 | as `m3_bgp_change`, plus objects |
-| `m3_lcdc_win_en_change_multiple_wx` | 5942 | window re-activation (LCDC bit 5) |
+| `m3_lcdc_win_en_change_multiple` | 5760 | window re-activation (LCDC bit 5); 8316 before the mid-line disable landed |
 | `daid/ppu_scanline_bgp` | 7186 | disagrees with the Mealybug references by 12 dots |
-| `m3_lcdc_win_en_change_multiple` | 8316 | window re-activation (LCDC bit 5) |
 | `m3_wx_6_change` | 13799 | WX = 6 is not a one-pixel shift of WX = 7 |
 
 The mid-line LCDC, SCX and SCY entries above are all the same shape: the

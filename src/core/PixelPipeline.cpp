@@ -18,6 +18,8 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     pixelX_ = 0;
     discard_ = ppu.scx() & 0x07;
     window_ = false;
+    windowActivated_ = false;
+    fetchWindow_ = false;
     windowX_ = 0;
     windowXHeadStart_ = false;
     windowSkip_ = 0;
@@ -47,6 +49,7 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
         stepDots_ = 0;
         {
             const bool window = window_;
+            fetchWindow_ = window;
             const u16 map = (window ? (ppu.lcdc() & 0x40) : (ppu.lcdc() & 0x08)) != 0 ? 0x9C00 : 0x9800;
             const u8 y = window ? static_cast<u8>(windowLineUsed_)
                                  : static_cast<u8>(ppu.lineNumber() + ppu.scy());
@@ -92,7 +95,17 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
                 static_cast<u8>((high << 1) | low);
             ++queueSize_;
         }
-        if (windowSkip_ > 0) {
+        if (windowSkip_ > 0 && !fetchWindow_) {
+            // The clip is the window's: it exists because the window's first
+            // tile starts kWindowCounterHeadStart - WX pixels left of screen
+            // x = 0. This tile is a background one, so a cleared LCDC bit 5
+            // reached the fetcher before it read the map (see
+            // stopWindowIfDisabled) and the window tile the clip was owed to
+            // never arrived. The background carries on from where it was, so
+            // it is not clipped, and nothing is left owing: the window cannot
+            // start again on this line.
+            windowSkip_ = 0;
+        } else if (windowSkip_ > 0) {
             // The window pixels that fall off the left edge (see the WX
             // note in startWindow) are dropped here, as the tile is pushed,
             // rather than emitted and thrown away: they take no dots.
@@ -332,10 +345,13 @@ bool PixelPipeline::windowConditions(const Ppu& ppu) const {
     // Pan Docs, "Window behavior": a counter match starts the window only "if
     // the Y condition is true and the Window enable bit is set in LCDC". Both
     // are read here, on the dot the match is tested, not once per line.
-    // window_ is the third term and is not a hardware condition: this model
-    // still activates the window at most once per line, which is the
-    // restriction the task after this one lifts.
-    return !window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached();
+    // windowActivated_ is the third term and is not a hardware condition: this
+    // model still activates the window at most once per line, which is the
+    // restriction the task after this one lifts. It is the activation latch
+    // and not window_, so that a window stopped part-way along the line by a
+    // cleared LCDC bit 5 does not silently re-activate when bit 5 comes back:
+    // Mealybug's notes say a bare re-enable has no effect.
+    return !windowActivated_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached();
 }
 
 void PixelPipeline::startWindow(Ppu& ppu) {
@@ -343,6 +359,7 @@ void PixelPipeline::startWindow(Ppu& ppu) {
     // row of the Window's tilemap" - the background queue is cleared and the
     // fetcher restarts, which costs the documented kWindowRestartDots dots.
     window_ = true;
+    windowActivated_ = true;
     queueSize_ = 0;
     queueHead_ = 0;
     step_ = Step::Tile;
@@ -401,6 +418,15 @@ void PixelPipeline::takeWindowHeadStart(Ppu& ppu) {
     }
 }
 
+void PixelPipeline::stopWindowIfDisabled(const Ppu& ppu) {
+    // See the header for the two sentences of Mealybug's notes this is. Only
+    // window_ is cleared: windowActivated_ stays set, so nothing re-activates
+    // the window later on this line.
+    if (window_ && (ppu.lcdc() & 0x20) == 0) {
+        window_ = false;
+    }
+}
+
 bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
     // The nesting matters: while the free increments are still owed and the
     // SCX discard has not drained, the counter reads 0 and must not be
@@ -425,6 +451,11 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
         // scanline").
         startWindow(ppu);
     }
+    // After the activation test, so that a line whose LCDC bit 5 is clear
+    // throughout cannot start the window and stop it on the same dot, and
+    // before the fetcher runs, so the tile it is working on when bit 5 goes
+    // low is already a background tile.
+    stopWindowIfDisabled(ppu);
 
     if (objectDots_ > 0) {
         --objectDots_;   // the fetch stalls the pixel stream
