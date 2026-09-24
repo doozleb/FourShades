@@ -314,8 +314,12 @@ TEST_CASE("OAM DMA from WRAM copies 160 bytes and blocks WRAM, ROM and OAM, but 
     CHECK(gb->peek(0xFF46) == 0xC0);
     gb->idle(); // start-up cycle
     gb->idle(); // first byte copied
-    CHECK(gb->read(0xC000) == 0xFF); // WRAM: blocked (external bus)
-    CHECK(gb->read(0x0000) == 0xFF); // ROM: blocked (external bus)
+    // A blocked read returns the byte the DMA is copying in that very
+    // M-cycle -- byte 1 (0xC001, 0x02) in the first of these, byte 2 in the
+    // second. Both differ from what the named address really holds, which is
+    // what makes them evidence that the access was blocked.
+    CHECK(gb->read(0xC000) == 0x02); // WRAM: blocked (external bus)
+    CHECK(gb->read(0x0000) == 0x03); // ROM: blocked (external bus)
     CHECK(gb->read(0xFE00) == 0xFF); // OAM: always blocked
     CHECK(gb->read(0x8000) == 0x00); // VRAM: readable (video bus, not in use)
     CHECK(gb->read(0xFF80) == 0x5A); // HRAM: readable
@@ -331,17 +335,19 @@ TEST_CASE("OAM DMA from VRAM blocks VRAM and OAM, but ROM and WRAM stay readable
     auto gb = makeGameBoy({0x00});
     gb->write(0xFF40, 0x11); // LCD off: the DMA's own bus blocking is what's under test here
     gb->write(0xC000, 0x01);
+    gb->write(0x8000, 0x70); // distinct from the byte the DMA copies next
+    gb->write(0x8001, 0x71);
     gb->write(0xFF46, 0x80); // source 0x8000: the video bus
     gb->idle(); // start-up cycle
     gb->idle(); // first byte copied
-    CHECK(gb->read(0x8000) == 0xFF); // VRAM: blocked (video bus)
-    CHECK(gb->read(0xFE00) == 0xFF); // OAM: always blocked
+    CHECK(gb->read(0x8000) == 0x71); // VRAM: blocked (video bus), so byte 1, not 0x70
+    CHECK(gb->read(0xFE00) == 0xFF); // OAM: always blocked, and always 0xFF
     CHECK(gb->read(0x0000) == 0x00); // ROM: readable (external bus, not in use)
     CHECK(gb->read(0xC000) == 0x01); // WRAM: readable (external bus, not in use)
     for (int i = 0; i < 170; ++i) {
         gb->idle();
     }
-    CHECK(gb->read(0x8000) == 0x00); // no longer blocked
+    CHECK(gb->read(0x8000) == 0x70); // no longer blocked
 }
 
 // Pan Docs: the transfer takes 160 M-cycles and starts after the M-cycle that
@@ -349,29 +355,116 @@ TEST_CASE("OAM DMA from VRAM blocks VRAM and OAM, but ROM and WRAM stay readable
 TEST_CASE("OAM DMA blocks the CPU through the M-cycle that copies the last byte") {
     auto gb = makeGameBoy({0x00});
     gb->write(0xC000, 0x01);
+    gb->write(0xC09F, 0x5C); // byte 159, and the value a read in its M-cycle sees
     gb->write(0xFF46, 0xC0); // M-cycle W
     for (int i = 0; i < 160; ++i) {
         gb->idle(); // W+1 (start-up) .. W+160
     }
-    CHECK(gb->read(0xC000) == 0xFF); // W+161: byte 159 is being copied
+    CHECK(gb->read(0xC000) == 0x5C); // W+161: byte 159 is being copied
     CHECK(gb->read(0xC000) == 0x01); // W+162: the transfer is over
 }
 
 TEST_CASE("a restarted OAM DMA keeps the CPU blocked through the new start-up cycle") {
     auto gb = makeGameBoy({0x00});
     gb->write(0xC000, 0x01);
+    gb->write(0xC009, 0x4B); // the byte the old transfer is on at W+1
+    gb->write(0xC09F, 0x5C); // and the new transfer's last byte
     gb->write(0xFF46, 0xC0);
     for (int i = 0; i < 9; ++i) {
         gb->idle();
     }
     gb->write(0xFF46, 0xC0);         // restart, M-cycle W
-    CHECK(gb->read(0xC000) == 0xFF); // W+1: the old transfer is still copying
+    CHECK(gb->read(0xC000) == 0x4B); // W+1: the old transfer is still copying
     for (int i = 0; i < 159; ++i) {
         gb->idle(); // W+2 .. W+160
     }
-    CHECK(gb->read(0xC000) == 0xFF); // W+161: the new transfer's last byte
+    CHECK(gb->read(0xC000) == 0x5C); // W+161: the new transfer's last byte
     CHECK(gb->read(0xC000) == 0x01); // W+162
 }
+
+// What a DMA-blocked read puts on the CPU's data bus. The conflict is a bus
+// conflict: while the DMA holds the source bus, a CPU read of that bus in the
+// same M-cycle sees the byte the DMA's own read has just put there, not 0xFF.
+// OAM is the transfer's other half and answers differently -- the case after
+// this one pins that. See docs/known-divergences.md, "What a read that
+// conflicts with an OAM DMA puts on the bus".
+TEST_CASE("a read that conflicts with an OAM DMA sees the byte the DMA is transferring") {
+    auto gb = makeGameBoy({0x00});
+    gb->write(0xFF40, 0x11); // LCD off: the DMA's own bus blocking is what is under test
+    for (int i = 0; i < 0xA0; ++i) {
+        gb->write(static_cast<u16>(0xC000 + i), static_cast<u8>(0x40 + i));
+    }
+    gb->write(0xFF46, 0xC0); // source 0xC000: the external bus
+    gb->idle();              // start-up cycle: nothing is copied and nothing is blocked
+    // Each read below is one M-cycle and the DMA copies one byte in each of
+    // them -- byte 0 in the first, byte 1 in the second, and so on. Whichever
+    // blocked address the CPU names, that is the byte it gets.
+    CHECK(gb->read(0xC000) == 0x40); // WRAM, the source itself
+    CHECK(gb->read(0x0000) == 0x41); // ROM: the same external bus
+    CHECK(gb->read(0xDFFF) == 0x42); // WRAM again, nowhere near the source
+    CHECK(gb->read(0xA000) == 0x43); // the cartridge RAM window
+    // The value does not depend on the address at all, only on the M-cycle.
+    CHECK(gb->read(0x0000) == 0x44);
+    CHECK(gb->read(0x0000) == 0x45);
+}
+
+// The destination is not the source bus, and the two do not answer the same
+// way: OAM is locked out outright while the DMA owns it, exactly as the PPU
+// locks it out in modes 2 and 3, and a locked-out OAM read reads 0xFF. This
+// case is what keeps the nine hardware-verified instruction-timing ROMs
+// passing -- each starts a DMA from the video bus and reads OAM expecting
+// 0xFF, so an OAM read that leaked the source byte would hand them video
+// memory instead. See docs/known-divergences.md, the two OAM DMA entries.
+TEST_CASE("an OAM read during a DMA stays locked out and reads 0xFF, whatever the source holds") {
+    auto gb = makeGameBoy({0x00});
+    gb->write(0xFF40, 0x11);
+    for (int i = 0; i < 0xA0; ++i) {
+        gb->write(static_cast<u16>(0x8000 + i), static_cast<u8>(0x20 + i));
+    }
+    gb->write(0xFF46, 0x80); // source 0x8000: the video bus
+    gb->idle();              // start-up cycle
+    CHECK(gb->read(0xFE00) == 0xFF); // OAM, while byte 0 (0x20) is copied
+    CHECK(gb->read(0xFE9F) == 0xFF); // and while byte 1 (0x21) is
+    CHECK(gb->read(0x8000) == 0x22); // the source bus does see the byte
+    CHECK(gb->read(0x0000) == 0x00); // and the external bus is untouched
+}
+
+// The consequence, and the only reason any of this is observable: an opcode
+// fetch is a read like any other, so a CPU whose PC sits on the blocked bus
+// executes the bytes the DMA is transferring rather than the program under
+// PC. Writes stay discarded throughout, HRAM excepted.
+TEST_CASE("the CPU executes the bytes an OAM DMA is transferring when its own bus is blocked") {
+    // ld a,0xC0 ; ldh (0xFF46),a -- and then straight on into ROM that is all
+    // 0x00. What runs from there is the source, not the nops.
+    auto gb = makeGameBoy({0x3E, 0xC0, 0xE0, 0x46});
+    gb->write(0xFF40, 0x11);
+    // inc a twice and inc b, then a store to HRAM that must land and a store
+    // to WRAM that must not. A multi-M-cycle instruction's later M-cycles eat
+    // the bytes behind its first, so each needs its own filler.
+    const std::vector<u8> source = {
+        0x3C,             // inc a
+        0x3C,             // inc a
+        0x04,             // inc b
+        0x21, 0x80, 0xFF, // ld hl,0xFF80
+        0x77, 0x00,       // ld (hl),a  + filler for the store's M-cycle
+        0x21, 0x00, 0xC5, // ld hl,0xC500
+        0x77, 0x00,       // ld (hl),a  + filler; this store is discarded
+    };
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        gb->write(static_cast<u16>(0xC000 + i), source[i]);
+    }
+    gb->write(0xFF80, 0x00);
+    gb->write(0xC500, 0x00);
+    const u8 firstB = gb->cpu().regs.b;
+    for (int i = 0; i < 40; ++i) {
+        gb->step();
+    }
+    CHECK(gb->cpu().regs.a == 0xC2);                         // two inc a out of the transfer
+    CHECK(gb->cpu().regs.b == static_cast<u8>(firstB + 1));  // and one inc b
+    CHECK(gb->peek(0xFF80) == 0xC2);                         // HRAM is not blocked: the store landed
+    CHECK(gb->peek(0xC500) == 0x00);                         // the external bus is: this one did not
+}
+
 
 TEST_CASE("the CPU runs a program through the memory map") {
     // LD A,0x12 ; LD (0xC000),A ; LD HL,0xC000 ; INC (HL) ; HALT

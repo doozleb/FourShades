@@ -136,7 +136,8 @@ void GameBoy::tickDma() {
             from = static_cast<u16>(from - 0x2000);
         }
         dmaCurrentSource_ = from;
-        ppu_.dmaWriteOam(dmaIndex_, peek(from));
+        dmaCurrentByte_ = peek(from);
+        ppu_.dmaWriteOam(dmaIndex_, dmaCurrentByte_);
         if (++dmaIndex_ == 0xA0) {
             dmaActive_ = false;
         }
@@ -151,9 +152,10 @@ void GameBoy::tickDma() {
 // DMA timing: the M-cycle after the FF46 write is a start-up cycle and isn't
 // blocked; the CPU is blocked in each of the 160 M-cycles that copy a byte,
 // the one copying byte 159 included (hardware-verified test ROMs read OAM in
-// that M-cycle and see 0xFF, and see the data one M-cycle later); blocked
-// reads return 0xFF; on a restart the old transfer keeps copying, so keeps
-// blocking, through the new one's start-up cycle.
+// that M-cycle and see 0xFF, and see the data one M-cycle later); on a restart
+// the old transfer keeps copying, so keeps blocking, through the new one's
+// start-up cycle. What a blocked access sees is a separate question, answered
+// at dmaConflictValue below.
 //
 // Which bus is blocked: Pan Docs says "On DMG, during OAM DMA, the CPU can
 // access only HRAM (memory at $FF80-$FFFE)" (OAM DMA Transfer: OAM DMA bus
@@ -182,12 +184,43 @@ bool GameBoy::dmaBlocks(u16 address) const {
     return address < 0x8000 || (address >= 0xA000 && address < 0xFE00); // external bus
 }
 
+// What a blocked read puts on the CPU's data bus. Which addresses are blocked
+// is the question above; this is the separate question of what comes back, and
+// the two halves of the transfer answer it differently.
+//
+// The source bus is a *conflict*: the DMA's read and the CPU's read reach the
+// same bus in the same M-cycle, the memory answers once, and both latch the
+// same byte -- so the CPU sees the byte the DMA is transferring right now,
+// whatever address it asked for. Pan Docs does not state this (it names the
+// regions the CPU may reach, not the value a conflict yields), but it states
+// the matching case for the other master on the bus: "If OAM DMA is active
+// during rendering (mode 3), the PPU reads whatever 16-bit word the DMA unit
+// is writing to OAM when the object is fetched" (OAM DMA Transfer).
+//
+// OAM is not a conflict but a lock-out: the DMA owns the destination outright
+// and the CPU is shut out of it, exactly as the PPU shuts it out in modes 2
+// and 3, and a shut-out OAM read reads 0xFF. Hardware-verified test ROMs pin
+// this apart from the source bus -- they run a DMA from the video bus with a
+// known non-0xFF byte under it and still require 0xFF from OAM.
+//
+// Writes are unaffected by any of this: a blocked write is discarded, and
+// HRAM, I/O and IE are never blocked at all.
+//
+// See docs/known-divergences.md, "What a read that conflicts with an OAM DMA
+// puts on the bus".
+u8 GameBoy::dmaConflictValue(u16 address) const {
+    if (address >= 0xFE00 && address < 0xFF00) {
+        return 0xFF;
+    }
+    return dmaCurrentByte_;
+}
+
 // What the CPU's data bus carries for `address` right now: the DMA's and the
 // PPU's locks both apply. The M-cycle this read belongs to has already
 // been stepped before this is called.
 u8 GameBoy::busRead(u16 address) const {
     if (dmaBlocks(address)) {
-        return 0xFF;
+        return dmaConflictValue(address);
     }
     if (address >= 0x8000 && address < 0xA000) {
         return ppu_.vramRead(address);

@@ -319,7 +319,9 @@ had to come from the boot ROM's own published code.
     differing pixels: a longer message on screen, further into the chain. Both
     messages were read off the frames in `build/frames`, with the seeding
     disabled and then enabled. It still fails, so the suite total does not
-    move; what the new subtest wants is not diagnosed here.
+    move; what the new subtest wants is not diagnosed here. It was diagnosed
+    later the same day and `bully` now passes - see "What a read that conflicts
+    with an OAM DMA puts on the bus" below.
   - Nine Mealybug tests and `daid/ppu_scanline_bgp` improved, and the `screen`
     group's total error fell from 50,889 differing pixels to 47,799. The reason
     is visible in the references: `m3_obp0_change` and `m3_lcdc_bg_map_change`
@@ -365,7 +367,114 @@ had to come from the boot ROM's own published code.
   bus for a VRAM source, the external bus otherwise); I/O, HRAM and IE stay
   reachable throughout. Test-ROM score: 76 → 85 of 167 (the nine tests
   above gained, nothing lost).
+- **The value a blocked access returns is a different question**, and this
+  entry does not answer it: see "What a read that conflicts with an OAM DMA
+  puts on the bus" immediately below, decided 2026-09-24. Nothing there
+  changes `GameBoy::dmaBlocks` or any of the nine tests above.
 - **Checked:** 2026-09-11.
+
+## What a read that conflicts with an OAM DMA puts on the bus (2026-09-24)
+
+Not a divergence, and not a change to the entry above. That entry settled
+*which* addresses an OAM DMA blocks. This one settles the separate question of
+*what a blocked access returns*, which Pan Docs does not answer at all. The
+answer turns out to be different for the two halves of the transfer, and
+keeping them apart is what lets both bodies of evidence be satisfied at once.
+
+- **The test:** `ashiepaws/bully.gb`, its last subtest. The ROM is a chain that
+  prints the first check it fails; after the post-boot VRAM work of the same day
+  it reached this one and printed "DMA bus conflict always reads $FF".
+- **What the subtest actually does**, disassembled from the vendored ROM (the
+  routine is the last entry of the table at $0E68, so it runs on every model):
+  - $0990 writes $C5, $09 to $FF81-$FF82. That is the address of its own
+    failure string at $09C5, left where the `rst $38` handler at $0038 ->
+    $01FB will find it: the message is printed by the crash path, not by a
+    check.
+  - It saves SP, points it at $D000, pushes $FFFF twice and pops twice, so
+    $CFFA-$CFFD hold $FF and SP is back at $CFFE with the old SP under it.
+  - $09A6 starts an OAM DMA **from $0300 - ROM, the external bus** - and then
+    runs straight on into its own code at $09AA, in ROM. Every fetch from there
+    collides with the DMA.
+  - $0300 is therefore not data but a **program**: `ld b,a / xor a / ld c,a /
+    push bc / inc a / inc a / inc a / pop de / scf / inc de / ld hl,$FF81 /
+    inc a / ld (hl+),a / inc a / ld (hl),a / inc a`, then 142 bytes of $00.
+    The `inc a`s and the `scf` are padding: they sit where a multi-M-cycle
+    instruction's later M-cycles eat the bytes behind its first, so the stream
+    stays aligned to the opcode boundaries.
+  - The checks at $0A4B want **A = 1, B = 3, C = 0, D = $13, E = $37**,
+    `[$FF81] = [$FF82] = 1`, and `[$CFFC] = [$CFFD] = $FF` on DMG. Every one of
+    those is produced by executing that program: `ld b,a` takes the $03 left in
+    A by the write to $FF46 (B = 3); `push bc`'s two writes are discarded, so
+    $CFFC-$CFFD keep their $FF; `pop de`'s two reads land on the discarded
+    words and return the *next two source bytes*, $37 and $13; `ld hl,$FF81`
+    takes its operand from the source too; the two stores to HRAM land, because
+    HRAM is never blocked. The 142 trailing $00 are nops that walk PC through
+    a nine-nop sled at $0A42 and into the checks - the test times itself by
+    counting the DMA's own bytes.
+- **So the subtest asks for exactly one thing:** while a DMA is copying, a CPU
+  read of the bus the DMA is reading returns **the byte the DMA is transferring
+  in that M-cycle**, whatever address the CPU named. The failure message names
+  the alternative it rejects, and what FourShades did: always $FF. Reading $FF
+  makes the fetch at $09AB a `rst $38`, the crash handler prints the string in
+  $FF81-$FF82, and that is the frame that was on screen.
+- **Pan Docs:** silent on the value.
+  [OAM DMA Transfer: OAM DMA bus conflicts](https://gbdev.io/pandocs/OAM_DMA_Transfer.html#oam-dma-bus-conflicts)
+  says which regions the CPU may reach ("On DMG, during OAM DMA, the CPU can
+  access only HRAM") and nothing about what a read of the others yields - it
+  never mentions $FF. The same page does state the matching case for the *other*
+  master on the bus, and it states it the way this decision goes: "If OAM DMA is
+  active during rendering (mode 3), the PPU reads whatever 16-bit word the DMA
+  unit is writing to OAM when the object is fetched." So there is no Pan Docs
+  sentence to overrule here; there is a gap, and a neighbouring sentence that
+  points the same way.
+- **Corroborating documentation:** GBEDG, by the same author as the ROM,
+  [DMA Transfers](https://github.com/Ashiepaws/GBEDG/blob/master/dma/index.md):
+  "When the CPU attempts to read a byte from ROM/RAM during a DMA transfer,
+  instead of the actual value at the given memory address, the byte that is
+  currently being transferred by the DMA transfer is returned", with "Writes to
+  ROM and RAM are completely ignored", "The HRAM section of memory is unaffected
+  by DMA Transfers", and "This also affects the CPU when fetching opcodes,
+  allowing for code execution through DMA transfers". Its claim about *which*
+  regions conflict is the same over-broad one the 2026-09-11 entry above already
+  overruled with nine hardware-verified tests; its claim about the *value* is
+  the one adopted here.
+- **Why this does not disturb the 2026-09-11 decision, and could not.** The nine
+  hardware-verified timing ROMs each run their DMA from **$8000, the video
+  bus**, and read **OAM**. `ret_timing.s` shows they distinguish the two answers
+  on purpose: round 1 writes $20 to $8000 and $80 to $FDFF, points SP at
+  $FDFF-1 and times a `ret` so that its high-byte pop lands in OAM in the
+  M-cycle that copies the transfer's last byte. If that pop returns $FF, PC
+  becomes $FF80 and the HRAM stub there clears A; if it returned the byte under
+  the DMA it would become $2080, where the ROM has planted `ld a,$01`. The test
+  requires the first, on DMG, MGB, SGB, SGB2, CGB, AGB and AGS. Round 2 then
+  repeats it one M-cycle later, after the DMA, and requires the *real* OAM byte.
+  So an OAM read during a DMA must be $FF and must not leak the source.
+- **Decision (2026-09-24).** The two halves are different mechanisms and are
+  modelled as such, in `GameBoy::dmaConflictValue`:
+  - **The source bus is a conflict.** The DMA's read and the CPU's read reach
+    the same bus in the same M-cycle, the memory answers once, and both latch
+    the same byte. A blocked read there returns the byte the DMA is
+    transferring. `GameBoy::tickDma` keeps it in `dmaCurrentByte_`.
+  - **OAM is a lock-out.** The DMA owns the destination outright and the CPU is
+    shut out of it, exactly as the PPU shuts it out in modes 2 and 3, and a
+    shut-out OAM read reads $FF - as it already did.
+  - Writes are unchanged: a blocked write is discarded, and HRAM, I/O and IE are
+    never blocked. `dmaBlocks` is untouched, so which addresses are blocked is
+    exactly what 2026-09-11 decided.
+- **Evidence that the split is load-bearing, not a convenience.** A throwaway
+  build that dropped the OAM case and let every blocked read return the source
+  byte took `cpu & interrupts` from 31 of 31 to **22 of 31** - precisely the
+  nine ROMs of the 2026-09-11 entry - and `oam dma` from 6 of 6 to 3 of 6, and
+  failed four unit assertions. A build that took the byte one M-cycle ahead
+  (`peek(from + 1)`) failed 17 unit assertions, `oam dma` fell to 2 of 6, and
+  `bully` failed at 248 pixels. The pre-change behaviour, $FF everywhere, is
+  the red run the two new unit cases were written against: 16 assertions.
+- **Effect.** `ashiepaws/bully.gb` goes from 421 differing pixels to **exact**.
+  Test ROMs 140 -> **141 of 165**, `screen` 5 -> 6 of 30. A full run diffed
+  test by test against the previous one shows **exactly one** changed verdict
+  and not one other pixel anywhere in the suite. SingleStepTests unchanged at
+  499 of 500 (the deliberate STOP-length divergence at the top of this file).
+- **Checked:** 2026-09-24.
 
 ## Object priority when sprites overlap: approximates Pan Docs' smaller-X-then-OAM-index rule (2026-09-14)
 
@@ -734,12 +843,17 @@ alone explains it.
 
 ## Screenshot tests still failing once the pixel pipeline was finished (2026-09-21)
 
-Twenty-six of the thirty tests in the `screen` group still fail. Each is
+Twenty-four of the thirty tests in the `screen` group still fail. Each is
 listed with the number of the 23,040 pixels that differ, what it measures and
-why it is not fixed. Four pass: `acid/dmg-acid2`,
+why it is not fixed. Six pass: `acid/dmg-acid2`,
 `mooneye/manual-only/sprite_priority`,
-`mealybug-tearoom-tests/ppu/m2_win_en_toggle` and, new in this task,
-`mealybug-tearoom-tests/ppu/m3_bgp_change`.
+`mealybug-tearoom-tests/ppu/m2_win_en_toggle`,
+`mealybug-tearoom-tests/ppu/m3_bgp_change` (this section's own task) and two
+that the power-on and OAM DMA work of 2026-09-24 took from failing to exact,
+`daid/stop_instr` and `ashiepaws/bully`. Those two no longer have rows in the
+table below; the notes after it say what each was and what settled it. Every
+count here was re-measured on 2026-09-24 from a full run, and the twenty-four
+below come to 47,378 differing pixels.
 
 **The window re-activates mid-line, and FourShades never does** - the single
 largest unmodelled behaviour left, and the cause of five of the entries below.
@@ -769,7 +883,6 @@ records for `m3_lcdc_win_en_change_multiple`.
 | `m3_lcdc_bg_map_change` | 316 | mid-line LCDC bit 3 changes |
 | `m3_scx_low_3_bits` | 324 | mid-line SCX changes inside the fetch |
 | `m3_lcdc_obj_size_change` | 410 | mid-line LCDC bit 2 changes; 60 worse under the seven-dot shift, cause unknown (see below) |
-| `ashiepaws/bully` | 421 | fails "DMA bus conflict always reads $FF"; the power-on VRAM subtests pass (see above) |
 | `m3_lcdc_obj_en_change_variant` | 532 | mid-line LCDC bit 1 changes |
 | `m3_window_timing_wx_0` | 584 | the WX < 7 window start costs the wrong number of dots |
 | `m3_wx_5_change` | 638 | window re-activation |
@@ -783,7 +896,6 @@ records for `m3_lcdc_win_en_change_multiple`.
 | `daid/ppu_scanline_bgp` | 7186 | disagrees with the Mealybug references by 12 dots |
 | `m3_lcdc_win_en_change_multiple` | 8316 | window re-activation (LCDC bit 5) |
 | `m3_wx_6_change` | 13799 | WX = 6 is not a one-pixel shift of WX = 7 |
-| `daid/stop_instr` | 22739 | undiagnosed; the wake-up landed 2026-09-22 and the count did not move |
 
 The mid-line LCDC, SCX and SCY entries above are all the same shape: the
 register is read live, at the dot the fetcher needs it, but which of a fetch's
@@ -904,11 +1016,12 @@ Notes on the ones that are more than "a behaviour not written yet":
   the count stayed at 22,739 exactly, which is what pointed at the screen
   rather than at STOP. See "STOP stops the PPU and blanks the LCD" near the top
   of this file.
-- **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (421).** Neither's
-  verdict is diagnosed, and both were failing before the pixel pipeline was
-  finished and still are. Their counts did not both stand still, though, and an
-  earlier version of this entry said they did. `strikethrough` has been 53
-  throughout. `bully` has been 346, then 290, then 346 again, then 421:
+- **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (was 421, now 0).**
+  `strikethrough`'s verdict is still not diagnosed; it was failing before the
+  pixel pipeline was finished and still is, at 53 pixels throughout. `bully`
+  was the same kind of entry until 2026-09-24, when three pieces of work in a
+  row walked it down its chain of subtests to a pass. Its counts went 346, 290,
+  346, 421, 0:
   - it was 346 until the first power-on change (the PPU starting at line 153 in
     mode 1 rather than line 0 in mode 2) took it to 290 - measured on
     2026-09-22 by building the commit before that change and running the ROM
@@ -940,7 +1053,18 @@ Notes on the ones that are more than "a behaviour not written yet":
     a message and the ROM has not been disassembled at that point. It is the
     next thing to look at, not something this entry claims to know. That run
     also moved ten other screenshot counts, all downwards; the post-boot VRAM
-    entry says why.
+    entry says why. It was disassembled later the same day, and the sub-bullet
+    below replaces the guess with what it actually wants.
+  - it went to **0 - exact - the same day**, once that subtest was disassembled
+    and turned out to be asking for a behaviour rather than a power-on value: a
+    CPU read that conflicts with an OAM DMA sees the byte the DMA is
+    transferring, not $FF. "What a read that conflicts with an OAM DMA puts on
+    the bus" above carries the disassembly, the evidence and the decision. The
+    guess above was in the right direction and wrong about the scope - the ROM
+    does not want $FF replaced everywhere, only on the bus the DMA is reading.
+    `bully` is the only screenshot ROM whose count has ever risen on its way to
+    passing, which is what a picture comparator does to a chain of subtests
+    that prints the first one it fails.
 
 - **Checked:** 2026-09-22; `bully`'s count and the group total re-measured
   2026-09-24. Every count in this section is from a full run of `rom_runner`; the per-pixel diff maps quoted above were taken from the
