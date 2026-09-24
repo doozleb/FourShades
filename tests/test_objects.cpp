@@ -366,20 +366,75 @@ void setUpHeightRuler(Ppu& ppu) {
 }
 } // namespace
 
-TEST_CASE("an object fetch reads LCDC bit 2 two dots before the pixel it pre-empts") {
+TEST_CASE("an object fetch reads LCDC bit 2 to build each half of its row's address") {
     // The height goes into the fetch's VRAM address, so it is read on the dot
-    // the address is built - which Pan Docs puts two dots before the pre-empted
-    // pixel (see PixelPipeline::kObjectDataDots). The object at screen x = 16
-    // is fetched once pixel 16 is due, on line dot 116, and its eleven dots put
-    // that pixel on dot 127 and the address on dot 125. Bit 2 set on dot 124 is
-    // visible from dot 125, so this fetch is the 8x16 one; an address built even
-    // one dot earlier is still the 8x8 one.
+    // the address is built. The object at screen x = 16 is fetched once pixel 16
+    // is due, on line dot 116, and its eleven dots put that pixel on dot 127,
+    // its low bitplane's address on dot 124 (kObjectDataDots) and its high
+    // bitplane's on 126 (kObjectDataHighDots). Bit 2 set on dot 120 is visible
+    // from 121, before both of those, so the whole row is the 8x16 one.
     Ppu ppu;
     setUpHeightRuler(ppu);
     putObject(ppu, 0, 16, 8 + 16, 3, 0x00); // screen x = 16, tile 3
-    const u8* row = lineWithWrites(ppu, 1, {{124, 0xFF40, 0x97}}); // 8x16 from dot 125
+    const u8* row = lineWithWrites(ppu, 1, {{120, 0xFF40, 0x97}}); // 8x16 from dot 121
     CHECK(row[16] == 2); // tile 2's colour 2, not tile 3's colour 1
     CHECK(row[23] == 2);
+}
+
+TEST_CASE("that fetch's low half is read no later than three dots before its pixel") {
+    // The same fetch, and the write moved one M-cycle later: bit 2 set on dot
+    // 124 is visible from 125, which is after the low bitplane's address was
+    // built on 124 and before the high one's on 126. So the row comes out mixed -
+    // tile 3's low half under tile 2's high half, colour 3, where either height
+    // alone gives 1 or 2. A low half read two dots before the pixel, which is
+    // what Pan Docs' dot count suggests and what this was until two hardware
+    // photographs were decoded, would make the whole row the 8x16 one instead.
+    // See PixelPipeline::kObjectDataDots.
+    Ppu ppu;
+    setUpHeightRuler(ppu);
+    putObject(ppu, 0, 16, 8 + 16, 3, 0x00); // screen x = 16, tile 3
+    const u8* row = lineWithWrites(ppu, 1, {{124, 0xFF40, 0x97}});
+    CHECK(row[16] == 3);
+    CHECK(row[23] == 3);
+}
+
+TEST_CASE("an object off the left edge is read before pixel 0, not at the end of its stall") {
+    // An object's fetch is timed to the dot its own leftmost pixel is due, and
+    // for an object off the left edge that dot comes before pixel 0's: the eight
+    // pixels of the row the fetcher throws away at the top of a line are the
+    // line's first eight ticks of the pixel clock, at screen x = -8 to -1. So
+    // the object at OAM X = 1, whose leftmost pixel is seven of them early,
+    // reads its row seven dots before an object at the screen edge would - on
+    // dots 100 and 102, where pixel 0 is not drawn until dot 110.
+    //
+    // Bit 2 set on dot 104 is visible from 105, after both of those dots, so
+    // this object is the 8x8 one: its only visible pixel, the eighth, is tile
+    // 3's colour 1. OBP0 shades that 3 so it cannot be confused with the
+    // background, which is colour 1 too. See PixelPipeline::objectEarlyDots_ and
+    // docs/known-divergences.md, "An object off the left edge is read on the dot
+    // its own pixel is due".
+    Ppu ppu;
+    setUpHeightRuler(ppu);
+    static_cast<void>(ppu.write(0xFF48, 0xEC)); // OBP0: colour 1 -> shade 3
+    putObject(ppu, 0, 16, 1, 3, 0x00); // screen x = -7, tile 3
+    const u8* row = lineWithWrites(ppu, 1, {{104, 0xFF40, 0x97}});
+    CHECK(row[0] == 3); // tile 3's colour 1, read before the write landed
+}
+
+TEST_CASE("an object at the screen edge is read after pixel 0's own dot") {
+    // The same write, the same line, one OAM X further right: the object at
+    // OAM X = 8 has its leftmost pixel at screen x = 0, so its fetch is timed to
+    // pixel 0 and reads its row on dots 108 and 110 - both after bit 2 became
+    // visible on dot 105. This one is the 8x16 object, and it is what tells the
+    // two cases apart: Pan Docs gives an OAM X of 0 and one of 8 the same
+    // eleven-dot penalty, and they are still not read on the same dots.
+    Ppu ppu;
+    setUpHeightRuler(ppu);
+    static_cast<void>(ppu.write(0xFF48, 0xEC)); // OBP0: colour 1 -> shade 3
+    putObject(ppu, 0, 16, 8, 3, 0x00); // screen x = 0, tile 3
+    const u8* row = lineWithWrites(ppu, 1, {{104, 0xFF40, 0x97}});
+    CHECK(row[0] == 2); // tile 2's colour 2
+    CHECK(row[7] == 2);
 }
 
 TEST_CASE("an object fetch reads LCDC bit 2 no later than that, and again a dot later") {
@@ -390,14 +445,14 @@ TEST_CASE("an object fetch reads LCDC bit 2 no later than that, and again a dot 
     // one. The transparent object at screen x = 0 costs eleven dots, so pixel 0
     // is drawn on dot 111 and pixel 1 is due on 112; the object at screen x = 1
     // is fetched there, pays the flat six dots alone (its tile was already
-    // counted), and so builds its low bitplane's address on dot 116, its high
+    // counted), and so builds its low bitplane's address on dot 115, its high
     // bitplane's on 117, and draws on dot 118.
     //
     // Bit 2 set on dot 116 is visible from dot 117, so this is the write that
     // falls *between* the two bitplanes: the low half is the 8x8 object's and
     // the high half the 8x16 object's, and the row the object draws is mixed out
-    // of both - colour 3, where either height alone gives 1 or 2. A low bitplane
-    // built one dot later would make the whole row the 8x16 one, colour 2. See
+    // of both - colour 3, where either height alone gives 1 or 2. A high bitplane
+    // built one dot earlier would make the whole row the 8x8 one, colour 1. See
     // docs/known-divergences.md, "An object fetch reads its two bitplanes on two
     // dots, and builds each address the way the hardware does".
     Ppu ppu;

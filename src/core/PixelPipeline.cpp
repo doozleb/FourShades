@@ -33,6 +33,7 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     objectFetching_ = false;
     objectLowRead_ = false;
     objectLow_ = 0;
+    objectEarlyDots_ = 0;
     objectLeadDots_ = 0;
     fifoLead_ = 0;
     drawn_ = 0;
@@ -235,6 +236,19 @@ void PixelPipeline::startObject(const Ppu& ppu, std::size_t index) {
     objectFetching_ = true;
     objectLowRead_ = false;
     objectLow_ = 0;
+    // The dot this fetch is timed to is the dot the object's own leftmost pixel
+    // is due, and for an object off the left edge that dot is this many before
+    // the dot pixel 0 is due: the pixels of the line's first row, the one the
+    // fetcher throws away, are the line's first eight ticks of the pixel clock.
+    // See objectEarlyDots_ and kObjectDataDots.
+    const int screenX = static_cast<int>(ppu.lineObjects()[index].x) - 8;
+    // Never more than the stall can hold: the fetch's two reads are dots of the
+    // stall, so the earlier of them is the stall's first dot at the earliest.
+    // The clamp binds only for an object off the left edge whose tile term is
+    // short enough that its own pixel was due before the stall began, which
+    // needs a non-zero SCX; nothing in the 165 reaches it with SCX = 0.
+    const int early = objectDots_ - kObjectDataDots;
+    objectEarlyDots_ = screenX < 0 ? (-screenX < early ? -screenX : early) : 0;
     if (firstOnLine) {
         // The line's first object fetch is where the fetcher takes its lead and
         // the FIFO starts carrying it. See kObjectFetcherLead.
@@ -248,7 +262,12 @@ void PixelPipeline::abandonObjectIfDisabled(const Ppu& ppu) {
     // has exactly kObjectFetchDots left, and bit 1 is read there: a fetch that
     // does not begin charges nothing beyond the wait, so the stall ends here and
     // this dot draws the pixel the fetch would have pre-empted. See the header.
-    if (objectFetching_ && objectDots_ == kObjectFetchDots && (ppu.lcdc() & 0x02) == 0) {
+    // An object off the left edge is read objectEarlyDots_ dots earlier, so its
+    // own fetch begins that much earlier too - and where that is before the
+    // stall itself begins, it begins on the dot the object was triggered, which
+    // is where stepDot has already read bit 1.
+    if (objectFetching_ && objectDots_ == kObjectFetchDots + objectEarlyDots_ &&
+        (ppu.lcdc() & 0x02) == 0) {
         objectDots_ = 0;
         objectFetching_ = false;
     }
@@ -284,6 +303,24 @@ u16 PixelPipeline::objectRowAddress(const Ppu& ppu) const {
                         ? static_cast<u8>((object.tile & 0xFE) | ((row >> 3) & 1))
                         : object.tile;
     return static_cast<u16>(0x8000 + tile * 16 + (row & 7) * 2);
+}
+
+void PixelPipeline::readObjectRowIfDue(const Ppu& ppu) {
+    // The two halves of the object's row, kObjectDataDots and kObjectDataHighDots
+    // dots before the dot the object's own leftmost pixel is due - the end of the
+    // stall for an object the screen shows, and objectEarlyDots_ dots before that
+    // for one off the left edge. Both dots are inside the stall:
+    // objectEarlyDots_ is clamped so the earlier of them is the stall's own first
+    // dot at the earliest.
+    if (!objectFetching_) {
+        return;
+    }
+    if (objectDots_ == kObjectDataDots - 1 + objectEarlyDots_) {
+        fetchObjectLow(ppu);
+    }
+    if (objectFetching_ && objectDots_ == kObjectDataHighDots - 1 + objectEarlyDots_) {
+        fetchObjectHigh(ppu);
+    }
 }
 
 void PixelPipeline::fetchObjectLow(const Ppu& ppu) {
@@ -769,12 +806,7 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
             stepFetcher(ppu);
         }
         cancelObjectIfDisabled(ppu);
-        if (objectFetching_ && objectDots_ == kObjectDataDots - 1) {
-            fetchObjectLow(ppu);
-        }
-        if (objectFetching_ && objectDots_ == 0) {
-            fetchObjectHigh(ppu);
-        }
+        readObjectRowIfDue(ppu);
         return false;
     }
     // Pan Docs, "Pixel FIFO", on what an object fetch begins with: "the fetcher
@@ -800,6 +832,10 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
             startObject(ppu, i);
             if (objectDots_ > 0) {
                 --objectDots_;
+                // The stall's first dot is one of its dots: an object far
+                // enough off the left edge is read on it. See
+                // readObjectRowIfDue and objectEarlyDots_.
+                readObjectRowIfDue(ppu);
                 return false;
             }
         }

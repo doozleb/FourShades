@@ -160,20 +160,31 @@ public:
     static constexpr int kObjectFetchDots = 6;
 
     // Dots from the dot an object fetch reads the *low* half of its row out of
-    // VRAM to the dot the pixel it pre-empts is drawn. Pan Docs, "Pixel FIFO",
-    // ends the object fetch with "the lower address for the row of pixels of the
-    // target object tile is now retrieved and lengthens mode 3 by 1 dot. Once the
-    // address is retrieved this is the last chance for object fetch cancel to
-    // occur. Exiting object fetch lengthens mode 3 by 1 dot" - the lower address,
-    // then one more dot, then the pixel. The upper half is read on that one more
-    // dot, and builds its own address: see objectRowAddress, fetchObjectLow and
-    // fetchObjectHigh. Everything an address is built from is read on its own
-    // dot and not before: the object's height (LCDC bit 2), its tile, its row.
-    // Measured, not only counted: see docs/known-divergences.md, "An object
-    // fetch reads its row two dots before the pixel it pre-empts" and "An object
-    // fetch reads its two bitplanes on two dots, and builds each address the way
-    // the hardware does".
-    static constexpr int kObjectDataDots = 2;
+    // VRAM to the dot the pixel it pre-empts is drawn, and the same for the
+    // *high* half. Pan Docs, "Pixel FIFO", ends the object fetch with "the lower
+    // address for the row of pixels of the target object tile is now retrieved
+    // and lengthens mode 3 by 1 dot. Once the address is retrieved this is the
+    // last chance for object fetch cancel to occur. Exiting object fetch
+    // lengthens mode 3 by 1 dot". It never says which dot the *upper* address is
+    // retrieved on, and counting its two "1 dot"s puts the lower address two
+    // dots before the pixel - which is what these were until the two Mealybug
+    // Tearoom height references were decoded byte by byte. They pin the high
+    // half one dot before the pixel and refuse two dots for the low half;
+    // three and four both fit, and three is the background fetcher's own
+    // offset, so the object fetch reads its two bitplanes on the same two dots
+    // before the pixel they feed as the background fetcher does (see
+    // stepFetcher: the high bitplane on P-1, the low on P-3). One VRAM read per
+    // dot, two dots apart, on one port.
+    //
+    // Everything an address is built from is read on its own dot and not
+    // before: the object's height (LCDC bit 2), its tile, its row - so a write
+    // that lands between the two dots gives the object a row out of two heights,
+    // which is exactly what those references photograph. See objectRowAddress,
+    // fetchObjectLow, fetchObjectHigh, objectEarlyDots_ and
+    // docs/known-divergences.md, "An object fetch reads its two bitplanes on two
+    // dots, and builds each address the way the hardware does".
+    static constexpr int kObjectDataDots = 3;
+    static constexpr int kObjectDataHighDots = 1;
 
     // The dots by which the LCDC bits that choose a pixel's colour lag the
     // register. Two of them are read when a pixel leaves the FIFO - bit 0,
@@ -330,6 +341,10 @@ private:
     // the object for that line at eight pixels tall. Same entry in
     // docs/known-divergences.md.
     u16 objectRowAddress(const Ppu& ppu) const;
+    // The two halves of the object's row, on the dots they are due: see
+    // objectEarlyDots_ for which dots those are, and why the stall's own first
+    // dot can be one of them.
+    void readObjectRowIfDue(const Ppu& ppu);
     // The low half of the object's row, on the dot Pan Docs retrieves "the lower
     // address" - and with it the last chance for a cancel is over. Not called at
     // all if the fetch was cancelled or abandoned before this dot.
@@ -534,6 +549,17 @@ private:
     // no longer stops the object. See fetchObjectLow.
     u8 objectLow_ = 0;
     bool objectLowRead_ = false;
+    // Dots by which this object's own fetch runs ahead of the end of its stall:
+    // how far off the left edge of the screen its leftmost pixel is, and zero
+    // for every object the screen shows. A fetch is timed to the dot its own
+    // leftmost pixel is due (see kObjectDataDots), and the eight pixels of the
+    // row the fetcher throws away at the top of a line are the line's first
+    // eight pixel-clock ticks, at screen x = -8 to -1 - so an object off the
+    // left edge is read before pixel 0 rather than on the dot pixel 0 is
+    // finally drawn. What the object costs the pixels and the fetcher is not
+    // moved with it; see docs/known-divergences.md, "An object off the left edge
+    // is read on the dot its own pixel is due, not on the dot pixel 0 is".
+    int objectEarlyDots_ = 0;
     // Dots of the stall the background fetcher still runs through; granted once
     // per line at the first object fetch. See kObjectFetcherLead.
     int objectLeadDots_ = 0;
