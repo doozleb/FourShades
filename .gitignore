@@ -6,3 +6,6 @@ tools/roms/data/
 third_party/sdl/SDL3-*/
 third_party/sdl/*.zip
 __pycache__/
+
+# Build output for the browser (web/build_wasm.py). Regenerated, never committed.
+web/dist/
