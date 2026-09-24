@@ -58,10 +58,38 @@ public:
     // restart cost ever changes.
     static constexpr int kWindowRestartDots = 6;
 
+    // The free increments the window's scanline X counter takes before the
+    // line's first pixel is rendered. Pan Docs, "Window behavior":
+    //
+    //   "the PPU maintains a counter, initialized to 0 at the beginning of
+    //   each scanline. The counter is incremented for each pixel rendered;
+    //   however, it also increments 7 times before the first pixel is
+    //   actually rendered (this covers pixels discarded during the initial
+    //   "fine scroll" adjustment). When this counter is equal to WX, if the
+    //   Y condition is true and the Window enable bit is set in LCDC,
+    //   background rendering is reset, beginning anew from the active row of
+    //   the Window's tilemap. The coordinate of the active Window row is
+    //   then incremented."
+    //
+    // So a WX of exactly this value lines the window's first pixel up with
+    // screen x = 0, and a smaller one is matched during the free increments,
+    // leaving the window's leftmost pixels off the screen.
+    static constexpr int kWindowCounterHeadStart = 7;
+
 private:
     enum class Step { Tile, DataLow, DataHigh, Push };
 
     void stepFetcher(const Ppu& ppu);
+    // Every condition the window needs other than the X counter's match:
+    // Pan Docs' "Y condition" and LCDC bit 5, both read live, plus the
+    // one-activation-per-line latch this model still has.
+    bool windowConditions(const Ppu& ppu) const;
+    // Resets background rendering to the window's tilemap, as a counter match
+    // does on hardware.
+    void startWindow(Ppu& ppu);
+    // Takes the counter's kWindowCounterHeadStart free increments, testing it
+    // against WX at each of them.
+    void takeWindowHeadStart(Ppu& ppu);
     u16 tileRowAddress(const Ppu& ppu) const;
     // Dots the fetcher still owes before its next Push, so dotsRemaining can
     // charge a stall the queue cannot cover. Zero when Push is next, which
@@ -96,6 +124,15 @@ private:
     int pixelX_ = 0;   // pixels emitted (0-160)
     int discard_ = 0;  // SCX % 8 pixels dropped at the start of the line
     bool window_ = false;        // drawing the window on this line
+    // The window's scanline X counter (kWindowCounterHeadStart). It is what
+    // WX is compared against: 0 at the top of the line, then the free
+    // increments, then one per pixel rendered. Nothing else in the pipeline
+    // reads it, so while the window is a one-activation-per-line latch it
+    // simply tracks pixelX_ + kWindowCounterHeadStart; the value of having it
+    // is that the comparison is the hardware's comparison rather than
+    // arithmetic on pixelX_, which is what a re-triggerable window needs.
+    int windowX_ = 0;
+    bool windowXHeadStart_ = false; // the free increments have been taken
     int windowSkip_ = 0;         // window pixels off the left edge, for WX < 7
     // The window's own line counter as it stood when the window started on
     // this line, cached so every fetch on the line reads the row the window
