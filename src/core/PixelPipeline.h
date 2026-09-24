@@ -103,8 +103,8 @@ public:
     //
     // An undisturbed line pushes its first tile on the thirteenth dot of
     // rendering - the reset's own dot, a six-dot fetch that is thrown away, and
-    // a six-dot fetch whose Get-Tile-Data-High step both reads the high
-    // bitplane and pushes the row, which is therefore also the dot that tile's
+    // a six-dot fetch whose Get-Tile-Data-High step pushes the row as it
+    // completes, which is therefore also the dot that tile's
     // first pixel leaves the FIFO (see stepFetcher). The last free increment
     // falls on that dot, which is what lines a WX of kWindowCounterHeadStart up
     // with screen x = 0, so
@@ -128,6 +128,11 @@ private:
     enum class Step { Tile, DataLow, DataHigh, Sleep, Push };
 
     void stepFetcher(const Ppu& ppu);
+    // The tile-index stage - Mealybug Tearoom's stage `B` - and every register
+    // that goes into its address: SCX for the map column, SCY for the map row,
+    // LCDC's map-select bit, and the fine-scroll discard that shares SCX's
+    // sample. Called on the stage's first dot; see stepFetcher.
+    void sampleTileIndex(const Ppu& ppu);
     // Offers the row the fetcher has just assembled to the background FIFO.
     // Pan Docs' "3 total chances" are three calls to this - one at the end of
     // Get Tile Data High and one on each Sleep dot - and then the Push step
@@ -255,8 +260,9 @@ private:
     int fetcherX_ = 0;
     bool discardFetch_ = true; // the line's first completed fetch is thrown away
     // Whether the fetch in progress read its tile index from the window's
-    // tilemap, latched at the step that read it. A clear of LCDC bit 5 that
-    // lands after that step leaves a window tile index being addressed with
+    // tilemap, latched on the dot that read it - the tile-index stage's first
+    // dot, see sampleTileIndex. A clear of LCDC bit 5 that
+    // lands after that dot leaves a window tile index being addressed with
     // the background's row - the same shape as the bitplane mixing Mealybug's
     // notes describe for TILE_SEL and SCY - and it also decides whether a push
     // counts as the window having started rendering (see windowRendering_).
@@ -274,8 +280,8 @@ private:
     // kWindowCounterHeadStart - WX of its leftmost pixels that fall off the
     // left edge. One counter for both, because on the hardware they are the
     // same pixels: each costs a dot, and neither advances pixelX_ or the
-    // window's X counter. See startWindow, and stepFetcher's Tile step for
-    // where the fine-scroll half of it is read.
+    // window's X counter. See startWindow, and sampleTileIndex for where the
+    // fine-scroll half of it is read.
     int discard_ = 0;
     // The fetcher is drawing the window right now. Set when the X counter
     // matches WX and cleared again by stopWindowIfDisabled when LCDC bit 5
