@@ -80,14 +80,41 @@ private:
     enum class Step { Tile, DataLow, DataHigh, Push };
 
     void stepFetcher(const Ppu& ppu);
+    // Pan Docs' two hardware conditions on a counter match: the "Y condition"
+    // and LCDC bit 5, both read live, on the dot the match is tested. What the
+    // match then does depends on whether the window is already drawing.
+    bool windowEnabled(const Ppu& ppu) const;
     // Every condition the window needs other than the X counter's match:
-    // Pan Docs' "Y condition" and LCDC bit 5, both read live, and that the
-    // window is not already drawing. All three are hardware conditions; there
-    // is no once-per-line latch, because none is needed - see window_.
+    // windowEnabled above, and that the window is not already drawing. All
+    // three are hardware conditions; there is no once-per-line latch, because
+    // none is needed - see window_.
     bool windowConditions(const Ppu& ppu) const;
     // Resets background rendering to the window's tilemap, as a counter match
     // does on hardware.
     void startWindow(Ppu& ppu);
+    // What a counter match does instead when the window is *already* drawing,
+    // which is the case a WX moved ahead of the counter mid-window reaches.
+    // Pan Docs, "Pixel FIFO":
+    //
+    //   "When the value of WX changes after the window has started rendering
+    //   and the new value of WX is reached again, a pixel with color value of 0
+    //   and the lowest priority is pushed onto the background FIFO."
+    //
+    // Colour 0 rather than a shade: it goes through BGP at emission like any
+    // other background pixel, and it is the lowest priority for free, because
+    // an object beats a background colour of 0 whatever the object's own
+    // priority flag says. And a *push*: the pixel is an extra one, so the rest
+    // of the line moves a pixel right and its last pixel falls off the edge.
+    // It costs no dots - the dot it is emitted on is the dot the fetcher's own
+    // push was going to use, and the fetcher simply pushes a dot later.
+    //
+    // "onto the background FIFO" is taken at its word: the FIFO has one push
+    // port and takes a push only when it is empty, exactly as the fetcher's
+    // push does (see Step::Push), so a match that lands part-way through a tile
+    // is swallowed. That is measured, not assumed - see
+    // docs/known-divergences.md, "A WX changed while the window is drawing
+    // pushes one colour-0 pixel, and only onto an empty FIFO".
+    void pushWindowShiftPixel();
     // Hands the line back to the background if LCDC bit 5 has gone low while
     // the window was drawing. Mealybug Tearoom's PPU notes, quoted in
     // docs/known-divergences.md:
@@ -182,6 +209,20 @@ private:
     // window's row, so one line can start the window any number of times.
     int windowX_ = 0;
     bool windowXHeadStart_ = false; // the free increments have been taken
+    // The highest counter value already compared against WX, or -1 if none has
+    // been. The comparison runs every dot but the counter does not move every
+    // dot: it stands still for the six dots an activation's fetcher restart
+    // takes, for every dot an object fetch stalls, and - all at once, in one dot
+    // - across the whole of its kWindowCounterHeadStart free increments. Pan
+    // Docs' pixel FIFO sentence is about a WX the counter "is reached again",
+    // so a value the counter is merely already sitting on is not one: this is
+    // what tells the two apart. Only pushWindowShiftPixel reads it, because a
+    // repeated match is only a problem there - a second activation is already
+    // ruled out by window_ - and without it every activation would be followed
+    // by a colour-0 pixel from its own match, and a WX written to any value at
+    // or below kWindowCounterHeadStart would push one for a counter value the
+    // free increments had already been through.
+    int windowComparedX_ = -1;
     int windowSkip_ = 0;         // window pixels off the left edge, for WX < 7
     // The window's own line counter as it stood when the window started on
     // this line, cached so every fetch on the line reads the row the window

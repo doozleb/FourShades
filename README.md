@@ -6,7 +6,7 @@ and measured, honestly, against the public test ROMs.
 <!-- scoreboard:start -->
 ```
 cpu instructions  ███████████████░   499 / 500
-test roms         █████████████░░░   141 / 165
+test roms         █████████████░░░   144 / 165
 ```
 <!-- scoreboard:end -->
 
@@ -79,7 +79,7 @@ The test-ROM line, group by group, with the first test each group fails:
 | timer | 13 / 13 |  |
 | mbc1 | 13 / 13 |  |
 | mbc2 / mbc5 | 15 / 15 |  |
-| screen | 6 / 30 | `mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG)`: differs from the reference in 2104 pixels |
+| screen | 9 / 30 | `mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG)`: differs from the reference in 2104 pixels |
 | mbc3 / rtc | 3 / 3 |  |
 
 Not counted (informational in the Shootout, no pass condition): `acid/which.gb (DMG)`, `daid/rom_and_ram.gb`.

@@ -1062,6 +1062,137 @@ one comparison that had to change with it, and what it measured.
   which is the WX-below-7 start-up cost in the entry below.
 - **Checked:** 2026-09-24.
 
+## A WX changed while the window is drawing pushes one colour-0 pixel, and only onto an empty FIFO (2026-09-24)
+
+Not a divergence: the behaviour is implemented and Pan Docs states it. What is
+recorded here is the two things Pan Docs' sentence leaves open, which the DMG
+references settle, and the one-match-per-counter-value rule the implementation
+needed.
+
+- **Evidence, Pan Docs, [Pixel FIFO](https://gbdev.io/pandocs/pixel_fifo.html):**
+  "When the value of WX changes after the window has started rendering and the
+  new value of WX is reached again, a pixel with color value of 0 and the
+  lowest priority is pushed onto the background FIFO."
+- **Tests:** Mealybug Tearoom `m3_wx_4_change`, `m3_wx_5_change` and
+  `m3_wx_4_change_sprites`. All three run the same mode-2 STAT handler: set WX
+  to 4 (or 5) while still in mode 2, then WX = LY and then WX = 80 during mode
+  3. Traced, the second write lands on line dot 96 and the third on dot 192,
+  and the line's first pixel is emitted on dot 100 - so the second write is a
+  WX moved *ahead* of a counter that is already at 7, with the window drawing.
+- **It is a push, not a substitution.** Each reference is, line for line,
+  FourShades' own line with one colour-0 pixel **inserted**: the rest of the
+  line moves one pixel right and its last pixel falls off the edge. Searching
+  every insertion position for each failing line gave an exact 23,040-pixel
+  match, and the position is always screen x = WX - 7, the pixel at which the
+  counter equals the new WX.
+- **It costs no dots.** The dot the pushed pixel is emitted on is the dot the
+  fetcher's own push was going to use, so the fetcher pushes one dot later and
+  the line still emits 160 pixels in the same number of dots; one fetched pixel
+  is lost at the right-hand edge instead. Mode 3's length is unchanged, which
+  `ppu timing` 12 / 12 and the unit suite's mode-3 lengths both hold to.
+- **"Onto the background FIFO" is literal: the FIFO takes a push only when it
+  is empty.** This is measured, not assumed. `m3_wx_4_change` differs on
+  lines 12, 20, 28 ... 92 and nowhere else; `m3_wx_5_change` on lines 13, 21,
+  ... 93. Those are exactly the lines whose insertion point, WX - 7 = LY - 7,
+  falls on one of the drawing window's tile boundaries - x = 5, 13, 21 ... for
+  WX = 4 (three pixels clipped) and x = 6, 14, 22 ... for WX = 5 (two) - which
+  is where the background FIFO is empty at the top of the dot. On every other
+  line the match lands part-way through a tile and the reference shows no shift
+  at all. Pushing at the back of a non-empty FIFO instead was built and
+  measured: it puts the pixel where the FIFO's tail is rather than where the
+  references show it, and the lines that should be untouched shift. So the
+  colour-0 pixel contends for the FIFO's single push port exactly as the
+  fetcher's own push does.
+- **The pixel is a background colour 0, not a shade.** `m3_wx_4_change_sprites`
+  runs the same sequence under `BGP = $1B`, where background colour 0 shades to
+  3, and its reference shows the pushed pixel as shade 3 on a band that is
+  otherwise flat shade 0. So it goes through BGP at emission like any other
+  background pixel. Its "lowest priority" then costs nothing to model: an
+  object already beats a background colour of 0 whatever the object's own
+  priority flag says. That same ROM shows it from the other side - its line 20
+  is the one line whose insertion point is covered by an object, and the
+  reference draws the object there, not the pushed pixel.
+- **The window's row does not advance.** Pan Docs advances "the coordinate of
+  the active Window row" when a match *resets background rendering*; this match
+  does not, so it is not an activation. `m2_win_en_toggle`, the canary for the
+  row counter, stays exact.
+- **One match per counter value, which needed a field.** The comparison runs on
+  every dot but the counter does not move on every dot: it stands still for the
+  six dots an activation's fetcher restart takes, for every dot an object fetch
+  stalls, and - all at once, within one dot - across the whole of its seven free
+  increments. Without a memo of the highest counter value already compared
+  (`windowComparedX_`), every activation would be followed by a colour-0 pixel
+  from its own match, and a WX written to any value from 0 to 7 after the free
+  increments had been through them would push one for a value the counter was
+  merely already sitting on rather than had "reached again". That second case is
+  not hypothetical: it is line 7 of all three ROMs, where the handler writes
+  WX = LY = 7 with the counter already at 7, and it was 72, 121 and 1 differing
+  pixels before the memo covered the free increments.
+- **Effect:** `m3_wx_4_change` 229 differing pixels -> **0, passing**,
+  `m3_wx_5_change` 638 -> **0, passing**, `m3_wx_4_change_sprites` 10 -> **0,
+  passing**. `m3_wx_6_change` 13799 -> 13810 (see the next entry: its root
+  cause is elsewhere, and those 11 pixels are a consequence of it). No other
+  test in the suite moved by a pixel; `ppu timing` 12 / 12, and
+  `m3_bgp_change`, `dmg-acid2` and `m2_win_en_toggle` all still exact. The
+  `screen` group's differing-pixel total went 33670 -> 32804.
+- **Checked:** 2026-09-24.
+
+## `m3_wx_6_change`: diagnosed, and it is the free increments' timing, not WX = 6 (2026-09-24)
+
+This replaces the "it has not been diagnosed" note further down. The ROM is
+still failing; what is new is that its reference has been reproduced exactly on
+paper, so the behaviour it needs is now named.
+
+- **What the ROM does.** Identical to `m3_wx_4_change` and `m3_wx_5_change`
+  except for one constant: its mode-2 handler writes WX = 6 (line dot 52,
+  still mode 2), then WX = LY (dot 96), then WX = 80 (dot 192), with WY = 4.
+- **What its reference shows,** read off the decoded tilemaps rather than
+  guessed at:
+  - lines 4 and 5 have **no window at all** - they are background rows 4 and 5;
+  - from line 6 the window activates **once** per line at screen
+    x = LY - 7, so its left edge walks one pixel right per line, and it draws
+    one window row per activation starting at row 0 on line 6;
+  - from line 102 there is no window again, because the counter only reaches
+    LY after the third write has moved WX to 80.
+- **Reproduced exactly.** A frame computed from that rule and the ROM's own
+  decoded background and window tilemaps matches the DMG reference in **all
+  23,040 pixels**. The same computation with any other last-activating line than
+  101 does not (9, 66 and 73 pixels wrong for 102, 100 and 103), so the rule is
+  pinned, not fitted.
+- **So the initial WX = 6 never activates the window on hardware, and WX = 4
+  and WX = 5 do.** The difference is timing, not the value: the second write
+  lands on dot 96, so the counter must already have compared 4 and 5 by then -
+  hence the WX = 4 and WX = 5 activations, which those two references confirm -
+  and must not compare 6 until after it. On line 6, where the second write
+  leaves WX at 6, the comparison then matches and the window starts; on lines 4
+  and 5 WX has been moved behind the counter first, so it never does.
+- **What FourShades does instead.** `takeWindowHeadStart` takes all seven free
+  increments, and all eight comparisons, **within one dot** - the first dot of
+  the pipeline, line dot 88. Every value from 0 to 7 is therefore compared
+  before dot 96, so WX = 6 activates the window on lines 4 and 5 too, and the
+  frame is wrong from line 4 down. That placement is already recorded as
+  deliberately not the hardware's in "The window's scanline X counter, and the
+  evidence for it, quoted"; this ROM is the measurement of what it costs.
+- **The constraint it puts on the fix**, for whoever spreads the increments: the
+  counter must have compared 5 at or before the dot the write lands (just after
+  line dot 96) and must not compare 6 until after it. With one comparison per
+  dot that puts value *v* on line dot 91 + *v*, against a first pixel emitted on
+  dot 100. `m3_window_timing` and `m3_window_timing_wx_0`, which measure the
+  window start-up cost for every WX from 0 to 10, are the other half of the
+  evidence and must be satisfied by the same spread.
+- **A second interaction to expect when it is fixed.** Once the increments are
+  spread, `m3_wx_5_change`'s line 6 becomes a WX moved from 5 to 6 while the
+  counter still sits inside its free increments and the window has just
+  activated, which is a colour-0 push before the line's first pixel. That
+  reference passes exactly today, so it is the test to watch.
+- **Effect of this task on it:** 13799 -> 13810. The extra 11 pixels are one
+  each on lines 14, 22, 30 ... 94 - the lines whose insertion point, LY - 7,
+  lands on a tile boundary of a window that should not be drawing at all - so
+  they are a downstream consequence of the activation above, not a second
+  fault. They are left rather than suppressed, because suppressing them would
+  mean special-casing a rule the other three references pin.
+- **Checked:** 2026-09-24.
+
 ## A WX below 7 pushes the window's leftmost pixels off the screen (2026-09-21)
 
 - **Tests:** Mealybug Tearoom `m3_wx_4_change` and `m3_wx_5_change` set WX to
@@ -1188,10 +1319,13 @@ Notes on the ones that are more than "a behaviour not written yet":
   reference draws the window two rows behind and two pixels right of where
   WX = 5's does, and shows the background on lines the window covers in the
   WX = 5 image. Since the three ROMs differ only in that one constant, WX = 6
-  is doing something else on hardware; it has not been diagnosed. The WX
-  clipping above made it 518 pixels worse, which is not evidence against the
-  clipping - the WX = 4 and WX = 5 references pin that - only a sign that
-  whatever WX = 6 does is not a clip.
+  is doing something else on hardware. **Diagnosed on 2026-09-24:** it is the
+  dots the window X counter's free increments are spread over, and the
+  reference has been reproduced exactly on paper - see the entry
+  "`m3_wx_6_change`: diagnosed, and it is the free increments' timing, not
+  WX = 6" above. The WX clipping above made it 518 pixels worse, which is not
+  evidence against the clipping - the WX = 4 and WX = 5 references pin that -
+  only a sign that whatever WX = 6 does is not a clip.
 - **`m3_scx_high_5_bits` (80).** Only the third background tile of a line
   (x = 16-23) is ever wrong, and only on the 28 lines where SCX = LY crosses a
   tile boundary: the SCX write lands within a dot or two of that tile's map
