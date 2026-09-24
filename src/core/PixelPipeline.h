@@ -159,16 +159,20 @@ public:
     // begins, and a fetch that never begins charges only the wait".
     static constexpr int kObjectFetchDots = 6;
 
-    // Dots from the dot an object fetch reads its row out of VRAM to the dot
-    // the pixel it pre-empts is drawn. Pan Docs, "Pixel FIFO", ends the object
-    // fetch with "the lower address for the row of pixels of the target object
-    // tile is now retrieved and lengthens mode 3 by 1 dot. Once the address is
-    // retrieved this is the last chance for object fetch cancel to occur.
-    // Exiting object fetch lengthens mode 3 by 1 dot" - the read, then one more
-    // dot, then the pixel. Everything the address is built from is read on that
+    // Dots from the dot an object fetch reads the *low* half of its row out of
+    // VRAM to the dot the pixel it pre-empts is drawn. Pan Docs, "Pixel FIFO",
+    // ends the object fetch with "the lower address for the row of pixels of the
+    // target object tile is now retrieved and lengthens mode 3 by 1 dot. Once the
+    // address is retrieved this is the last chance for object fetch cancel to
+    // occur. Exiting object fetch lengthens mode 3 by 1 dot" - the lower address,
+    // then one more dot, then the pixel. The upper half is read on that one more
+    // dot, and builds its own address: see objectRowAddress, fetchObjectLow and
+    // fetchObjectHigh. Everything an address is built from is read on its own
     // dot and not before: the object's height (LCDC bit 2), its tile, its row.
     // Measured, not only counted: see docs/known-divergences.md, "An object
-    // fetch reads its row two dots before the pixel it pre-empts".
+    // fetch reads its row two dots before the pixel it pre-empts" and "An object
+    // fetch reads its two bitplanes on two dots, and builds each address the way
+    // the hardware does".
     static constexpr int kObjectDataDots = 2;
 
     // The dots by which the LCDC bits that choose a pixel's colour lag the
@@ -310,10 +314,30 @@ private:
     // pre-empts. Nothing of the object is read here, which is what lets a
     // write that lands in between change it - or cancel the fetch outright.
     void startObject(const Ppu& ppu, std::size_t index);
-    // The end of an object fetch: reads the object's row out of VRAM with the
-    // height LCDC bit 2 gives now, and merges it into the pixels the queue is
-    // about to emit. Not called at all if the fetch was cancelled.
-    void fetchObjectRow(const Ppu& ppu);
+    // The VRAM address of the low half of the row the object being fetched wants,
+    // built from LCDC bit 2 as it reads on the dot this is called - so the two
+    // bitplanes, read a dot apart, can disagree about the object's height and
+    // give it a row out of two of them. A Mealybug Tearoom reference photographs
+    // exactly that.
+    //
+    // The arithmetic is the hardware's, not a height-shaped special case: the
+    // row's low three bits index within a tile, and for a sixteen-pixel object
+    // the row's bit 3 replaces bit 0 of the tile number (Pan Docs, "VRAM Sprite
+    // Attribute Table": "In 8x16 mode ... the least significant bit of the tile
+    // index is ignored"). So a row past the end of an eight-pixel object's tile
+    // wraps inside it rather than running into the next tile - a case only a
+    // mid-line height change reaches, because the OAM scan would not have picked
+    // the object for that line at eight pixels tall. Same entry in
+    // docs/known-divergences.md.
+    u16 objectRowAddress(const Ppu& ppu) const;
+    // The low half of the object's row, on the dot Pan Docs retrieves "the lower
+    // address" - and with it the last chance for a cancel is over. Not called at
+    // all if the fetch was cancelled or abandoned before this dot.
+    void fetchObjectLow(const Ppu& ppu);
+    // The high half, on the fetch's last dot, from an address of its own; then
+    // the row is merged into the pixels the queue is about to emit and the fetch
+    // is over.
+    void fetchObjectHigh(const Ppu& ppu);
     // Pan Docs' condition on starting an object fetch, read on the dot that
     // fetch begins rather than on the dot the object was triggered: the two are
     // kObjectFetchDots dots apart at the end of a wait (see that constant and
@@ -333,7 +357,9 @@ private:
     void abandonObjectIfDisabled(const Ppu& ppu);
     // Pan Docs, "Pixel FIFO": "Object fetching may be canceled if LCDC.1 is
     // disabled while the PPU is fetching an object from OAM", and the last
-    // chance for that is the dot the row's address is retrieved on. A cancelled
+    // chance for that is the dot the row's address is retrieved on: once the low
+    // half of the row has been read the fetch can no longer be cancelled, which
+    // is what objectLowRead_ says. A cancelled
     // fetch still costs every dot it was charged - Pan Docs has the cancel
     // lengthening mode 3 too - so only the merge is skipped. A Mealybug
     // Tearoom reference measures both halves of that: it clears bit 1 across
@@ -502,6 +528,12 @@ private:
     // object it is for.
     std::size_t objectIndex_ = 0;
     bool objectFetching_ = false;
+    // The low half of the object's row, and whether it has been read. The two
+    // halves are read a dot apart, so the first has to be held; and the read is
+    // Pan Docs' last chance for a cancel, so once it has happened bit 1 going low
+    // no longer stops the object. See fetchObjectLow.
+    u8 objectLow_ = 0;
+    bool objectLowRead_ = false;
     // Dots of the stall the background fetcher still runs through; granted once
     // per line at the first object fetch. See kObjectFetcherLead.
     int objectLeadDots_ = 0;

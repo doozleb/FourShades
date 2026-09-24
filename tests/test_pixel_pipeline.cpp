@@ -2375,6 +2375,113 @@ TEST_CASE("an object whose wait is zero is decided by the trigger's own bit 1 re
     CHECK(got.dots == 176); // 172 + 5 - 3, both fetches gone
 }
 
+// ---------------------------------------------------------------------------
+// An object fetch's two bitplanes, and the address they are built from
+//
+// Pan Docs, "Pixel FIFO", ends the object fetch with "the lower address for the
+// row of pixels of the target object tile is now retrieved and lengthens mode 3
+// by 1 dot. Once the address is retrieved this is the last chance for object
+// fetch cancel to occur. Exiting object fetch lengthens mode 3 by 1 dot" - two
+// dots, the lower address on the first and the upper on the second. Each builds
+// its own address, so LCDC bit 2 is read twice and a write that lands between
+// them gives the object a row mixed out of two heights, exactly as a write
+// between the background fetcher's two bitplane stages does.
+//
+// The address itself is the hardware's: the row's low three bits index within a
+// tile, and for a sixteen-pixel object the row's bit 3 replaces bit 0 of the
+// tile number. So an eight-pixel object asked for a row past its tile wraps
+// inside it rather than reading the next tile - which is a case only a mid-line
+// height change reaches, because the OAM scan would not have selected the object
+// for that line at eight pixels tall.
+//
+// Both are measured: see docs/known-divergences.md, "An object fetch reads its
+// two bitplanes on two dots, and builds each address the way the hardware does".
+namespace {
+// One transparent object at OAM X = 8 to move the rest of the line off the
+// M-cycle grid, and the object under test at OAM X = 9 behind it. Traced: the
+// first is fetched on line dot 100 for eleven dots, the second on 112 for six,
+// so the second reads its low bitplane on dot 116 and its high on 117 - and a
+// write landing at the end of the M-cycle ending on 116 falls between them.
+//
+// The object under test is tile 2, whose row 0 is colour 1 and whose pair's
+// second tile (tile 3, which is row 8 of a sixteen-pixel object) is colour 2. So
+// on line 8, where the row asked for is 8, the three cases are three shades:
+// colour 1 if both bitplanes came from row 0, colour 2 if both came from row 8,
+// and colour 3 if the low came from one and the high from the other.
+void setUpObjectHeightRuler(Ppu& ppu) {
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so OAM and VRAM land
+    for (u16 i = 0; i < 16; ++i) { ppu.vramWrite(static_cast<u16>(0x8000 + i), 0x00); }
+    for (u16 i = 0; i < 32; ++i) { ppu.vramWrite(static_cast<u16>(0x8020 + i), 0x00); }
+    for (u16 i = 0; i < 16; ++i) { ppu.vramWrite(static_cast<u16>(0x8040 + i), 0x00); }
+    ppu.vramWrite(0x8020, 0xFF); ppu.vramWrite(0x8021, 0x00); // tile 2 row 0: colour 1
+    ppu.vramWrite(0x8030, 0x00); ppu.vramWrite(0x8031, 0xFF); // tile 3 row 0: colour 2
+    for (u16 i = 0; i < 0x400; ++i) { ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00); }
+    static_cast<void>(ppu.write(0xFF47, 0xE4)); // BGP: the background is colour 0
+    static_cast<void>(ppu.write(0xFF48, 0xE4)); // OBP0: shade == colour
+    ppu.oamWrite(0xFE00, 0x10); ppu.oamWrite(0xFE01, 0x08);
+    ppu.oamWrite(0xFE02, 0x04); ppu.oamWrite(0xFE03, 0x00); // transparent
+    ppu.oamWrite(0xFE04, 0x10); ppu.oamWrite(0xFE05, 0x09);
+    ppu.oamWrite(0xFE06, 0x02); ppu.oamWrite(0xFE07, 0x00); // the object under test
+    enableLcd(ppu, 0x97); // objects on, sixteen pixels tall
+}
+
+// The object under test covers screen x = 1 to 8; the one in front of it is
+// transparent and claims nothing.
+std::string objectPixels(const CharLine& line) { return line.pixels.substr(1, 8); }
+} // namespace
+
+TEST_CASE("an object's two bitplanes are read on two dots, each with its own height") {
+    // LCDC bit 2 cleared on dot 112, so the low bitplane's address is built at
+    // eight pixels tall on 116 and wraps to row 0, and set again on 116, so the
+    // high bitplane's address is built at sixteen on 117 and reads row 8. The row
+    // the object draws comes out of both.
+    Ppu ppu;
+    setUpObjectHeightRuler(ppu);
+    for (int i = 0; i < 8; ++i) { runLine(ppu); } // line 8: the row asked for is 8
+    const CharLine got = characteriseWrites(ppu, {{112, 0xFF40, 0x93}, {116, 0xFF40, 0x97}});
+    CHECK(objectPixels(got) == "33333333");
+}
+
+TEST_CASE("an eight-pixel object's row wraps inside its tile") {
+    // The same write, left clear: both bitplanes are built at eight pixels tall
+    // and the row's low three bits index within the tile, so row 8 is row 0.
+    // Reading past the tile instead draws the next one, colour 2.
+    Ppu ppu;
+    setUpObjectHeightRuler(ppu);
+    for (int i = 0; i < 8; ++i) { runLine(ppu); }
+    const CharLine got = characteriseWrites(ppu, {{112, 0xFF40, 0x93}});
+    CHECK(objectPixels(got) == "11111111");
+}
+
+TEST_CASE("a sixteen-pixel object's row bit 3 picks the second tile of its pair") {
+    // No write at all: sixteen pixels tall throughout, and row 8 is the pair's
+    // second tile. This is the case an ordinary tall object is drawn by, and it
+    // has to keep working when the address is built the hardware's way.
+    Ppu ppu;
+    setUpObjectHeightRuler(ppu);
+    for (int i = 0; i < 8; ++i) { runLine(ppu); }
+    const CharLine got = characteriseWrites(ppu, {});
+    CHECK(objectPixels(got) == "22222222");
+}
+
+TEST_CASE("a bit 1 cleared after the low bitplane is read is past the last chance to cancel") {
+    // Pan Docs: "Once the address is retrieved this is the last chance for object
+    // fetch cancel to occur." The lower address is retrieved on the first of the
+    // fetch's last two dots, so a bit 1 written clear between the two bitplanes
+    // does not cancel the fetch - the object is still merged. Bit 1 is read again
+    // when the pixel is emitted, one dot before the palette shades it, so the
+    // write is set again as soon as the M-cycle grid allows, which is four pixels
+    // later: those four are hidden by the *other* reader and the last four are
+    // what say the row was merged at all. A cancel allowed through here leaves
+    // all eight at the background's colour 0.
+    Ppu ppu;
+    setUpObjectHeightRuler(ppu);
+    for (int i = 0; i < 8; ++i) { runLine(ppu); }
+    const CharLine got = characteriseWrites(ppu, {{116, 0xFF40, 0x95},   // objects off
+                                                  {120, 0xFF40, 0x97}}); // and on again
+    CHECK(objectPixels(got) == "00002222");
+}
+
 TEST_CASE("an object fetch triggered on the dot the window activates does not wait for the window's row") {
     // The two things that can happen on the dot the line's first row reaches the
     // FIFO: the X counter reaches WX and the window resets the fetcher, and an
