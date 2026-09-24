@@ -99,3 +99,52 @@ TEST_CASE("an empty frame stays empty, whatever the correction says") {
     CHECK(correctedSampleCount(0, DriftCorrection::Drop) == 0);
     CHECK(correctedSampleCount(0, DriftCorrection::Repeat) == 0);
 }
+
+// ---------------------------------------------------------------------------
+// The ceiling. A different job from the marks above: those answer drift, this
+// answers a step, and the reason it exists is that a step is not bounded by
+// anything the emulator chooses. A pass round the frame loop runs until the
+// PPU completes a frame, and the PPU completes none while the LCD is off, so
+// a program that switches it off for half a second gets half a second of
+// audio pushed in one pass. One sample a frame needs minutes to walk that
+// back, which is heard as a lag that never goes away.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the ceiling ignores everything the drift policy is there for") {
+    // Nothing at or below it is a step, so nothing at or below it is cut --
+    // the two policies must never both act on the same frame.
+    CHECK(app::excessQueuedSamples(0) == 0);
+    CHECK(app::excessQueuedSamples(app::kLowWaterSamples) == 0);
+    CHECK(app::excessQueuedSamples(app::kTargetQueuedSamples) == 0);
+    CHECK(app::excessQueuedSamples(app::kHighWaterSamples) == 0);
+    CHECK(app::excessQueuedSamples(app::kMaxQueuedSamples) == 0);
+}
+
+TEST_CASE("above the ceiling the whole excess goes at once, down to the target") {
+    // Not a slice, and not down to the ceiling: stopping at the ceiling would
+    // leave two frames for the one-sample-a-frame policy to walk off, and put
+    // the resting depth at 67 ms rather than 33.
+    const std::size_t justOver = app::kMaxQueuedSamples + 1;
+    CHECK(app::excessQueuedSamples(justOver) == justOver - app::kTargetQueuedSamples);
+
+    // The half-second burst this was written for: a queue 24,000 samples deep
+    // comes back to the two-frame target in one step, not in four hundred
+    // seconds of one-sample corrections.
+    CHECK(app::excessQueuedSamples(24000) == 24000 - app::kTargetQueuedSamples);
+    CHECK(24000 - app::excessQueuedSamples(24000) == app::kTargetQueuedSamples);
+}
+
+TEST_CASE("the ceiling is a step, and it never cuts below the target") {
+    // Sweeping it is how we know it is a step function rather than a ramp,
+    // and that no queue depth can be cut to less than the resting depth --
+    // cutting below the target would starve the device and the drift policy
+    // would then spend seconds repeating samples to refill it.
+    for (std::size_t n = 0; n <= 5000; ++n) {
+        const std::size_t excess = app::excessQueuedSamples(n);
+        CHECK(excess <= n);
+        if (excess > 0) {
+            CHECK(n > app::kMaxQueuedSamples);
+            CHECK(n - excess == app::kTargetQueuedSamples);
+        }
+    }
+}

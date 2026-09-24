@@ -4,13 +4,23 @@
 // the SDL side of piece 5b; app/AudioResampler.h is the side with no device
 // in it, where the arithmetic that decides the emulator's pitch lives.
 //
-// Only the drift policy is testable without a sound card, so only the drift
-// policy is written as free functions: they are constexpr, they are in this
-// header, and tests/test_audio_drift.cpp links them without ever touching
-// SDL. The `Audio` class below is the thin part that cannot be tested here
-// -- opening a device, handing it bytes -- and it makes no decisions of its
-// own: it asks driftCorrection() what to do and correctedSampleCount() how
-// much that is, so there is one statement of the policy, not two.
+// There are two policies here and they answer two different problems. The
+// water marks and driftCorrection() answer drift -- the emulator's clock and
+// the sound card's crystal pulling apart -- with at most one sample a frame.
+// kMaxQueuedSamples and excessQueuedSamples() answer a step: a backlog that
+// arrived all at once and is far too large for one sample a frame ever to
+// clear. The first corrects, the second cuts, and they are kept apart so it
+// stays obvious which is which.
+//
+// Only those decisions are testable without a sound card, so only those
+// decisions are written as free functions: they are constexpr, they are in
+// this header, and tests/test_audio_drift.cpp links them without ever
+// touching SDL. The `Audio` class below is the thin part that cannot be
+// tested here -- opening a device, handing it bytes -- and it makes no
+// decisions of its own: it asks driftCorrection() what to do,
+// correctedSampleCount() how much that is and excessQueuedSamples() whether
+// the backlog has stopped being drift, so there is one statement of each
+// policy, not two.
 //
 // SDL3 is deliberately not included here. SDL_AudioStream is an opaque
 // struct, so a forward declaration is enough for the pointer, and that
@@ -68,21 +78,75 @@ inline constexpr double kSamplesPerFrame = static_cast<double>(kAudioSampleRate)
 //
 // Three frames rather than two for the high mark, because the queue does
 // not only drift, it also steps. A pass round the frame loop runs until the
-// PPU completes a frame, so a program that switches the LCD off for a
-// moment -- which they do at boot and on a reset -- gets several frames'
-// worth of emulated time, and several frames' worth of samples, in one
-// pass. Measured at up to 2,100 samples in a single step. The machine
-// really did run that long, so the samples are real and must not be thrown
-// away; the queue simply has to be able to hold them. Neither mark actually
-// contains a step that size: a ~2,100-sample burst on the ~1,607-sample
-// resting queue lands near 3,707, past either mark. What the third frame
-// buys is not containment but recovery time -- nothing is ever discarded,
-// only the one-sample-a-frame drift correction runs a little longer, about
-// 30 seconds, to walk the excess back down. That is a transient, not a
-// latency: the resting depth is still two frames.
+// PPU completes a frame, so a program that switches the LCD off -- which
+// they do at boot and at screen transitions -- gets several frames' worth
+// of emulated time, and several frames' worth of samples, in one pass. The
+// third frame buys the drift correction a little room above the resting
+// depth to absorb a small step without clipping anything.
+//
+// It does not, and cannot, contain a step. See kMaxQueuedSamples: a step is
+// not bounded by anything, and the band above was sized for drift.
 inline constexpr std::size_t kLowWaterSamples = static_cast<std::size_t>(kSamplesPerFrame);
 inline constexpr std::size_t kTargetQueuedSamples = static_cast<std::size_t>(2.0 * kSamplesPerFrame);
 inline constexpr std::size_t kHighWaterSamples = static_cast<std::size_t>(3.0 * kSamplesPerFrame);
+
+// The ceiling -- a different job from the marks above, and the reason they
+// are not enough on their own.
+//
+// The band above answers drift: two crystals pulling apart by a few parts
+// per million, which one sample a frame outruns six times over. It cannot
+// answer a step, and the frame loop produces steps. A pass runs until the
+// PPU completes a frame, and the PPU does not complete frames while the LCD
+// is off, so a pass over an LCD-off stretch emulates however long the
+// program leaves the LCD off and pushes all of it at once. Measured here
+// with a ROM that switches the LCD off for 0.44 s: 22,332 samples out of a
+// single pass, and the queue 21,000 samples deeper afterwards -- 437 ms of
+// latency that one sample a frame needs six minutes to walk back, arriving
+// once per screen transition. There is no number of frames that contains
+// that, because the program chooses it.
+//
+// So above some depth the answer is not to correct more gently, it is to
+// stop pretending the backlog is drift and cut it. Four frames, 66.9 ms:
+//
+//   - A frame above the high-water mark, so nothing that is merely drift or
+//     one late frame can reach it. One sample a frame takes 13.5 seconds to
+//     cross a frame's worth of samples, and the queue is read every frame,
+//     so the gentle policy always gets its turn first and this never fires
+//     on the thing that policy was written for.
+//   - Low enough that the latency it tolerates is not something you can
+//     hear against the picture. ITU-R BT.1359-1 puts the detectability
+//     threshold for sound lagging picture at about 125 ms (and about 45 ms
+//     the other way round, sound early); 66.9 ms sits inside it, and a
+//     couple of frames more would not.
+//   - Deliberately not "larger than the largest step seen", which is the
+//     reasoning that produced the three-frame mark and is unsound: the
+//     largest step is whatever ROM you run next.
+//
+// Crossing it costs one discontinuity: the device's queue is thrown away
+// and refilled to the two-frame target, so the sound jumps forward by the
+// excess and there is a hole of up to two frames -- 33 ms -- where the
+// stale audio was. That is the trade, stated plainly: one 33 ms dropout,
+// once per screen transition, against a lag that never goes away.
+inline constexpr std::size_t kMaxQueuedSamples = static_cast<std::size_t>(4.0 * kSamplesPerFrame);
+
+// How much latency to throw away, given a queue of `queuedSamples`.
+//
+// Zero at and below the ceiling: everything down there belongs to
+// driftCorrection() below, and the two must never both act on the same
+// frame. Above it, the whole excess over the target goes at once -- not a
+// slice of it, and not down to the ceiling, because stopping at the ceiling
+// would leave two frames for the one-sample-a-frame policy to walk off and
+// put the resting depth at 67 ms instead of 33.
+//
+// So this is a step function, on purpose: nothing, nothing, nothing, then
+// all of it. Trimming a little at a time is what the policy below already
+// does, and it is what does not work here.
+constexpr std::size_t excessQueuedSamples(std::size_t queuedSamples) {
+    if (queuedSamples <= kMaxQueuedSamples) {
+        return 0;
+    }
+    return queuedSamples - kTargetQueuedSamples;
+}
 
 // What one frame's worth of samples should have done to it before it is
 // handed to the device.
@@ -180,6 +244,19 @@ public:
     // queue to nothing on purpose.
     std::size_t reprime();
 
+    // The ceiling, applied. `queuedSamples` is what queued() just said, so
+    // the caller reads the device once and both policies see the same
+    // number. Returns the stereo samples of latency thrown away, or zero if
+    // the backlog was still inside the range the drift policy owns -- in
+    // which case nothing at all happened and the caller should go on to
+    // apply driftCorrection() as usual.
+    //
+    // The cut itself is reprime()'s: clear what has not been played and
+    // refill to the two-frame target. This frame's samples then land on top
+    // of that, so the queue is one frame deep past the target for exactly
+    // one frame before the device eats the difference.
+    std::size_t trimBacklog(std::size_t queuedSamples);
+
     // Tears the device down early, before SDL_Quit(): destroys the audio
     // stream and marks the device closed, exactly what the destructor does
     // for a stream still open at that point. main() calls this explicitly,
@@ -193,9 +270,16 @@ public:
     // many frames the drift policy corrected; min and max are the extremes
     // the queue reached, and are the numbers that say whether the marks are
     // in the right place.
+    // `trims` and `trimmedSamples` are the ceiling's, and they are the
+    // numbers that say whether the ceiling is where it belongs: trims should
+    // be zero on an undisturbed run and one per LCD-off stretch otherwise,
+    // never one per frame. One per frame would be the ceiling doing the
+    // drift policy's job, which means it is too low.
     std::uint64_t pushedSamples() const { return pushedSamples_; }
     std::uint64_t drops() const { return drops_; }
     std::uint64_t repeats() const { return repeats_; }
+    std::uint64_t trims() const { return trims_; }
+    std::uint64_t trimmedSamples() const { return trimmedSamples_; }
     std::uint64_t observations() const { return observations_; }
     std::size_t minQueued() const { return observations_ == 0 ? 0 : minQueued_; }
     std::size_t maxQueued() const { return maxQueued_; }
@@ -214,6 +298,8 @@ private:
     std::uint64_t pushedSamples_ = 0;
     std::uint64_t drops_ = 0;
     std::uint64_t repeats_ = 0;
+    std::uint64_t trims_ = 0;
+    std::uint64_t trimmedSamples_ = 0;
     std::uint64_t observations_ = 0;
     std::size_t minQueued_ = 0;
     std::size_t maxQueued_ = 0;
