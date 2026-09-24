@@ -10,17 +10,25 @@ test roms         ██████████████░░   154 / 165
 ```
 <!-- scoreboard:end -->
 
-**Status: it plays, with every cartridge chip and a sound unit (piece 5 of 6).**
-FourShades is a Game Boy that runs real test ROMs headless - memory map, the
-MBC1, MBC2, MBC3-with-clock and MBC5 cartridge controllers, timer, interrupts,
-serial, OAM DMA, and a dot-by-dot picture-processing unit that draws
-background, window and objects into a 160x144 frame in memory. It passes
-dmg-acid2. That frame goes to an SDL3 window at the DMG's own 59.727 Hz, the
-keyboard reaches the joypad register, and a cartridge with a battery keeps its
-save. The sound hardware is emulated as well - all four channels, the frame
-sequencer, the envelopes, the sweep and the DMG's wave RAM window - and passes
-12 of the 12 sound test ROMs. It is not audible through a speaker yet: that is
-piece 5b, and it is in progress.
+**[Play it in your browser](https://doozleb.com/fourshades/)** — no install, no
+upload, your ROM never leaves the tab.
+
+**Status: it plays, with sound.** FourShades is a Game Boy that runs real test
+ROMs headless — memory map, the MBC1, MBC2, MBC3-with-clock and MBC5 cartridge
+controllers, timer, interrupts, serial, OAM DMA, and a dot-by-dot
+picture-processing unit that draws background, window and objects into a
+160x144 frame. It passes dmg-acid2. That frame goes to an SDL3 window at the
+DMG's own 59.727 Hz, or to a canvas in a browser; the keyboard reaches the
+joypad register, a cartridge with a battery keeps its save, and all four sound
+channels play — the frame sequencer, the envelopes, the sweep and the DMG's
+wave RAM window, 12 of the 12 sound test ROMs.
+
+Twelve of the thirteen test groups are complete. The screen tests are the
+unfinished one, and several of the ROMs still failing are failing *on purpose*
+— see [known-divergences.md](docs/known-divergences.md), where each one is
+recorded with its evidence and what would overturn it.
+
+**[Download for Windows](https://github.com/doozleb/FourShades/releases/latest)**
 
 The two lines above mean:
 
