@@ -321,9 +321,12 @@ private:
     };
 
     // Begins the fetch of line object `index`: charges its dots and leaves the
-    // reads to fetchObjectRow, kObjectDataDots dots before the pixel the fetch
-    // pre-empts. Nothing of the object is read here, which is what lets a
-    // write that lands in between change it - or cancel the fetch outright.
+    // reads to readObjectRowIfDue, kObjectDataDots and kObjectDataHighDots dots
+    // before the dot the object's own leftmost pixel is due - which is the pixel
+    // the fetch pre-empts, except off the left edge, where it comes
+    // objectEarlyDots_ dots sooner. Nothing of the object is read here, which is
+    // what lets a write that lands in between change it - or cancel the fetch
+    // outright.
     void startObject(const Ppu& ppu, std::size_t index);
     // The VRAM address of the low half of the row the object being fetched wants,
     // built from LCDC bit 2 as it reads on the dot this is called - so the two
@@ -539,8 +542,8 @@ private:
     std::array<ObjectPixel, 8> objects_{}; // pixels waiting, index 0 is next
     int objectDots_ = 0;      // dots of penalty still owed for a fetch
     // The object whose fetch is running, if any: its reads happen at the end of
-    // the stall (see kObjectDataDots), so the fetch has to remember which
-    // object it is for.
+    // the stall, or objectEarlyDots_ dots before that off the left edge (see
+    // kObjectDataDots), so the fetch has to remember which object it is for.
     std::size_t objectIndex_ = 0;
     bool objectFetching_ = false;
     // The low half of the object's row, and whether it has been read. The two
