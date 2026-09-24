@@ -165,6 +165,12 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
             return;
         }
         stepDots_ = 0;
+        // The fetch is over: its tile index and both its bitplane bytes are in
+        // hand. This is the one dot of the fetch on which LCDC bit 5 is read,
+        // and what it decides is whether the *next* tile the fetcher goes for
+        // is a window tile or a background one. Measured; see
+        // stopWindowIfDisabled.
+        stopWindowIfDisabled(ppu);
         if (discardFetch_) {
             // Pan Docs: two tile fetches happen before the first pixel. The
             // first one's result is thrown away, so this fetch costs exactly
@@ -633,7 +639,28 @@ void PixelPipeline::advanceWindowCounter() {
 }
 
 void PixelPipeline::stopWindowIfDisabled(const Ppu& ppu) {
-    // See the header for the two sentences of Mealybug's notes this is.
+    // Called from stepFetcher, on the dot a fetch completes, and from nowhere
+    // else: that is the whole of Mealybug's "the disabling will take effect at
+    // the end of the current window tile being drawn. When the current window
+    // tile has finished being drawn, the PPU will start drawing background
+    // tiles again" (quoted in the header). A fetch already under way is a
+    // window fetch until it is over, whichever of its steps the write lands
+    // between and even if it has got no further than its tile index, so bit 5
+    // can never split one fetch across the two tilemaps or the two rows.
+    //
+    // Reading it once per fetch rather than once per dot is measured from both
+    // sides. Two Mealybug Tearoom references clear bit 5 mid-line, one with the
+    // write landing between a window fetch's bitplane stages and the other on
+    // the dot a freshly activated window's first fetch reads its tile index,
+    // and both photograph that fetch's whole window tile; a fetcher that read
+    // the bit at each stage draws a row mixed out of the window's tile and the
+    // background's in the first and no window pixel at all in the second. The
+    // dot within the fetch is pinned by the same pair: the fetch's own last dot
+    // is the only one of the five that both agree on, and reading the bit two
+    // dots later - at the next fetch's tile-index stage - loses the second of
+    // them again. See docs/known-divergences.md, "A fetch in flight is a window
+    // fetch until it ends: LCDC bit 5 is read once per fetch".
+    //
     // Clearing window_ is what lets the window activate again later on the
     // line - but only if WX moves ahead of the counter first, because the
     // comparison in stepDot is an equality and the counter only counts up.
@@ -694,11 +721,8 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
     }
     lcdcSelectPipe_.back() = ppu.lcdc();
     advanceWindowCounter();
-    // After the activation test, so that a line whose LCDC bit 5 is clear
-    // throughout cannot start the window and stop it on the same dot, and
-    // before the fetcher runs, so the tile it is working on when bit 5 goes
-    // low is already a background tile.
-    stopWindowIfDisabled(ppu);
+    // LCDC bit 5 is not read here at all: the fetcher reads it, once per fetch,
+    // on the dot that fetch completes. See stopWindowIfDisabled.
 
     if (objectDots_ > 0) {
         --objectDots_;   // the fetch stalls the pixel stream

@@ -1765,8 +1765,9 @@ makes this an exception found rather than an exception assumed:
 
 Nothing in the suite arbitrates whether a *window activation*, which also clears
 the queue and restarts the fetcher, resets the stage: the two readings differ
-nowhere in the 165 (`m3_lcdc_win_en_change_multiple` is 468 under every column
-above). The stage is modelled as holding its pixel across an activation, which is
+nowhere in the 165 (`m3_lcdc_win_en_change_multiple` was 468 under every column
+above, and its own residual turned out to be elsewhere - see "A fetch in flight is
+a window fetch until it ends" below). The stage is modelled as holding its pixel across an activation, which is
 the narrower claim.
 
 ### FourShades
@@ -2279,31 +2280,198 @@ here is one thing those notes do **not** pin, and the measurement.
   on a tile boundary, the low 3 bits of SCX have no effect" reads like the
   description of a counter that was reset rather than of a recomputed column.
   If a later ROM does arbitrate it, this is the knob.
-- **A mid-fetch write mixes the two sources.** LCDC bit 5 is read on every dot,
-  so a clear that lands between the fetcher's tile-index step and its bitplane
-  steps leaves a tile index read from the window map being addressed with the
-  background's row. That is the same shape as the mixing Mealybug documents for
-  `TILE_SEL` and `SCY`, and it is what "read live, at the dot the fetcher needs
-  it" means throughout this pipeline; no reference decoded so far measures it.
+- **A mid-fetch write does not mix the two sources.** Until 2026-09-24 this
+  bullet said the opposite: bit 5 was read on every dot, so a clear landing
+  between the fetcher's tile-index step and its bitplane steps left a tile index
+  read from the window map being addressed with the background's row, and no
+  reference decoded so far was thought to measure it. Both halves were wrong.
+  Two references measure it, and they say the fetch in flight stays a window
+  fetch to its end: bit 5 is read once per fetch, on the dot the fetch completes.
+  See "A fetch in flight is a window fetch until it ends: LCDC bit 5 is read
+  once per fetch" below, which is where the 468 pixels this bullet was blamed
+  for went.
 - **A WX below 7 leaves a discard owed, and a stop does not cancel it.** A WX
   below 7 adds `kWindowCounterHeadStart` - WX pixels to `discard_` when the
   window starts (see "A WX below 7 pushes the window's leftmost pixels off the
   screen" below). Until 2026-09-24 those pixels were a separate clip that the
   fetcher's push dropped, and the clip was cancelled if a cleared bit 5 turned
   the tile it was owed to into a background one; now they are ordinary
-  discarded pixels and nothing cancels them, so a clear that lands in the six
-  dots between the activation and its push takes them out of the background
-  tile instead. Nothing in either suite reaches that window - the write would
-  have to land inside one particular M-cycle - and no reference measures it, so
-  it is recorded rather than guarded. The reading that would argue for a guard
-  is Mealybug's "when the background resumes drawing it is on a tile boundary".
+  discarded pixels and nothing cancels them. Since bit 5's sample moved to the
+  dot a fetch ends (see the entry below), a clear landing in the six dots
+  between the activation and its push cannot take them out of a background tile
+  either: that fetch is still the window's, so they come out of the window's own
+  first tile, which is what they are owed to. A clear landing in a later fetch's
+  dots does still leave them to be spent on a background tile. Nothing in either
+  suite reaches that window - the write would have to land inside one particular
+  M-cycle - and no reference measures it, so it is recorded rather than guarded.
+  The reading that would argue for a guard is Mealybug's "when the background
+  resumes drawing it is on a tile boundary".
 - **Effect:** `m3_lcdc_win_en_change_multiple` 8316 differing pixels -> 5760,
   `m3_lcdc_win_en_change_multiple_wx` 5942 -> 1228 when this landed; both moved
   again with the window X counter work of 2026-09-24, to 468 and 69, and then
   the `_wx` one twice more with the five-step fetcher and its stage dots, to
-  116 and then **85**. Neither passes; **468 and 85** are where they stand at
-  the end of the piece. `ppu timing` stays 12 / 12, `m3_bgp_change`, `dmg-acid2`
-  and `m2_win_en_toggle` stay exact.
+  116 and then 85. Both moved once more on 2026-09-24, when bit 5's sample turned
+  out to be once per fetch rather than once per dot: **`…_multiple` passes
+  (468 -> 0) and `…_multiple_wx` stands at 5**, and those five are Pan Docs'
+  colour-0 insertion rather than anything in this entry. See "A fetch in flight
+  is a window fetch until it ends" below. `ppu timing` stays 12 / 12,
+  `m3_bgp_change`, `dmg-acid2` and `m2_win_en_toggle` stay exact.
+- **Checked:** 2026-09-24.
+
+## A fetch in flight is a window fetch until it ends: LCDC bit 5 is read once per fetch (2026-09-24)
+
+Not a divergence: this is Mealybug's own first WIN_EN sentence, taken at its word
+for the first time. What is recorded here is which of bit 5's readers the residual
+was about, the sweep that picked the dot, and the one thing left in the two ROMs.
+
+- **Evidence:** Mealybug Tearoom's PPU notes, `WIN_EN (bit 5)`, quoted whole in
+  "The window's scanline X counter, and the evidence for it, quoted" above:
+  "WIN_EN can be disabled during mode 3. The disabling will take effect at the
+  end of the current window tile being drawn. When the current window tile has
+  finished being drawn, the PPU will start drawing background tiles again."
+  The sentence is **ambiguous about which tile**: the fetcher runs a tile ahead of
+  the pixels, so "the current window tile being drawn" can mean the one being
+  emitted or the one being fetched. FourShades had read it as the emitted one -
+  the queue drains unchanged and the fetch in flight becomes a background fetch on
+  the dot bit 5 goes low. The two references below pick the **fetched** one, and
+  that is all this entry is.
+- **Tests:** Mealybug Tearoom `m3_lcdc_win_en_change_multiple` (468 differing
+  pixels before this) and `m3_lcdc_win_en_change_multiple_wx` (85).
+
+### What the two ROMs do, traced
+
+Neither has an object anywhere, so neither has the OBJ-penalty sweep the group-D
+ROMs use; what varies from line to line is the tile row and, in the second, WX.
+
+- **`…_multiple`** writes, on every visible line but line 0, WX = `$18` on the
+  M-cycle ending at line dot 88, WX = `$78` at 128, LCDC = `$D3` (bit 5 clear) at
+  152 and LCDC = `$F3` (bit 5 set) at 168. Line 0's four writes land at
+  84 / 124 / 148 / 164, four dots earlier, which line 0's four early drawing dots
+  cancel. The line's first pixel is drawn on dot 100, the window's X counter
+  reaches WX = 24 on dot 117 and the window starts there at screen x = 17; it is
+  stopped by the write at 152 (visible from 153) and starts again at WX = 120 on
+  dot 219, screen x = 113. **So there is exactly one measured write dot, and it
+  lands between a window fetch's low-bitplane read (dot 152) and its high-bitplane
+  read (dot 154).**
+- **`…_multiple_wx`** writes WX = LY at dot 88 and then LCDC = `$C1` at 100,
+  `$E1` at 108, `$C1` at 128, `$E1` at 136 - two pulses of bit 5 eight dots wide,
+  with WX walking the whole screen underneath them. That is its sweep: the
+  activation dot is 93 + WX, so LY decides where the activation falls among the
+  pulses.
+
+### The residual's shape
+
+All 468 pixels of `…_multiple` are in columns **49-56** - eight columns, the
+fifth window tile, which starts at x = 49 because the window itself started at
+x = 17 - and the pattern is **identical in every 8-line band**, differing only
+with LY % 8. Per band: 4 pixels on rows 1 and 5, 6 on row 3, 2 on rows 4 and 6,
+8 on row 7, none on rows 0 and 2.
+
+That is the signature of one mis-addressed row. The window tile there is tile
+`$45` at `$8450`, whose eight rows are `FF FF`, `FF 81`, `FF 9F`, `FE 82`,
+`FF 9F`, `FF 81`, `FF FF`, `00 00`. FourShades read its low bitplane from the
+window's row and, because bit 5 had gone low in between, its high bitplane from
+the **background's** row - LY + SCY instead of the window's row counter. Pairing
+those two rows reproduces the diff row for row, and rows 0 and 2 are clean exactly
+because the two rows' high bytes happen to be equal there. The reference is the
+whole window row, both bitplanes.
+
+### The sweep: which dot of a fetch the fetcher reads bit 5 on
+
+Bit 5 has three readers in `PixelPipeline`: the activation test (`windowEnabled`,
+at the top of every dot), `stopWindowIfDisabled`, and - through `window_` - the
+fetch's own tilemap, column and **row**. The residual is about the last of those,
+which is why none of the emission-time work of "The LCDC bits that choose a
+pixel's colour are read one dot before the palette shades it" touched it. Every
+candidate below was measured over the whole `screen` group, and **no test outside
+these two moved by a single pixel under any of them**.
+
+| where the fetcher reads bit 5 | `…_multiple` | `…_multiple_wx` | `screen` group total |
+| --- | --- | --- | --- |
+| every dot (what HEAD did) | 468 | 85 | 10,911 |
+| the tile-index (`B`) stage's dot | 0 | 85 | 10,443 |
+| the low-bitplane (`0`) stage's dot | 288 | 83 | 10,729 |
+| the high-bitplane (`1`) stage's dot | 468 | 29 | 10,855 |
+| **the dot the fetch completes** | **0** | **5** | **10,363** |
+
+Two families of rival explanation were measured and rejected:
+
+| rival | `…_multiple` | `…_multiple_wx` | what it costs elsewhere |
+| --- | --- | --- | --- |
+| the fetch's row source latched at the `B` stage, bit 5 still read every dot | 0 | 85 | nothing |
+| the same latched at the `0` stage | 0 | 85 | nothing |
+| the fetcher reading `window_` 1 dot late | 468 | 85 | nothing |
+| ... 2 dots late | 0 | 85 | nothing |
+| ... 3 dots late | 0 | 85 | nothing |
+| ... 4 dots late | 576 | 85 | `m2_win_en_toggle` 0 -> 101, `m3_wx_4_change` 0 -> 315, `m3_wx_5_change` 0 -> 245, `m3_wx_6_change` 0 -> 239 |
+
+### Why this is a mechanism and not a fit
+
+- It is **one rule with no constant in it**: bit 5 is read once per fetch, at the
+  fetch boundary, and nothing anywhere is offset by a tuned number of dots.
+- It is **the document's own sentence**, disambiguated rather than contradicted.
+- It moves **both** ROMs - 468 of 468 and 80 of 85 - where every other candidate
+  moves at most one of them. The second ROM's 80 pixels are a different situation
+  from the first's (a window activated on the dot bit 5 went low, four times over,
+  rather than a write landing between two bitplane stages), so they are
+  independent support and not more of the same pixels.
+- The dot inside the fetch is pinned from both sides: the fetch's own last dot is
+  the only one of the five candidates that both references agree on, and reading
+  the bit two dots later, at the next fetch's tile-index stage, loses the second
+  reference's 80 pixels again.
+- The lag family that would also fix the first ROM has a **two-wide plateau**
+  (2 or 3 dots, identical results) and four dots breaks four exact tests by 900
+  pixels - the shape of a fitted constant, not a measurement.
+
+### What is left, and it is not this
+
+`…_multiple_wx` keeps **5** pixels, on four lines:
+
+- **Lines 15 and 39** are Pan Docs' documented insertion: "On monochrome systems,
+  if the Window is disabled via `LCDC`, but the other conditions are met *and* it
+  would have started rendering exactly on a BG tile boundary, then where it would
+  have started rendering, a single pixel with ID 0 is inserted." WX = LY on this
+  ROM, so those two lines are exactly the ones whose WX - 7 (8 and 32) is a
+  background tile boundary *and* whose counter reaches WX on a dot bit 5 is low:
+  dot 108 and dot 132. The references draw colour 0 there and FourShades draws the
+  background. That pixel is not modelled anywhere yet.
+- **Lines 16 and 44** are the two lines whose counter reaches WX on the very dot
+  bit 5 becomes visible again (dots 109 and 137). Both references put the whole
+  window band one pixel to the right of FourShades' - background at WX - 7, window
+  through the end of the third window tile - which is 2 pixels on line 16 and 1 on
+  line 44. Nothing here decides why an activation on that dot should start a pixel
+  late; it is the next thing for this ROM.
+
+### What was implemented
+
+`stopWindowIfDisabled` is no longer called from `stepDot` at all. It is called
+from `stepFetcher`, at the end of the `DataHigh` stage - the dot the fetch's tile
+index and both its bitplane bytes are in hand - and what it decides is whether the
+**next** tile the fetcher goes for is a window tile. Nothing else changed: the
+queue is still not cleared, the fetcher is still not restarted, `fetcherX_` still
+keeps counting, and no fresh SCX fine-scroll discard is taken.
+
+Three unit cases in `tests/test_pixel_pipeline.cpp` cover it, on a ruler whose
+window tile carries a different colour on the window's row than on the
+background's, so that a fetch split across the two is visible: a write landing
+between a window fetch's two bitplane stages, a write landing on the dot a fetch
+completes, and a write landing on the dot a freshly activated window's first fetch
+reads its tile index.
+
+| mutation | unit cases failed | `…_multiple` | `…_multiple_wx` |
+| --- | --- | --- | --- |
+| bit 5 read on every dot (what HEAD did) | 2 | 468 | 85 |
+| read at the tile-index stage instead | 1 | 0 | 85 |
+| read at the low-bitplane stage instead | 3 | 288 | 83 |
+| never read by the fetcher at all | 10 | 8874 | 3741 |
+
+- **Effect:** `m3_lcdc_win_en_change_multiple` **468 -> 0** (passes),
+  `m3_lcdc_win_en_change_multiple_wx` **85 -> 5**. Nothing else in the 165 moved
+  by a pixel: `ppu timing` 12 / 12, `intr_2_mode0_timing_sprites`,
+  `m3_bgp_change`, `dmg-acid2`, `m3_scx_low_3_bits`, the four `m3_wx_*` and
+  `m2_win_en_toggle` - the canary for the window - all still exact. The `screen`
+  group's differing-pixel total went 10,911 -> **10,363** and the suite
+  151 -> **152 / 165**.
 - **Checked:** 2026-09-24.
 
 ## The window can start more than once on a scanline, and its row advances at each start (2026-09-24)
@@ -2365,12 +2533,16 @@ one comparison that had to change with it, and what it measured.
   `ppu timing` 12 / 12 with `m3_bgp_change`, `dmg-acid2` and, the canary for the
   row counter, `m2_win_en_toggle` all still exact. The `screen` group's
   differing-pixel total went 40108 -> 33670.
-- **What is left in the two that moved.** `m3_lcdc_win_en_change_multiple`'s
-  468 pixels are all in columns 49-56, a single tile wide: the tile the window
-  hands back to the background on, which is the dot a fetch in flight samples
-  LCDC bit 5, not the activation rule. `m3_lcdc_win_en_change_multiple_wx`'s 77
-  are all in columns 0-9 and 28-37 and are a window that starts one pixel late,
-  which is the WX-below-7 start-up cost in the entry below.
+- **What was left in the two that moved, and where it went.**
+  `m3_lcdc_win_en_change_multiple`'s 468 pixels were all in columns 49-56, a
+  single tile wide: the tile the window hands back to the background on, which is
+  where a fetch in flight samples LCDC bit 5, not the activation rule. That was
+  measured on 2026-09-24 and the ROM now passes - see "A fetch in flight is a
+  window fetch until it ends" below. `m3_lcdc_win_en_change_multiple_wx`'s 77
+  were all in columns 0-9 and 28-37; the same measurement took 80 of them (its
+  count had reached 85 by then), and the 5 that are left are Pan Docs' colour-0
+  insertion where a disabled window would have started on a background tile
+  boundary, recorded in the same entry.
 - **Checked:** 2026-09-24.
 
 ## A WX changed while the window is drawing pushes one colour-0 pixel, and only onto an empty FIFO (2026-09-24)
@@ -2670,21 +2842,23 @@ kept here because the diagnosis is what the fix was verified against.
 
 ## Screenshot tests still failing once the pixel pipeline was finished (2026-09-21)
 
-**Re-measured from a full run on 2026-09-24, after the LCDC bits that choose a
-pixel's colour were separated from the palette by one dot** (see "The LCDC bits
-that choose a pixel's colour are read one dot before the palette shades it"
-above; before that, and after the object fetch's dots were split between the
-fetcher and the pixels and the window's fetches were re-measured on top of that,
-sixteen failed and came to 11,399). **Fourteen** of the thirty tests in the
-`screen` group still fail, and they come to **10,911** differing pixels out of
+**Re-measured from a full run on 2026-09-24, after the fetcher was found to read
+LCDC bit 5 once per fetch rather than once per dot** (see "A fetch in flight is a
+window fetch until it ends: LCDC bit 5 is read once per fetch" above; before that,
+after the LCDC bits that choose a pixel's colour were separated from the palette
+by one dot, fourteen failed and came to 10,911, and before *that*, with the object
+fetch's dots split between the fetcher and the pixels, sixteen failed and came to
+11,399). **Thirteen** of the thirty tests in the
+`screen` group still fail, and they come to **10,363** differing pixels out of
 23,040 each. Each is listed with its count, what
-it measures and why it is not fixed. Sixteen pass: `acid/dmg-acid2`,
+it measures and why it is not fixed. Seventeen pass: `acid/dmg-acid2`,
 `mooneye/manual-only/sprite_priority`, `daid/stop_instr`, `ashiepaws/bully`,
 and `mealybug-tearoom-tests/ppu/`'s `m2_win_en_toggle`, `m3_bgp_change` (this
 section's own task), `m3_bgp_change_sprites`, `m3_obp0_change`,
 `m3_wx_4_change`, `m3_wx_4_change_sprites`,
 `m3_wx_5_change`, `m3_wx_6_change`, `m3_window_timing`, `m3_scx_low_3_bits`,
-`m3_lcdc_bg_en_change` and `m3_lcdc_obj_en_change`.
+`m3_lcdc_bg_en_change`, `m3_lcdc_obj_en_change` and
+`m3_lcdc_win_en_change_multiple`.
 Passing tests have no row below; the notes after the table say what each of them
 was and what settled it. For the history of the figures: the group stood at
 47,378 before the mid-line LCDC bit 5 work of 2026-09-24, 40,108 after it,
@@ -2697,12 +2871,13 @@ charging the pixels three dots less than Pan Docs' sum and stopped happening
 before the line's warm-up ("An object fetch costs the pixels three dots more than
 it costs the fetcher and mode 3", and "An object fetch waits for the pixel it
 pre-empts"), 11,399 once an object fetch stopped waiting for the
-window's row on the dot the window activates, and **10,911 now**, once LCDC's two
-colour-selection bits were separated from the palette by a dot. The object move
-changed two verdicts and the LCDC dot changed two more; the other four moves
-changed none. Every figure in the table
+window's row on the dot the window activates, 10,911 once LCDC's two
+colour-selection bits were separated from the palette by a dot, and **10,363
+now**, once the fetcher's read of LCDC bit 5 became one per fetch. The object move
+changed two verdicts, the LCDC dot changed two more and bit 5's sample dot changed
+one; the other four moves changed none. Every figure in the table
 below was re-checked against a fresh full run on 2026-09-24, at the end of the
-piece, and all fourteen agree to the pixel.
+piece, and all thirteen agree to the pixel.
 
 **What the window still gets wrong is the two mid-line LCDC bit 5 tests.** The
 paragraph that stood here said the window never re-activates mid-line and that
@@ -2715,17 +2890,21 @@ boundary with SCX's low bits ignored, and re-enabling it has no effect unless
 WX has been moved to a pixel not yet drawn - in which case the window starts
 again *on the next window row*, on the same scanline. All four of those
 sentences are implemented: see "Clearing LCDC bit 5 part-way along a line stops
-the window" and "The window can start more than once on a scanline" above. What
-is left is where inside a fetch a bit 5 write lands, which is the same open
-question as the mid-line LCDC, SCX and SCY rows below, and it is what
-`m3_lcdc_win_en_change_multiple` (468) and `m3_lcdc_win_en_change_multiple_wx`
-(85) still measure - down from 8,316 and 5,942.
+the window" and "The window can start more than once on a scanline" above. Where
+inside a fetch a bit 5 write lands was settled on 2026-09-24 as well - the
+fetcher reads the bit once per fetch, on the dot the fetch completes, so a write
+landing between two of a fetch's stages cannot split it ("A fetch in flight is a
+window fetch until it ends" above). `m3_lcdc_win_en_change_multiple` **passes**
+with that, down from 8,316, and `m3_lcdc_win_en_change_multiple_wx` is at 5, down
+from 5,942; those five are Pan Docs' colour-0 insertion for a window disabled on a
+background tile boundary, and an activation that lands on the dot bit 5 comes back,
+neither of which is modelled.
 
 | test | pixels | why it still fails |
 | --- | --- | --- |
 | `m3_scx_high_5_bits` | 12 | one background tile per affected line takes the wrong SCX; 80, then 86, then 45 once the fetch stages were pinned |
 | `ashiepaws/strikethrough` | 53 | an OAM DMA still copying through line 68's object scan; diagnosed and left failing, see its own entry above |
-| `m3_lcdc_win_en_change_multiple_wx` | 85 | mid-line LCDC bit 5; 5942, then 77, then 69, then 116 under the five-step fetcher |
+| `m3_lcdc_win_en_change_multiple_wx` | 5 | not the bit 5 sample any more: Pan Docs' colour-0 insertion on two lines, and a window activated on the dot bit 5 returns on two more; 5942, then 77, then 69, then 116 under the five-step fetcher, then 85. See "A fetch in flight is a window fetch until it ends" above |
 | `m3_lcdc_obj_en_change_variant` | 96 | not bit 1 any more: a six-pixel block at the right edge of the last two bands, where the longest object stall meets its end-of-line BGP pulse; 532 before the object fetch's dots, 152 before LCDC's colour-selection dot. See "The LCDC bits that choose a pixel's colour are read one dot before the palette shades it" above |
 | `m3_lcdc_bg_map_change` | 124 | mid-line LCDC bit 3 changes; 316, 428, then 182 |
 | `m3_window_timing_wx_0` | 126 | one dot, only when SCX % 8 is not 0 (see the residual above) |
@@ -2733,17 +2912,18 @@ question as the mid-line LCDC, SCX and SCY rows below, and it is what
 | `m3_scy_change` | 259 | mid-line SCY; 1256, 2542, then 661 |
 | `m3_lcdc_obj_size_change` | 310 | mid-line LCDC bit 2 changes; 350, 410, then this |
 | `m3_lcdc_tile_sel_change` | 410 | mid-line LCDC bit 4 changes; 688, 1144, then 534 |
-| `m3_lcdc_win_en_change_multiple` | 468 | mid-line LCDC bit 5; 8316, then 5760, then this |
 | `m3_lcdc_win_map_change` | 724 | mid-line LCDC bit 6 changes; 1646 before the counter work, 1448 before the five-step fetcher, 792, then 852. Not sampling either: same entry |
 | `m3_lcdc_tile_sel_win_change` | 868 | mid-line LCDC bit 4 changes, with a window; 1904 before the counter work, 1336, then 1016. Not sampling: see "Group E, measured to the dot and not solved" above |
 | `daid/ppu_scanline_bgp` | 7186 | disagrees by 12 dots, which are three M-cycles in its once-a-frame `halt` -> LYC-interrupt sync and not in the pipeline; see its own entry above |
 
 The mid-line LCDC, SCX and SCY entries left in the table are all the same shape:
-the register is read live, at the dot the fetcher needs it. (**The two that were
-not** - LCDC bits 0 and 1, which are read when a pixel leaves the FIFO and not by
-any fetch - both pass since 2026-09-24; see "The LCDC bits that choose a pixel's
-colour are read one dot before the palette shades it" above. That is why none of
-the fetch-sampling work ever moved them.) Which dot that is **is**
+the register is read live, at the dot the fetcher needs it. (**The three that were
+not** all pass since 2026-09-24. LCDC bits 0 and 1 are read when a pixel leaves
+the FIFO and not by any fetch, which is why none of the fetch-sampling work ever
+moved them - see "The LCDC bits that choose a pixel's colour are read one dot
+before the palette shades it" above. LCDC bit 5 *is* read by the fetch, but once
+per fetch rather than at each stage, so a write cannot split one - see "A fetch in
+flight is a window fetch until it ends" above.) Which dot that is **is**
 now pinned - Mealybug's PPU documentation names the stages (TILE_SEL at the two
 bitplane stages, SCY at all three), and each stage reads on the first of its two
 dots; see "Each fetch stage samples its registers on its first dot" above for the
@@ -3577,8 +3757,9 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   twice advances it twice; see "The window can start more than once on a
   scanline, and its row advances at each start" above. Mealybug's
   `m3_lcdc_win_en_change_multiple` and `m3_lcdc_win_en_change_multiple_wx`
-  probe it and still fail, at 468 and 85 differing pixels, on where inside a
-  fetch an LCDC bit 5 write lands rather than on the advance rule.
+  probe it; the first passes since the fetcher's read of LCDC bit 5 became one per
+  fetch, and the second is at 5 differing pixels, neither of them the advance
+  rule.
   (Pan Docs does note that on GBC, clearing bit 5 resets the Y condition
   too — but says so only for GBC, which FourShades doesn't model yet, so it
   doesn't bear on this DMG-era decision.) The alternative — gating the latch
