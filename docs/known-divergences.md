@@ -1240,6 +1240,183 @@ of a stage's two dots.
   exact.
 - **Checked:** 2026-09-24.
 
+## Each fetch stage still samples its registers on its first dot once the object fetch's dots are right (2026-09-24)
+
+Not a divergence: the re-measurement the entry above promised, plus the same
+question asked of a **window** fetch, which no document answers at all.
+
+The entry above measured its eight combinations while an object fetch started on
+the line's first rendering dot, which moved every read on a line with an object
+by eight to eleven dots. Every one of the six ROMs it quotes has an object on
+every line, so the whole sweep was run on a grid that has since moved ("An
+object fetch costs the pixels three dots more than it costs the fetcher and mode
+3"). It was therefore run again, one stage at a time, and separately for window
+fetches, which the Mealybug notes say nothing about: their TILE_SEL and SCY
+sentences are both about "background tile data fetching".
+
+`screen` group totals, one stage moved to its last dot at a time, on a full ROM
+run each (the baseline is 11,399 differing pixels):
+
+| variant | total | what moves |
+| --- | --- | --- |
+| **shipped: every stage, both sources, first dot** | **11,399** | |
+| background tile-index stage on its last dot | 11,722 | `m3_lcdc_bg_map_change` +192, `m3_scx_high_5_bits` +74, `m3_scy_change` +26, `…win_en_change_multiple_wx` +31 |
+| background low bitplane on its last dot | 13,789 | `m3_scy_change` +1,814, `m3_lcdc_tile_sel_change` +576 |
+| background high bitplane on its last dot | 11,995 | `m3_scy_change` +438, `m3_lcdc_tile_sel_change` +158 |
+| **window** tile-index stage on its last dot | 11,418 | `m3_lcdc_win_map_change` +4, `…win_en_change_multiple_wx` +15 |
+| **window** low bitplane on its last dot | 11,409 | `m3_lcdc_tile_sel_win_change` +10 |
+| **window** high bitplane on its last dot | 11,467 | `m3_lcdc_tile_sel_win_change` +68 |
+| all three, both sources, last dot (Task 7's convention) | 15,116 | everything (measured on the 11,547 baseline) |
+
+(The three background rows were measured on the 11,547 baseline, before the
+window ordering below; their figures are quoted as differences for that reason.)
+
+**All six independently prefer their first dot, and the six are separable** -
+each moves a different set of tests. So a window fetch does sample on the same
+dot of each stage as a background fetch, and that is now measured rather than
+inherited.
+
+### The 60-pixel asymmetry, explained by being gone
+
+The entry above recorded one dissenter: `m3_lcdc_win_map_change` got **60 pixels
+worse** from pinning the tile-index stage to its first dot, while
+`m3_lcdc_bg_map_change` got 246 better from the same change to the same kind of
+read. It was left sharing the rule and recorded, since splitting the window's
+map-select read off on 60 pixels would have been tuning.
+
+That was the right call, and the asymmetry was not about the window at all: it
+was the object fetch's start dot. Every line of that ROM parks an object at OAM
+X = 0-17, and with the fetch taken before the line's warm-up the window's tiles
+were read eight to sixteen dots from where they belong - far enough that which
+side of an eight-dot LCDC pulse a one-dot change lands on carries no information.
+With the object fetch's dots right, the same measurement comes out the same way
+round as the background's: the window's tile-index stage on its last dot now
+makes `m3_lcdc_win_map_change` **worse**, not better. The sign flipped because
+the grid moved, which is the whole of the answer.
+
+### Three unit cases, and they need no object
+
+A window fetch is easier to pin than a background one: the window's own restart
+puts its stages wherever WX says, so no stalling object is needed to break the
+M-cycle grid. The counter reaches WX on line dot 93 + WX, the activation spends
+that dot resetting the fetcher, and the three stages follow on dots 94 + WX,
+96 + WX and 98 + WX. A WX that puts a stage's first dot at the end of an M-cycle
+therefore separates that stage's two dots on an undisturbed line:
+
+| case | WX | stage's dots | the write |
+| --- | --- | --- | --- |
+| "a window fetch reads LCDC bit 6 on the tile-index stage's first dot" | 6 | 100-101 | bit 6 on dot 100, visible from 101: the first tile comes from $9800 and the second from $9C00 |
+| "a window fetch reads LCDC bit 4 on the low bitplane stage's first dot" | 4 | 100-101 | bit 4 cleared on dot 100: the low plane from $8000 and the high from $9000 mix colour 3, which neither area draws alone |
+| "a window fetch reads LCDC bit 4 on the high bitplane stage's first dot" | 6 | 104-105 | bit 4 cleared on dot 104: both planes come from $8000, colour 1 |
+
+Each of the three, moved to its stage's last dot, is caught by exactly its own
+case and by nothing else in either suite; before them the window's three stages
+were caught by no unit case at all and by 4 to 68 differing pixels.
+
+- **Checked:** 2026-09-24.
+
+## A window fetch and the object fetch that lands on the dot it activates (2026-09-24)
+
+Not a divergence: an ordering, measured. Two things can want the dot the line's
+first row reaches the FIFO - the X counter reaching WX, which clears the FIFO and
+sends the fetcher back to its first step, and an object at screen x = 0, whose
+fetch pre-empts the pixel that row was about to feed. Which of them sees the
+other decides whether the object's fetch runs on that dot or waits another
+`kWindowRestartDots` for the window's own first row.
+
+- **Measured:** it runs on that dot. `m3_lcdc_tile_sel_win_change` goes from
+  1,016 differing pixels to **868** and nothing else in either suite moves by a
+  pixel - no verdict, no other count, `ppu timing` 12/12,
+  `intr_2_mode0_timing_sprites`, `m2_win_en_toggle`, `m3_bgp_change`,
+  `m3_scx_low_3_bits` and `dmg-acid2` all unmoved.
+- **How it is written:** `stepDot` reads "a pixel is due on this dot"
+  (`queueSize_ > 0 || fetchStallDots() == 0`) once, at the top, before the
+  counter is compared - so the object fetch's Pan Docs condition is evaluated
+  against the FIFO as it was when the pixel became due, not against the empty one
+  the activation leaves behind.
+- **Unit case:** "an object fetch triggered on the dot the window activates does
+  not wait for the window's row". WX = 7 puts the activation on line dot 100 and
+  an object at OAM X = 8 costs eleven dots, so pixel 0 is drawn on dot 114 rather
+  than 117, and a BGP write on dot 116 separates the two: the palette short
+  (above) makes the three shades 1, 3 and 2 name the three sides of that
+  boundary. Reverting the ordering is caught by that case and by the 148 pixels.
+
+- **Checked:** 2026-09-24.
+
+## Group E, measured to the dot and not solved: what the window's fetch cadence has to be (2026-09-24)
+
+An open question, recorded with its evidence because the evidence is exact and
+the next task should not have to re-derive it. `m3_lcdc_win_map_change` (724
+differing pixels) and `m3_lcdc_tile_sel_win_change` (868) are the two ROMs left
+in the `screen` group that are about window fetches, and what is left of them is
+**not** which dot of a stage samples a register (the entry above measures that
+from both sides). It is where the window's fetches fall.
+
+### The measurement
+
+`m3_lcdc_win_map_change` sets WX = 7 and WY = 0, so the window covers every line
+from x = 0, fills the window's two tilemaps with a white tile and a black tile,
+and sets LCDC bit 6 for exactly eight dots per line - line dots 109-116, read
+off an instrumented run and consistent with the handler's two `ld [hl]` writes
+two M-cycles apart. It parks one object per line, at OAM X = 0 on lines 0-7,
+X = 1 on 8-15 and so on to X = 17. So each 8-line block is one measurement:
+which window tile came out black says which of that line's window fetches read
+its tilemap inside those eight dots, and the object's own penalty P is what
+moves the fetches from block to block.
+
+Writing fx0, fx1, fx2 for the dots the window's first three fetches read their
+tilemap on, the reference requires:
+
+| OAM X | P | in the pulse | FourShades' fx0, fx1, fx2 |
+| --- | --- | --- | --- |
+| 0 | 11 | fx0 | 101, 117, 125 |
+| 1 | 10 | fx0 **and** fx1 | 101, 116, 124 |
+| 2 | 9 | fx0 **and** fx1 | 101, 115, 123 |
+| 3 | 8 | fx1 | 101, 114, 122 |
+| 4 | 7 | fx1 | 101, 113, 121 |
+| 5-7 | 6 | fx1 | 101, 112, 120 |
+| 8 | 11 | none | 101, 117, 125 |
+| 9-15 | 10-6 | none | 101, 109-110, 120-124 |
+| 16 | 11 | fx2 | 101, 109, 125 |
+| 17 | 10 | fx2 | 101, 109, 118 |
+
+### What fits, and what does not
+
+For the eight blocks whose object sits off the left edge - OAM X = 0-7, where the
+fetch is triggered at pixel 0 - the sixteen constraints above have a **unique**
+two-parameter solution, and it is exact:
+
+- **fx0 = 100 + P.** The object's stall runs from dot 100 (the dot the
+  background's first row was due) and the window's restart fetch begins its
+  tile-index stage on the dot the stall ends. P = 9 must land inside the pulse and
+  P = 8 outside it, which pins the constant to 100 and no other value.
+- **fx1 = fx0 + 6.** P = 10 must put both fetches inside an eight-dot pulse and
+  P = 11 must not, which pins the gap to exactly 6 - a fetch's three stages with
+  nothing between them. FourShades puts 8 there, because after the extra push at
+  Get Tile Data High it spends the two Sleep dots before the next Tile stage.
+
+Those two together say the fetcher spends the wait *after* a fetch's push rather
+than before the next fetch's first stage, which on an undisturbed line is
+invisible (the FIFO empties exactly as the push lands, so the fetcher waits
+either way) and after a window restart is not.
+
+**It is not implemented, because it is not the whole answer.** The blocks from
+OAM X = 8 up are not satisfied by it, and one pair rules out *any* model built
+only from the dots above: OAM X = 0 and OAM X = 8 have the same penalty (11 dots,
+Pan Docs' exception and its general formula agreeing at SCX = 0), trigger on the
+same pixel and therefore have identical timing in every model here - yet the
+reference makes the first window tile black on one and white on the other. So
+something about an object *off the left edge* differs in time from one at the
+edge, and nothing in this repository identifies it. Implementing the two rules
+above without that would be fitting six blocks and breaking ten.
+
+- **What the next task should do:** start from the table, not from the ROM. The
+  two rules are worth testing against `m3_lcdc_tile_sel_win_change` as well,
+  whose residual is the same shape, and the X = 0 versus X = 8 pair is the thing
+  to explain first - it is the only place in the whole `screen` group where two
+  lines that this model says are identical photograph differently.
+- **Checked:** 2026-09-24.
+
 ## Palette writes short the old and new values together for one dot (2026-09-21)
 
 - **Test:** Mealybug Tearoom `m3_bgp_change` (DMG reference image,
@@ -1856,8 +2033,9 @@ kept here because the diagnosis is what the fix was verified against.
 ## Screenshot tests still failing once the pixel pipeline was finished (2026-09-21)
 
 **Re-measured from a full run on 2026-09-24, after the object fetch's dots were
-split between the fetcher and the pixels.** Sixteen of the thirty tests in the
-`screen` group still fail, and they come to 11,547 differing pixels out of
+split between the fetcher and the pixels and the window's fetches were
+re-measured on top of that.** Sixteen of the thirty tests in the
+`screen` group still fail, and they come to 11,399 differing pixels out of
 23,040 each. Each is listed with its count, what
 it measures and why it is not fixed. Fourteen pass: `acid/dmg-acid2`,
 `mooneye/manual-only/sprite_priority`, `daid/stop_instr`, `ashiepaws/bully`,
@@ -1876,8 +2054,9 @@ samples its registers on its first dot"), and **11,547** now, once an object
 fetch stopped charging the pixels three dots less than Pan Docs' sum and stopped
 happening before the line's warm-up ("An object fetch costs the pixels three dots
 more than it costs the fetcher and mode 3", and "An object fetch waits for the
-pixel it pre-empts"). That last move is the only one of the four that changed a
-verdict, and it changed two.
+pixel it pre-empts"), and **11,399** once an object fetch stopped waiting for the
+window's row on the dot the window activates. The object move is the only one of
+the five that changed a verdict, and it changed two.
 
 **What the window still gets wrong is the two mid-line LCDC bit 5 tests.** The
 paragraph that stood here said the window never re-activates mid-line and that
@@ -1911,8 +2090,8 @@ question as the mid-line LCDC, SCX and SCY rows below, and it is what
 | `m3_lcdc_bg_en_change` | 376 | mid-line LCDC bit 0 changes, which is read at emission and not by a fetch; 855 before the object fetch's dots |
 | `m3_lcdc_tile_sel_change` | 410 | mid-line LCDC bit 4 changes; 688, 1144, then 534 |
 | `m3_lcdc_win_en_change_multiple` | 468 | mid-line LCDC bit 5; 8316, then 5760, then this |
-| `m3_lcdc_win_map_change` | 724 | mid-line LCDC bit 6 changes; 1646 before the counter work, 1448 before the five-step fetcher, 792, then 852 |
-| `m3_lcdc_tile_sel_win_change` | 1016 | mid-line LCDC bit 4 changes, with a window; 1904 before the counter work, then 1336 |
+| `m3_lcdc_win_map_change` | 724 | mid-line LCDC bit 6 changes; 1646 before the counter work, 1448 before the five-step fetcher, 792, then 852. Not sampling either: same entry |
+| `m3_lcdc_tile_sel_win_change` | 868 | mid-line LCDC bit 4 changes, with a window; 1904 before the counter work, 1336, then 1016. Not sampling: see "Group E, measured to the dot and not solved" above |
 | `daid/ppu_scanline_bgp` | 7186 | disagrees with the Mealybug references by 12 dots |
 
 The mid-line LCDC, SCX and SCY entries above are all the same shape: the
