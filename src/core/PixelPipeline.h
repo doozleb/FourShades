@@ -234,8 +234,24 @@ private:
     // "after the window has started rendering" is taken at its word too, and it
     // is not the same as "the window is on": a window that has just activated
     // has an empty FIFO and a fetcher six dots from its first push, and a WX
-    // reached again in those dots pushes nothing. See windowRendering_.
-    void pushWindowShiftPixel();
+    // reached again in those dots pushes nothing. See fifoFed_.
+    //
+    // Pan Docs' "Window behavior" page pushes the same pixel for the other
+    // reason a match can fail to reset background rendering:
+    //
+    //   "On monochrome systems, if the Window is disabled via LCDC, but the
+    //   other conditions are met and it would have started rendering exactly on
+    //   a BG tile boundary, then where it would have started rendering, a
+    //   single pixel with ID 0 is inserted."
+    //
+    // Same push, same port, and "exactly on a BG tile boundary" is the port's
+    // own condition restated: the FIFO takes the pixel only when the pixel it
+    // is about to hand over starts a row. So this is called for every match
+    // that is not an activation, whichever of the two reasons it is not one,
+    // and the two sentences need one rule between them rather than two. See
+    // docs/known-divergences.md, "A counter match that does not reset
+    // background rendering pushes one colour-0 pixel".
+    void pushColourZeroPixel();
     // Hands the line back to the background if LCDC bit 5 has gone low while
     // the window was drawing. Mealybug Tearoom's PPU notes, quoted in
     // docs/known-divergences.md:
@@ -333,14 +349,6 @@ private:
     // shape Mealybug's "the low 3 bits of SCX have no effect" describes.
     int fetcherX_ = 0;
     bool discardFetch_ = true; // the line's first completed fetch is thrown away
-    // Whether the fetch in progress read its tile index from the window's
-    // tilemap, latched on the dot that read it - the tile-index stage's first
-    // dot, see sampleTileIndex. It cannot disagree with window_ part-way
-    // through a fetch, because bit 5 is only read on the dot a fetch ends (see
-    // stopWindowIfDisabled) and an activation restarts the fetcher; what it is
-    // for is deciding whether a push counts as the window having started
-    // rendering (see windowRendering_), which is asked after the fetch.
-    bool fetchWindow_ = false;
     u8 tileIndex_ = 0;
     u8 tileLow_ = 0;
     u8 tileHigh_ = 0;
@@ -415,13 +423,23 @@ private:
     // pre-empts with the old bit, which rules the wider reading out. Same entry
     // in docs/known-divergences.md.
     bool pixelStreamStarted_ = false;
-    // The window has put at least one tile into the queue since it started.
-    // Pan Docs' pixel-FIFO sentence is about a WX changed "after the window has
-    // started rendering", and the six dots between an activation and its first
-    // push are not that: the window is on, the queue is empty, and a WX reached
-    // again there pushes nothing. Cleared by every activation, because each one
-    // empties the queue and sends the fetcher back to its first step.
-    bool windowRendering_ = false;
+    // A row has reached the FIFO since the fetcher was last reset - the line's
+    // start or a window activation. It is what an inserted pixel needs: there
+    // has to be a row for it to go in front of.
+    //
+    // It carries both of Pan Docs' colour-0 sentences at once. For the WX
+    // changed "after the window has started rendering" it is exactly "the
+    // window has started rendering", because the last reset was that
+    // activation: the six dots between an activation and its first push are
+    // not started rendering, and a WX reached again in them pushes nothing.
+    // For the disabled window's pixel it is the background's own first row -
+    // a WX of 0 is matched by the counter's first free increment and a WX of
+    // kWindowCounterHeadStart by the dot the line's first row arrives, and at
+    // the top of that dot the row is not there yet, so neither inserts
+    // anything. Measured both ways round: scoping the flag to window pixels
+    // instead loses the disabled window's pixel outright, and dropping it
+    // inserts one into the front of three references' every line.
+    bool fifoFed_ = false;
     // The highest counter value already compared against WX, or -1 if none has
     // been. The comparison runs every dot but the counter does not move every
     // dot: it stands still for the six dots an activation's fetcher restart
@@ -429,7 +447,7 @@ private:
     // discard throws away. Pan
     // Docs' pixel FIFO sentence is about a WX the counter "is reached again",
     // so a value the counter is merely already sitting on is not one: this is
-    // what tells the two apart. Only pushWindowShiftPixel reads it, because a
+    // what tells the two apart. Only pushColourZeroPixel reads it, because a
     // repeated match is only a problem there - a second activation is already
     // ruled out by window_ - and without it every activation would be followed
     // by a colour-0 pixel from its own match, and a WX written to any value at

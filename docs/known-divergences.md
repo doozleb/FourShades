@@ -2232,7 +2232,11 @@ rather than against `pixelX_` arithmetic, and a match runs `startWindow`.
 
 Since 2026-09-24 all four of the WIN_EN passages above **are** modelled: see
 "Clearing LCDC bit 5 part-way along a line stops the window" for the first two
-and "The window can start more than once on a scanline" for the last two.
+and "The window can start more than once on a scanline" for the last two. The
+monochrome colour-0 insertion quoted last is modelled too, as one rule with the
+pixel-FIFO page's WX-change pixel: see "A counter match that does not reset
+background rendering pushes one colour-0 pixel". The `WX = 166` bug is the one
+passage on this page that is not, and no test in the 165 reaches it.
 
 Where the free increments fall, and the two dots the comparator lags WX by, are
 measured rather than documented: see "The window's X counter is compared once
@@ -2425,16 +2429,18 @@ Two families of rival explanation were measured and rejected:
 
 ### What is left, and it is not this
 
-`…_multiple_wx` keeps **5** pixels, on four lines:
+`…_multiple_wx` kept **5** pixels, on four lines, and keeps **3**:
 
-- **Lines 15 and 39** are Pan Docs' documented insertion: "On monochrome systems,
+- **Lines 15 and 39** were Pan Docs' documented insertion: "On monochrome systems,
   if the Window is disabled via `LCDC`, but the other conditions are met *and* it
   would have started rendering exactly on a BG tile boundary, then where it would
   have started rendering, a single pixel with ID 0 is inserted." WX = LY on this
   ROM, so those two lines are exactly the ones whose WX - 7 (8 and 32) is a
   background tile boundary *and* whose counter reaches WX on a dot bit 5 is low:
-  dot 108 and dot 132. The references draw colour 0 there and FourShades draws the
-  background. That pixel is not modelled anywhere yet.
+  dot 108 and dot 132. **Modelled since 2026-09-24**, as one rule with the
+  colour-0 pixel a WX change pushes - see "A counter match that does not reset
+  background rendering pushes one colour-0 pixel" below. Those two pixels are
+  gone.
 - **Lines 16 and 44** are the two lines whose counter reaches WX on the very dot
   bit 5 becomes visible again (dots 109 and 137). Both references put the whole
   window band one pixel to the right of FourShades' - background at WX - 7, window
@@ -2466,7 +2472,8 @@ reads its tile index.
 | never read by the fetcher at all | 10 | 8874 | 3741 |
 
 - **Effect:** `m3_lcdc_win_en_change_multiple` **468 -> 0** (passes),
-  `m3_lcdc_win_en_change_multiple_wx` **85 -> 5**. Nothing else in the 165 moved
+  `m3_lcdc_win_en_change_multiple_wx` **85 -> 5**, and 5 -> 3 once the colour-0
+  insertion above was modelled. Nothing else in the 165 moved
   by a pixel: `ppu timing` 12 / 12, `intr_2_mode0_timing_sprites`,
   `m3_bgp_change`, `dmg-acid2`, `m3_scx_low_3_bits`, the four `m3_wx_*` and
   `m2_win_en_toggle` - the canary for the window - all still exact. The `screen`
@@ -2621,6 +2628,14 @@ needed.
   not hypothetical: it is line 7 of all three ROMs, where the handler writes
   WX = LY = 7 with the counter already at 7, and it was 72, 121 and 1 differing
   pixels before the memo covered the free increments.
+- **Restated again on 2026-09-24, same behaviour.** `windowRendering_` is now
+  `fifoFed_`, "a row has reached the FIFO since the fetcher was last reset", and
+  `pushWindowShiftPixel` is `pushColourZeroPixel`: Pan Docs pushes the same pixel
+  for a *disabled* window's match too, and one rule covers both. Whenever the
+  window is drawing the two flags are the same flag, because the last reset was
+  that activation. See "A counter match that does not reset background rendering
+  pushes one colour-0 pixel" below, which also has Pan Docs' own words for the
+  tile-boundary gate this bullet measured.
 - **Effect:** `m3_wx_4_change` 229 differing pixels -> **0, passing**,
   `m3_wx_5_change` 638 -> **0, passing**, `m3_wx_4_change_sprites` 10 -> **0,
   passing**. `m3_wx_6_change` 13799 -> 13810 (see the next entry: its root
@@ -2628,6 +2643,100 @@ needed.
   test in the suite moved by a pixel; `ppu timing` 12 / 12, and
   `m3_bgp_change`, `dmg-acid2` and `m2_win_en_toggle` all still exact. The
   `screen` group's differing-pixel total went 33670 -> 32804.
+- **Checked:** 2026-09-24.
+
+## A counter match that does not reset background rendering pushes one colour-0 pixel (2026-09-24)
+
+Not a divergence: Pan Docs states it twice, in two sentences that were read as two
+mechanisms and are one. What is recorded here is the unification, the gate both
+sentences share, and the sixteen lines of one reference that measure it.
+
+- **Evidence, Pan Docs, [Pixel FIFO](https://gbdev.io/pandocs/pixel_fifo.html):**
+  "When the value of WX changes after the window has started rendering and the new
+  value of WX is reached again, a pixel with color value of 0 and the lowest
+  priority is pushed onto the background FIFO."
+- **Evidence, Pan Docs, [Window behavior](https://gbdev.io/pandocs/Scrolling.html):**
+  "On monochrome systems, if the Window is disabled via `LCDC`, but the other
+  conditions are met *and* it would have started rendering exactly on a BG tile
+  boundary, then where it would have started rendering, a single pixel with ID 0
+  is inserted."
+- **The two sentences are the same push.** The window's X counter is compared
+  against WX on every dot, and a match does one of exactly three things: it resets
+  background rendering (the activation), or it does not, for one of two reasons -
+  the window is already drawing, or LCDC bit 5 is clear. Pan Docs has a sentence
+  for each of those two reasons and both say a colour-0 pixel goes onto the
+  background FIFO. So the rule is **a match that does not reset background
+  rendering pushes one colour-0 pixel**, and nothing distinguishes the two cases
+  once it is stated that way. `stepDot` now tests the Y condition and the counter,
+  and branches on whether `windowConditions` hold; `pushColourZeroPixel` (was
+  `pushWindowShiftPixel`) handles everything else.
+- **"Exactly on a BG tile boundary" is the FIFO's push port, restated.** The
+  second sentence's condition and the first sentence's measured one are the same
+  condition. The entry above measured the first from three references: the FIFO
+  has one push port and takes a push only when the pixel it is about to hand over
+  starts a row, so a match part-way through a tile is swallowed. On a line with no
+  window that dot is exactly the one Pan Docs calls a BG tile boundary - in
+  *background* coordinates, SCX included, since the fine-scroll discard eats the
+  first tile's leading pixels. A unit case runs SCX = 3 and WX = 12, where the
+  insertion point is screen x = 5, to hold that down. **So the second sentence is
+  independent documentary support for a gate that had only been measured.**
+- **Which is measured, sixteen ways, by one reference.**
+  `m3_lcdc_win_en_change_multiple_wx` writes WX = LY and pulses LCDC bit 5 low
+  over line dots 101-108 and 129-136; the counter reaches WX on dot 93 + WX. So
+  its lines 8-15 and 36-43 - sixteen of them - are matches with bit 5 clear, and
+  exactly two of those sixteen, WX = 15 and WX = 39, have WX - 7 on a background
+  tile boundary. Traced: the queue's fill on the match dot counts 7, 6, 5, 4, 3,
+  2, 1, 0 down each run of eight lines, and only the 0 is a boundary. The
+  reference draws the pixel on those two lines and on none of the other fourteen.
+- **The flag the push needs is scoped to the fetcher's last reset, not to the
+  window.** An insertion needs a row in the FIFO to go in front of. For the first
+  sentence that row is the window's own, because the last reset *was* the
+  activation - which is what `windowRendering_` used to say. For the second it is
+  the background's first row of the line. One field says both: `fifoFed_`, set
+  when any row reaches the FIFO and cleared at the line's start and at every
+  activation. That is measured both ways round - keeping the flag scoped to window
+  pixels leaves the disabled window's pixel undrawn (both of it), and dropping it
+  altogether inserts a pixel into the front of every line of `bully`,
+  `sprite_priority`, `daid/ppu_scanline_bgp` and `ashiepaws/strikethrough`, which
+  all leave the window disabled with WY = 0 and WX = 0 for whole frames: 170, 86,
+  794 and 204 pixels. The suite's own characterisation rows at WX = 0, 4 and 7
+  pin the same edge from inside.
+- **`fetchWindow_` is gone with it.** Its only use was deciding whether a push
+  counted as the window having started rendering, and a push that counts is now
+  any push. It could not disagree with `window_` mid-fetch in any case, since bit
+  5 is only read at a fetch's end.
+- **What is *not* arbitrated.** Two things, recorded rather than asserted:
+  1. **Both reasons at once.** A match that finds the window drawing *and* bit 5
+     clear - the dots between a clear and the fetch end that acts on it - is
+     pushed by the unified rule. Nothing in the 165 measures it: adding a clause
+     to exclude it moves no test by a pixel. It is in because excluding it would
+     need a clause, not because a picture asks for it.
+  2. **Insertion versus substitution, for the disabled case specifically.** The
+     first sentence's insertion is measured (this file's entry above: an exact
+     23,040-pixel match against three references). The second sentence's word is
+     "inserted" too, and it is the same push, but the two lines that show it sit
+     on a flat background where a substitution would look identical. So the
+     insertion is carried by Pan Docs' word and by the shared mechanism, not by
+     these two pixels.
+- **Effect:** `m3_lcdc_win_en_change_multiple_wx` **5 -> 3** differing pixels.
+  Nothing else in the 165 moved by a pixel: `ppu timing` 12 / 12,
+  `intr_2_mode0_timing_sprites`, the `oam bug` seven, `m3_bgp_change`,
+  `dmg-acid2`, `m2_win_en_toggle`, the four `m3_wx_*` and
+  `m3_lcdc_win_en_change_multiple` all still exact. The `screen` group's
+  differing-pixel total went 10,363 -> **10,361**; the suite stays at 152 / 165,
+  because the ROM still fails.
+
+| mutation | unit cases failed | `…_multiple_wx` | `screen` total |
+| --- | --- | --- | --- |
+| the disabled-window branch removed | 6 | 5 | 10,363 |
+| `fifoFed_` scoped to window pixels, as it was | 6 | 5 | 10,363 |
+| the "a row is in the FIFO" guard dropped | 34 | 3 | 11,957 |
+| the tile-boundary gate dropped | 3 | 17 | 16,913 |
+| a substitution rather than an insertion | 9 | 5 | 11,239 |
+
+- **What is left in that ROM:** 3 pixels, on lines 16 and 44, which are a
+  different question - see "A fetch in flight is a window fetch until it ends"
+  above.
 - **Checked:** 2026-09-24.
 
 ## The window's X counter is compared once per dot, against a WX two dots old (2026-09-24)
@@ -2849,7 +2958,7 @@ after the LCDC bits that choose a pixel's colour were separated from the palette
 by one dot, fourteen failed and came to 10,911, and before *that*, with the object
 fetch's dots split between the fetcher and the pixels, sixteen failed and came to
 11,399). **Thirteen** of the thirty tests in the
-`screen` group still fail, and they come to **10,363** differing pixels out of
+`screen` group still fail, and they come to **10,361** differing pixels out of
 23,040 each. Each is listed with its count, what
 it measures and why it is not fixed. Seventeen pass: `acid/dmg-acid2`,
 `mooneye/manual-only/sprite_priority`, `daid/stop_instr`, `ashiepaws/bully`,
@@ -2872,10 +2981,13 @@ before the line's warm-up ("An object fetch costs the pixels three dots more tha
 it costs the fetcher and mode 3", and "An object fetch waits for the pixel it
 pre-empts"), 11,399 once an object fetch stopped waiting for the
 window's row on the dot the window activates, 10,911 once LCDC's two
-colour-selection bits were separated from the palette by a dot, and **10,363
-now**, once the fetcher's read of LCDC bit 5 became one per fetch. The object move
-changed two verdicts, the LCDC dot changed two more and bit 5's sample dot changed
-one; the other four moves changed none. Every figure in the table
+colour-selection bits were separated from the palette by a dot, 10,363 once the
+fetcher's read of LCDC bit 5 became one per fetch, and **10,361 now**, once a
+counter match that does not reset background rendering started pushing Pan Docs'
+colour-0 pixel for a *disabled* window as well as for a WX change ("A counter
+match that does not reset background rendering pushes one colour-0 pixel" above).
+The object move changed two verdicts, the LCDC dot changed two more and bit 5's
+sample dot changed one; the other five moves changed none. Every figure in the table
 below was re-checked against a fresh full run on 2026-09-24, at the end of the
 piece, and all thirteen agree to the pixel.
 
@@ -2895,16 +3007,18 @@ inside a fetch a bit 5 write lands was settled on 2026-09-24 as well - the
 fetcher reads the bit once per fetch, on the dot the fetch completes, so a write
 landing between two of a fetch's stages cannot split it ("A fetch in flight is a
 window fetch until it ends" above). `m3_lcdc_win_en_change_multiple` **passes**
-with that, down from 8,316, and `m3_lcdc_win_en_change_multiple_wx` is at 5, down
-from 5,942; those five are Pan Docs' colour-0 insertion for a window disabled on a
-background tile boundary, and an activation that lands on the dot bit 5 comes back,
-neither of which is modelled.
+with that, down from 8,316, and `m3_lcdc_win_en_change_multiple_wx` is at 3, down
+from 5,942. Two of the five it stood at were Pan Docs' colour-0 insertion for a
+window disabled on a background tile boundary, modelled on 2026-09-24 as one rule
+with the pixel a WX change pushes ("A counter match that does not reset background
+rendering pushes one colour-0 pixel" above). The 3 left are an activation that
+lands on the dot bit 5 comes back, which is not modelled.
 
 | test | pixels | why it still fails |
 | --- | --- | --- |
 | `m3_scx_high_5_bits` | 12 | one background tile per affected line takes the wrong SCX; 80, then 86, then 45 once the fetch stages were pinned |
 | `ashiepaws/strikethrough` | 53 | an OAM DMA still copying through line 68's object scan; diagnosed and left failing, see its own entry above |
-| `m3_lcdc_win_en_change_multiple_wx` | 5 | not the bit 5 sample any more: Pan Docs' colour-0 insertion on two lines, and a window activated on the dot bit 5 returns on two more; 5942, then 77, then 69, then 116 under the five-step fetcher, then 85. See "A fetch in flight is a window fetch until it ends" above |
+| `m3_lcdc_win_en_change_multiple_wx` | 3 | not the bit 5 sample and not the colour-0 insertion either: a window activated on the very dot bit 5 returns, on lines 16 and 44, whose whole band both references put one pixel right of ours; 5942, then 77, then 69, then 116 under the five-step fetcher, then 85, then 5. See "A fetch in flight is a window fetch until it ends" above |
 | `m3_lcdc_obj_en_change_variant` | 96 | not bit 1 any more: a six-pixel block at the right edge of the last two bands, where the longest object stall meets its end-of-line BGP pulse; 532 before the object fetch's dots, 152 before LCDC's colour-selection dot. See "The LCDC bits that choose a pixel's colour are read one dot before the palette shades it" above |
 | `m3_lcdc_bg_map_change` | 124 | mid-line LCDC bit 3 changes; 316, 428, then 182 |
 | `m3_window_timing_wx_0` | 126 | one dot, only when SCX % 8 is not 0 (see the residual above) |
