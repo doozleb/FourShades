@@ -166,6 +166,91 @@ TEST_CASE("a palette written during mode 3 reads as the old value OR the new one
     CHECK(row[3] == 2);
 }
 
+TEST_CASE("LCDC's colour-selection bits are read a dot before the palette shades the pixel") {
+    // The case above pins the palette to the pixel's own dot: a write landing
+    // after the M-cycle that ends on dot 100 shades the pixel drawn on dot 101.
+    // Mealybug Tearoom's three references for LCDC bits 0 and 1 put their seams
+    // one pixel further right than that, on real DMG hardware, so the colour a
+    // pixel carries is chosen a dot before the palette shades it. See
+    // PixelPipeline::kLcdcSelectLag.
+    Ppu ppu;
+    setUpTile(ppu, 0xFF, 0xFF); // every pixel colour 3, shade 3 under BGP 0xE4
+    runTo(ppu, 1, 100);
+    static_cast<void>(ppu.write(0xFF40, 0x90)); // LCDC bit 0 clear: blank the background
+    while (ppu.lineDot() < 300) { ppu.tick(); }
+    const auto* row = &ppu.frame()[Ppu::kWidth];
+    CHECK(row[0] == 3); // drawn on dot 100, before the write landed
+    CHECK(row[1] == 3); // drawn on dot 101 and chosen on dot 100: still the old bit
+    CHECK(row[2] == 0); // chosen on dot 101, the first dot that sees it
+    CHECK(row[3] == 0);
+}
+
+TEST_CASE("the object-enable bit is read a dot early too, on the same dot as the blanking bit") {
+    // Bit 1 at emission decides whether an object already merged into the queue
+    // covers the background, and it comes from the same dot bit 0 does. An
+    // object at screen x = 0 stalls the line eleven dots, so pixel 0 is drawn on
+    // dot 111 and pixel n on dot 111 + n; a write landing after the M-cycle that
+    // ends on dot 112 is therefore chosen from first by pixel 3.
+    Ppu ppu;
+    setUpTile(ppu, 0x00, 0x00); // background all colour 0
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so OAM and VRAM land
+    for (u16 row = 0; row < 16; ++row) {
+        ppu.vramWrite(static_cast<u16>(0x8020 + row), 0xFF); // tile 2: every pixel colour 3
+    }
+    static_cast<void>(ppu.write(0xFF48, 0xE4)); // OBP0: colour 3 -> shade 3
+    ppu.oamWrite(0xFE00, 0x10); // Y = 16: on every line drawn here
+    ppu.oamWrite(0xFE01, 0x08); // X = 8: screen x = 0, so it covers pixels 0-7
+    ppu.oamWrite(0xFE02, 0x02);
+    ppu.oamWrite(0xFE03, 0x00);
+    enableLcd(ppu, 0x93); // LCD on, background on, objects on
+    runTo(ppu, 1, 112);
+    static_cast<void>(ppu.write(0xFF40, 0x91)); // LCDC bit 1 clear: objects off
+    while (ppu.lineDot() < 400) { ppu.tick(); }
+    const auto* row = &ppu.frame()[Ppu::kWidth];
+    CHECK(row[0] == 3); // dot 111
+    CHECK(row[1] == 3); // dot 112, before the write landed
+    CHECK(row[2] == 3); // dot 113, chosen on dot 112: still the old bit
+    CHECK(row[3] == 0); // dot 114, chosen on dot 113: the object is gone
+}
+
+TEST_CASE("the line's first pixel chooses its colour on the dot it is shaded") {
+    // The dot of lag is the gap between one pixel's colour being chosen and the
+    // previous one being shaded, so the line's first pixel has nothing to lag
+    // behind. Two of the three Mealybug Tearoom references measure it: each puts
+    // one object off the left edge of every line at an OAM X that walks the
+    // stall's length band by band, and on the band where the stall ends exactly
+    // on the dot a write lands, both photograph the line's first pixel with the
+    // new bit rather than the old one.
+    //
+    // An object at OAM X = 2 is that band. Pan Docs' penalty makes it nine dots
+    // - six for the fetch and three for the five background pixels to the right
+    // of background x = -6, less two - so pixel 0 is drawn on dot 109, the first
+    // dot a write landing after the M-cycle ending on dot 108 is seen on.
+    const auto firstPixelOf = [](u8 objectX) {
+        Ppu ppu;
+        setUpTile(ppu, 0xFF, 0xFF); // every pixel colour 3
+        static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so OAM lands
+        ppu.oamWrite(0xFE00, 0x10); // Y = 16: on every line drawn here
+        ppu.oamWrite(0xFE01, objectX);
+        ppu.oamWrite(0xFE02, 0x02); // tile 2, all zero: transparent, so only the stall shows
+        ppu.oamWrite(0xFE03, 0x00);
+        enableLcd(ppu, 0x93);
+        runTo(ppu, 1, 108);
+        static_cast<void>(ppu.write(0xFF40, 0x92)); // LCDC bit 0 clear, objects still on
+        while (ppu.lineDot() < 400) { ppu.tick(); }
+        return std::array<u8, 3>{ppu.frame()[Ppu::kWidth], ppu.frame()[Ppu::kWidth + 1],
+                                ppu.frame()[Ppu::kWidth + 2]};
+    };
+    // Nine dots of stall: pixel 0 is drawn on dot 109 and blanked, although the
+    // dot before it - the stall's last - still had the bit set.
+    CHECK(firstPixelOf(0x02) == std::array<u8, 3>{0, 0, 0});
+    // Eight dots: pixel 0 is drawn on dot 108, before the write lands, and the
+    // lag then carries the old bit one pixel further. Nothing about the first
+    // pixel is special here, which is what makes the case above a measurement
+    // rather than an assumption about where a stall leaves the stage.
+    CHECK(firstPixelOf(0x03) == std::array<u8, 3>{3, 3, 0});
+}
+
 TEST_CASE("the last pixels of a line are drawn after mode 3 has ended") {
     // The other end of the same seven dots: mode 3 ends once the fetcher has
     // read everything the line needs, while the pixels still in the FIFO take
