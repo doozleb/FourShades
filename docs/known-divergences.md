@@ -1001,9 +1001,14 @@ triggered.** Pan Docs ends the fetch with "the lower address for the row of
 pixels of the target object tile is now retrieved and lengthens mode 3 by 1 dot.
 Once the address is retrieved this is the last chance for object fetch cancel to
 occur. Exiting object fetch lengthens mode 3 by 1 dot" - the address, then one
-more dot, then the pixel. `kObjectDataDots` is that 2, and it is measured rather
+more dot, then the pixel. `kObjectDataDots` was that 2, and it was measured rather
 than counted: 1 costs `m3_lcdc_obj_size_change_scx` 40 pixels, 3 and 4 cost
-`m3_lcdc_obj_size_change` 20, and 5 costs it 60. Two unit cases pin it from both
+`m3_lcdc_obj_size_change` 20, and 5 costs it 60. **Superseded on 2026-09-24: it
+is 3.** That sweep predates the two bitplanes being read on two separate dots, so
+it moved both reads together; with the *high* half pinned one dot before the pixel
+and only the low half moved, three is exact on both frames and two costs 15
+pixels. See "An object off the left edge is read on the dot its own pixel is due,
+and the low half three dots before the pixel" below for the full sweep. Two unit cases pin it from both
 sides, the second of which needs a second object on the line to break the
 M-cycle grid.
 
@@ -1133,6 +1138,17 @@ one part of them that is **still not explained**.
   wrong, and no constant offset from the trigger dot fits bands 1 and 8 at once,
   because band 1's object wants a dot at or before 104 and band 8's wants one at
   or after 105.
+  **Solved on 2026-09-24, and 15 of the 105 were not these seven at all.** A
+  third reading fits: the fetch is timed to the dot the object's *own* leftmost
+  pixel is due, which off the left edge comes (8 - OAM X) dots before pixel 0's,
+  while the stall it charges stays where it is. That is not a constant offset from
+  the trigger dot and not the fetcher's three dots, which is why neither of the two
+  readings above found it - band 1 moves seven dots and band 8 none. The last 15
+  pixels turned out to be an on-screen object whose low half is read three dots
+  before its pixel rather than two. See "An object off the left edge is read on the
+  dot its own pixel is due, and the low half three dots before the pixel" below,
+  which supersedes this bullet and the two rows of the table below it that quote a
+  low-half dot.
 
 | mutation | unit cases failed | plain | `_scx` | `screen` | `dmg-acid2` |
 | --- | --- | --- | --- | --- | --- |
@@ -1144,9 +1160,11 @@ one part of them that is **still not explained**.
 
 - **The tile's pair bit is pinned by `dmg-acid2`**, not by these two: dropping it
   costs that reference 512 pixels and two unit cases about ordinary tall objects.
-  The low half's dot is pinned from both sides - a dot later costs the plain
+  The low half's dot is pinned from one side here - a dot later costs the plain
   variant 30 pixels and the `_scx` variant nothing, and reading both halves on one
-  dot loses the `_scx` variant's last 30. `intr_2_mode0_timing_sprites` is
+  dot loses the `_scx` variant's last 30 - but **not from the other**: a dot
+  *earlier* was not swept until 2026-09-24, and it is where the last 15 pixels
+  were. The sweep is in the entry named two bullets above. `intr_2_mode0_timing_sprites` is
   untouched by all of it: no dot moved, only which byte each read fetched.
 - **What is *not* arbitrated.** That a cancel can no longer happen once the lower
   address is retrieved is Pan Docs' sentence and a unit case, and **no ROM in the
@@ -1154,11 +1172,214 @@ one part of them that is **still not explained**.
   the dot the pixels are drawn, so the emission-time reader hides those objects
   either way. It is in because Pan Docs says so.
 - **Effect:** `m3_lcdc_obj_size_change_scx` **190 -> 0, passing**,
-  `m3_lcdc_obj_size_change` **310 -> 105**. `ppu timing` 12 / 12,
+  `m3_lcdc_obj_size_change` **310 -> 105** (**0 since 2026-09-24**; see the entry
+  named in the bullet above). `ppu timing` 12 / 12,
   `intr_2_mode0_timing_sprites`, the `oam bug` seven, `m3_bgp_change`,
   `dmg-acid2`, `m2_win_en_toggle` and both `obj_en` ROMs all still exact. The
   `screen` group's differing-pixel total went 10,265 -> **9,870** and the suite
   153 -> **154 / 165**.
+- **Checked:** 2026-09-24.
+
+## An object off the left edge is read on the dot its own pixel is due, and the low half three dots before the pixel (2026-09-24)
+
+Not a divergence: the two dots an object fetch reads VRAM on, measured from the
+two references that photograph them, and the answer to the "what is left" bullet
+of the entry above - the 105 pixels of `m3_lcdc_obj_size_change`, which is now
+**0**. Two things came out of it, and each is measured separately.
+
+**1. An object off the left edge is read (8 - OAM X) dots earlier than an object
+at the screen edge.** The eight pixels of the row the fetcher throws away at the
+top of a line are real pixels of the line, at screen x = -8 to -1, and they are
+the line's first eight ticks of the pixel clock: pixel 0 is the ninth. An
+object's fetch is timed to the dot its own leftmost pixel is due - "The Pixel",
+at screen x = OAM X - 8, which the OBJ penalty's tile term already uses off the
+left edge (see "OBJ penalty: the first object fetched on a line gets a three-dot
+rebate against Pan Docs' algorithm" above) - so an object at OAM X = 1 is read
+seven dots before an object at OAM X = 8 is, even though Pan Docs gives them the
+same ten- and eleven-dot penalties and both pre-empt pixel 0. **What the object
+costs is not moved with it**: the stall still runs from the pixel it pre-empts,
+which for every object off the left edge is pixel 0, and the fetcher still keeps
+`kObjectFetcherLead` of it. See `PixelPipeline::objectEarlyDots_`.
+
+**2. The low half of the row is read three dots before that pixel, not two.**
+Pan Docs, [Pixel FIFO](https://gbdev.io/pandocs/pixel_fifo.html): "the lower
+address for the row of pixels of the target object tile is now retrieved and
+lengthens mode 3 by 1 dot. Once the address is retrieved this is the last chance
+for object fetch cancel to occur. Exiting object fetch lengthens mode 3 by 1
+dot." Counting those two "1 dot"s puts the lower address two dots before the
+pixel, which is what `kObjectDataDots` was; Pan Docs never says which dot the
+*upper* address is retrieved on. The two references refuse two dots and pin the
+upper address one dot before the pixel, which leaves the two reads **two dots
+apart** - the same cadence, and the same two offsets from the pixel they feed, as
+the background fetcher's own bitplane reads (see "The background fetcher is five
+steps over eight dots, and the dot that leaves over" above: the high bitplane on
+P-1, the low on P-3). One VRAM read per dot, two dots apart, on one port.
+
+### The measurement
+
+`m3_lcdc_obj_size_change` (DMG) and its `_scx` sibling, decoded byte by byte the
+way the entry above describes: BGP is `$00` and OBP0 `$E4`, so every object pixel
+in either frame decodes straight back into the two bytes its fetch read. The
+plain ROM writes LCDC `$83` (eight pixels tall) on line dot 104, `$87` on 128,
+`$83` on 140 and `$87` on 152, the same dots on every line, so a read sees `$87`
+at or before dot 104, `$83` from 105 to 128, `$87` from 129 to 140, `$83` from
+141 to 152 and `$87` from 153 on. Three objects per sixteen-line band, at
+OAM X = *b*, *b* + 16 and *b* + 32 for band *b*.
+
+The seven objects at OAM X = 1 to 7 each wanted **both** halves read with the
+sixteen-pixel height, which on this ROM means a dot no later than 104. With rule
+1 and rule 2 together they are:
+
+| OAM X | penalty | pixel 0's dot | low read | high read | both by dot 104 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 10 | 110 | 100 | 102 | yes |
+| 2 | 9 | 109 | 100 | 102 | yes |
+| 3 | 8 | 108 | 100 | 102 | yes |
+| 4 | 7 | 107 | 100 | 102 | yes |
+| 5 | 6 | 106 | 100 | 102 | yes |
+| 6 | 6 | 106 | 101 | 103 | yes |
+| 7 | 6 | 106 | 102 | 104 | yes |
+| 8 | 11 | 111 | 108 | 110 | no, and the reference agrees |
+
+OAM X = 7's high read lands on dot 104 exactly, the last dot that still sees
+`$87`, and OAM X = 8 - the same penalty family, the same pre-empted pixel - is
+read eight dots later and is the eight-pixel-tall one in the photograph too. That
+pair is the whole of rule 1's evidence and it is tight at both ends.
+
+### The sweep, and what the two photographs pin
+
+Writing *low* and *high* for the dots between each read and the pixel the fetch
+pre-empts, with rule 1 in place, measured over both frames:
+
+| low | high | unit cases failed | plain | `_scx` |
+| --- | --- | --- | --- | --- |
+| 2 | 1 | 0 | 15 | 0 |
+| **3** | **1** | **1** | **0** | **0** |
+| 4 | 1 | 1 | 0 | 0 |
+| 5 | 1 | 1 | 15 | 45 |
+| 2 | 2 | 2 | 30 | 30 |
+| 3 | 2 | 3 | 15 | 30 |
+| 4 | 2 | 3 | 15 | 30 |
+| 5 | 2 | 3 | 30 | 75 |
+| 4 | 3 | 3 | 30 | 30 |
+| 1 | 1 | 3 | 30 | 30 |
+
+- **high = 1 is pinned**: every row with high = 2 or 3 costs one frame or both.
+- **low = 2 is refused** (15 pixels) and **low = 5 is refused** (15 and 45).
+  **low = 3 and low = 4 are indistinguishable** - both frames are exact for
+  either. Three is shipped because it is the background fetcher's own offset and
+  therefore introduces no number of its own; four would be a dot of its own with
+  nothing behind it. Nothing in either suite separates them, and that is recorded
+  rather than argued away.
+- The one unit case that fails at low = 3 asserted Pan Docs' two dots
+  (`tests/test_objects.cpp`, "an object fetch reads LCDC bit 2 two dots before
+  the pixel it pre-empts"). It was written from the dot count, not from hardware;
+  under this file's own rule a hardware photograph outranks a Pan Docs sentence
+  that turns out to be a simplification, so it has been rewritten to pin the new
+  dot from both sides, and two new cases pin rule 1 from both sides - an object at
+  OAM X = 1 and one at OAM X = 8, one line, one LCDC write between their read
+  dots, opposite heights.
+
+### Both halves of the change are needed, and 15 of the 105 were somewhere else
+
+| what changed | plain | `_scx` |
+| --- | --- | --- |
+| neither (HEAD) | 105 | 0 |
+| rule 2 alone (the low half three dots before the pixel) | 85 | 0 |
+| rule 1 alone (the off-left reads moved early) | 15 | 0 |
+| **both** | **0** | **0** |
+
+The entry above said all 105 pixels were the seven objects off the left edge.
+**They were not.** Diffed against the reference pixel by pixel, 90 of them are
+those seven - bands 1 to 7, rows 8 to 13, x = 0 to 6 - and the other **15 are one
+on-screen object**: band 1's third, at OAM X = 33, on lines 20 to 23, x = 29 to
+32, whose low half the reference takes from the eight-pixel address and whose
+high half from the sixteen-pixel one. Its low read sat on dot 153 and its high on
+154, one dot too late for the `$87` written on 152 to fall between them. Rule 2
+is what moves it, and rule 2 alone leaves 85 of the other 90, so the two rules
+answer two different parts of one residual.
+
+### Refuted, with the numbers
+
+- **Moving the stall as well as the fetch.** The same physical reading applied to
+  the whole stall - the object *triggered* on the dot its own pixel is due, so the
+  stall runs from there - keeps the pixel stream where the references want it (an
+  off-left object triggered before the line's first push finds no idle fetcher
+  dots to overlap, so it costs the fetcher all of its penalty instead of
+  `penalty - kObjectFetcherLead`, and pixel 0 still lands on 100 + penalty), and
+  it gives **the same read dots** and the same 15-pixel residual. It also moves
+  the background fetch grid three dots on every line whose first object is off the
+  left edge, and that is measured and wrong: `m3_lcdc_bg_map_change` 124 -> 764,
+  `m3_lcdc_tile_sel_change` 410 -> 1,046, `m3_scy_change` 259 -> 2,764,
+  `m3_scx_high_5_bits` 12 -> 116, `m3_lcdc_win_map_change` 724 -> 788,
+  `m3_lcdc_tile_sel_win_change` 868 -> 1,420; the `screen` group
+  9,780 -> 14,281. **So the fetch's dots move and the stall's do not**, and that
+  is a measurement rather than a preference.
+- **The off-left penalty being one dot shorter.** The same 15 pixels can be
+  reached instead by charging an object off the left edge one dot less than Pan
+  Docs' tile term, which shifts everything after it on the line by a dot. It
+  fails: `intr_2_mode0_timing_sprites` **fails** (hardware-verified),
+  `m3_bgp_change_sprites` 0 -> 194 (the hardware photograph of the pixel stream),
+  `m3_obp0_change` 0 -> 34, `m3_lcdc_bg_en_change` 0 -> 102, both `obj_en` ROMs
+  break, two unit cases fail, `m3_lcdc_obj_size_change` itself goes 15 -> 99, and
+  the suite goes 155 -> 148. The penalty is Pan Docs' and stays Pan Docs'.
+
+### What is not arbitrated
+
+1. **low = 3 against low = 4**, above.
+2. **The clamp.** The fetch's two reads are dots of the stall, so an object off
+   the left edge is read at most as early as the stall's own first dot. With
+   SCX = 0 the clamp is never binding (for OAM X = 0 to 5 it is exactly
+   saturated, which is why those five are all read on dot 100); with a non-zero
+   SCX it can be, and no ROM in the 165 reaches it. Without it such a fetch would
+   be due on a dot its stall never has and would silently drop half a row.
+3. **Which dots the discarded row's eight pixels really occupy.** FourShades
+   throws the line's first row away as a lump rather than shifting it out, so
+   "eight dots before pixel 0" comes from a row's width rather than from a
+   simulated shift. A model that shifted those eight pixels out would put these
+   reads on the same dots; the two are not distinguished here.
+4. **The SCX interaction.** The dots are counted from the line's first push, not
+   from pixel 0, so an off-left object on a line with a non-zero fine scroll is
+   read `SCX % 8` dots before its own pixel would be drawn.
+   `m3_lcdc_obj_size_change_scx`, the only reference with both, is exact either
+   way.
+
+### Groups D and E did not move, and this sharpens what they need
+
+`m3_lcdc_bg_map_change` (124), `m3_lcdc_tile_sel_change` (410), `m3_scy_change`
+(259), `m3_scx_high_5_bits` (12), `m3_lcdc_win_map_change` (724) and
+`m3_lcdc_tile_sel_win_change` (868) are **unchanged to the pixel** - as they must
+be, because nothing in this entry moves a single dot of any stall. The open
+question those six share is the OAM X = 0 against OAM X = 8 pair, and this entry
+sharpens it rather than settling it:
+
+- The pair *is* distinguishable in time, and by the mechanism those two entries
+  asked for: the pixel clock reaches an object off the left edge before it reaches
+  pixel 0. That is now measured, from a third reference.
+- But groups D and E need the **fetcher's** dots to differ between the two, not
+  the fetch's reads, and moving the stall to match is measured above to be wrong:
+  it breaks the bands of group D that are exact today. So a fourth reference, or a
+  hardware measurement, would have to show one of three things:
+  1. the background fetch grid on a line whose object is off the left edge sitting
+     somewhere other than where `m3_lcdc_tile_sel_change`'s and
+     `m3_lcdc_bg_map_change`'s bands 0-7 put it today - those bands are exact, so
+     a fourth reference would have to overrule them; or
+  2. the window's restart fetch beginning on a dot that is not the dot the pixel
+     counter reaches WX - 7 on (group E's unique fx0 = 100 + penalty fit, which
+     holds for OAM X = 0 to 7 and fails from 8); or
+  3. the two bands' penalties differing after all - which
+     `intr_2_mode0_timing_sprites` and `m3_bgp_change_sprites` between them forbid
+     to within a dot in either direction, as the second refutation above measures.
+- Band 16 against band 17 of group D remains contradictory on its own terms; see
+  that entry for the exhaustive search that closed it.
+
+- **Effect:** `m3_lcdc_obj_size_change` **105 -> 0, passing**, and nothing else in
+  the 165 moves by a pixel. `intr_2_mode0_timing_sprites`, `ppu timing` 12 / 12,
+  the `oam bug` seven, `m3_bgp_change` and `m3_bgp_change_sprites`,
+  `m3_obp0_change`, `dmg-acid2`, `m2_win_en_toggle`, both `obj_en` ROMs and
+  `m3_lcdc_obj_size_change_scx` are all still exact. The `screen` group's
+  differing-pixel total went 9,870 -> **9,765** and the suite
+  154 -> **155 / 165**.
 - **Checked:** 2026-09-24.
 
 ## Rendering runs seven dots behind the mode-3 window (2026-09-21)
@@ -2043,13 +2264,20 @@ exact, the residual's shape is sharp, and two of the four references turn out to
 be **mutually inconsistent** with the structure of the fetch - which is worth
 knowing before anyone spends another task on them.
 
-**A fifth reference joined them on 2026-09-24.** `m3_lcdc_obj_size_change`'s last
-105 pixels are the same term seen through LCDC bit 2 instead of through the
-background: they are exactly the seven objects whose OAM X is 1 to 7, and each of
-them wants its row read five or more dots earlier than the stall this term gives
-it. See "An object fetch reads its two bitplanes on two dots, and builds each
-address the way the hardware does" above for the decode. Whatever settles the tile
-term for an object off the left-hand edge should be checked against that ROM too.
+**A fifth reference joined them on 2026-09-24, and it has since been answered
+without moving these four by a pixel.** `m3_lcdc_obj_size_change`'s last 105
+pixels looked like the same term seen through LCDC bit 2 instead of through the
+background: 90 of them are the objects whose OAM X is 1 to 7, and each wanted its
+row read five or more dots earlier than the stall this term gives it. The answer
+was not the term at all - it is *where in the stall the fetch sits*: an object off
+the left edge is read (8 - OAM X) dots before pixel 0, because the pixel clock
+reaches its own leftmost pixel that much earlier, while the stall stays where it
+is. That ROM now passes and these four are unchanged to the pixel. Two things
+about it matter here: it shows the OAM X = 0 against OAM X = 8 pair **is**
+distinguishable in time, and moving the *stall* to match (rather than just the
+fetch) was measured and makes these four much worse - 124 -> 764, 410 -> 1,046,
+259 -> 2,764 and 12 -> 116. See "An object off the left edge is read on the dot
+its own pixel is due, and the low half three dots before the pixel" above.
 
 The four ROMs are `m3_lcdc_tile_sel_change` (410 differing pixels),
 `m3_scy_change` (259), `m3_lcdc_bg_map_change` (124) and `m3_scx_high_5_bits`
@@ -2199,7 +2427,13 @@ there is no mechanism that explains even the two LCDC ones at bands 16 and 17.
   pixels, and anything that changes the flat six dots will move
   `intr_2_mode0_timing_sprites`, which is hardware-verified and passing.
 - The X = 0 versus X = 8 pair is the thing to explain first, and it is now worth
-  more than the group-E entry says it is.
+  more than the group-E entry says it is. **Partly answered on 2026-09-24**: the
+  two are read on different dots, eight apart, because the pixel clock reaches an
+  object off the left edge before it reaches pixel 0 (see the entry named in the
+  paragraph at the top of this one). What is still unexplained is the pair
+  differing in the **fetcher's** dots, which is what these four ROMs and group E
+  measure, and the obvious way to get that - moving the stall as well as the
+  fetch - is measured to break the bands of these four that are exact today.
 - The band-16/17 contradiction needs a *third* reference or a hardware
   measurement, not more thought: it says one of three things this model treats as
   structural is wrong - the pulse's dots (pinned by bands 0-7 of these same two
@@ -2284,7 +2518,15 @@ above without that would be fitting six blocks and breaking ten.
   group D show the same pair, in the background fetcher and with no window
   involved, for 128 of their 805 remaining pixels. See "Group D's residual is the
   OBJ penalty's tile term, and two references contradict each other over it"
-  above.
+  above. **And the two lines are no longer identical in this model:** since
+  2026-09-24 an object off the left edge is *read* eight dots before one at
+  OAM X = 8 is, because the pixel clock reaches its own leftmost pixel that much
+  earlier. Its stall is still in the same place, which is why these two ROMs did
+  not move; making the stall move with the fetch was measured and costs group D
+  its exact bands. See "An object off the left edge is read on the dot its own
+  pixel is due, and the low half three dots before the pixel" above. So the
+  mechanism this bullet asks for exists and is measured - what is missing is a
+  reference saying the fetcher's dots follow it.
 - **Checked:** 2026-09-24.
 
 ## Palette writes short the old and new values together for one dot (2026-09-21)
@@ -3190,18 +3432,20 @@ window fetch until it ends: LCDC bit 5 is read once per fetch" above; before tha
 after the LCDC bits that choose a pixel's colour were separated from the palette
 by one dot, fourteen failed and came to 10,911, and before *that*, with the object
 fetch's dots split between the fetcher and the pixels, sixteen failed and came to
-11,399). **Eleven** of the thirty tests in the
-`screen` group still fail, and they come to **9,870** differing pixels out of
-23,040 each. Each is listed with its count, what
-it measures and why it is not fixed. Nineteen pass: `acid/dmg-acid2`,
+11,399). **Ten** of the thirty tests in the
+`screen` group still fail, and they come to **9,765** differing pixels out of
+23,040 each (eleven and 9,870 before `m3_lcdc_obj_size_change` was solved on
+2026-09-24 - see "An object off the left edge is read on the dot its own pixel is
+due, and the low half three dots before the pixel" above). Each is listed with its count, what
+it measures and why it is not fixed. Twenty pass: `acid/dmg-acid2`,
 `mooneye/manual-only/sprite_priority`, `daid/stop_instr`, `ashiepaws/bully`,
 and `mealybug-tearoom-tests/ppu/`'s `m2_win_en_toggle`, `m3_bgp_change` (this
 section's own task), `m3_bgp_change_sprites`, `m3_obp0_change`,
 `m3_wx_4_change`, `m3_wx_4_change_sprites`,
 `m3_wx_5_change`, `m3_wx_6_change`, `m3_window_timing`, `m3_scx_low_3_bits`,
 `m3_lcdc_bg_en_change`, `m3_lcdc_obj_en_change`,
-`m3_lcdc_obj_en_change_variant`, `m3_lcdc_obj_size_change_scx` and
-`m3_lcdc_win_en_change_multiple`.
+`m3_lcdc_obj_en_change_variant`, `m3_lcdc_obj_size_change`,
+`m3_lcdc_obj_size_change_scx` and `m3_lcdc_win_en_change_multiple`.
 Passing tests have no row below; the notes after the table say what each of them
 was and what settled it. For the history of the figures: the group stood at
 47,378 before the mid-line LCDC bit 5 work of 2026-09-24, 40,108 after it,
@@ -3262,7 +3506,6 @@ lands on the dot bit 5 comes back, which is not modelled.
 | `m3_lcdc_bg_map_change` | 124 | mid-line LCDC bit 3 changes; 316, 428, then 182 |
 | `m3_window_timing_wx_0` | 126 | one dot, only when SCX % 8 is not 0 (see the residual above) |
 | `m3_scy_change` | 259 | mid-line SCY; 1256, 2542, then 661 |
-| `m3_lcdc_obj_size_change` | 105 | not bit 2's dot and not the row's address any more: the seven objects hanging off the left edge, whose stall is the OBJ penalty's contested tile term; 350, 410, 310, then this. See "An object fetch reads its two bitplanes on two dots" above |
 | `m3_lcdc_tile_sel_change` | 410 | mid-line LCDC bit 4 changes; 688, 1144, then 534 |
 | `m3_lcdc_win_map_change` | 724 | mid-line LCDC bit 6 changes; 1646 before the counter work, 1448 before the five-step fetcher, 792, then 852. Not sampling either: same entry |
 | `m3_lcdc_tile_sel_win_change` | 868 | mid-line LCDC bit 4 changes, with a window; 1904 before the counter work, 1336, then 1016. Not sampling: see "Group E, measured to the dot and not solved" above |
@@ -3337,8 +3580,7 @@ Notes on the ones that are more than "a behaviour not written yet":
     above about SCX = LY crossing a tile boundary is the old diagnosis and is
     superseded: see "Group D's residual is the OBJ penalty's tile term, and two
     references contradict each other over it" above.
-- **`m3_lcdc_obj_size_change` (105);
-  `m3_lcdc_obj_size_change_scx` now passes.** These two probe the same thing -
+- **`m3_lcdc_obj_size_change` and `m3_lcdc_obj_size_change_scx` both pass.** These two probe the same thing -
   LCDC bit 2, the object height bit, written during mode 3 - and the seven-dot
   rendering lag once moved them in opposite directions: the plain variant went
   from 350 differing pixels to 410, its `_scx` sibling from 350 to 270. **Solved
@@ -3352,22 +3594,30 @@ Notes on the ones that are more than "a behaviour not written yet":
     fetch was *triggered*, so a write landing inside the fetch could not change
     the height it used. It is now read on the dot the fetch builds its address,
     two dots before the pixel it pre-empts, and these are the two ROMs that pin
-    that dot - from either side, by 20 and 40 pixels. See "An object fetch waits
-    for the pixel it pre-empts, and reads its row two dots before it" above.
+    that dot - from either side, by 20 and 40 pixels (the low half's dot has since
+    moved to three dots before the pixel; that sweep moved both halves together).
+    See "An object fetch waits for the pixel it pre-empts, and reads its row two
+    dots before it" above.
     Together with the fetch's dots that takes them to 310 and 190.
-  - **Finished later the same day**, by reading the bit **twice** - once for each
-    half of the row, a dot apart - and by building each address the way the
-    hardware does. 310 -> 105 and 190 -> **0**. The 105 left are the seven objects
-    whose OAM X is 1 to 7, hanging off the left-hand edge, and they are the tile
-    term of the entry two bullets below rather than anything about bit 2.
+  - **Taken further later the same day**, by reading the bit **twice** - once for
+    each half of the row, a dot apart - and by building each address the way the
+    hardware does. 310 -> 105 and 190 -> **0**.
+  - **Finished on 2026-09-24**: **105 -> 0**. 90 of those pixels were the seven
+    objects whose OAM X is 1 to 7, hanging off the left-hand edge, which are read
+    (8 - OAM X) dots earlier than an object at the screen edge because the pixel
+    clock reaches their own leftmost pixel that much earlier; the other 15 were an
+    on-screen object whose low half is read three dots before its pixel rather
+    than two. Neither is the tile term, and neither moves a dot of any stall: see
+    "An object off the left edge is read on the dot its own pixel is due, and the
+    low half three dots before the pixel" above.
   - The old diff-map note said the errors sat in two narrow column clusters per
     16-line block, around x = 27-39 and x = 3-22, marching a pixel right every
     16 lines in the plain variant and standing still in the `_scx` one. That was
     a correct description and the right diagnosis - "a register write landing on
     the wrong side of the fetch that reads it" - but it stopped one step short:
     the fetch has **two** reads, and the write was landing between them. The
-    clusters are gone from the `_scx` variant and confined to the seven
-    left-edge objects in the plain one.
+    clusters are gone from the `_scx` variant, and from the plain one too since
+    the left-edge objects' read dots were found.
 - **`daid/ppu_scanline_bgp` (7186).** This one disagrees with the Mealybug
   references rather than with a behaviour, by a uniform 12 dots (three
   M-cycles) over the whole image. **Diagnosed on 2026-09-24 and still left
