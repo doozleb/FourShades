@@ -20,7 +20,6 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     pixelX_ = 0;
     discard_ = 0; // latched by the line's first tile fetch; see stepFetcher
     window_ = false;
-    fetchWindow_ = false;
     windowX_ = 0;
     windowXHeadStart_ = false;
     windowComparedX_ = -1;
@@ -28,7 +27,7 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     wxPipe_.fill(ppu.wx());
     lcdcSelectPipe_.fill(ppu.lcdc());
     pixelStreamStarted_ = false;
-    windowRendering_ = false;
+    fifoFed_ = false;
     objects_ = {};
     objectDots_ = 0;
     objectFetching_ = false;
@@ -68,13 +67,9 @@ void PixelPipeline::tryPushRow() {
             static_cast<u8>((high << 1) | low);
         ++queueSize_;
     }
-    if (fetchWindow_) {
-        // Pan Docs' pixel FIFO page says the colour-0 pixel is pushed by a
-        // WX changed "after the window has started rendering". This is what
-        // starting to render is: window pixels in the queue. See
-        // windowRendering_ and pushWindowShiftPixel.
-        windowRendering_ = true;
-    }
+    // There is now a row in the FIFO for an inserted pixel to go in front of.
+    // See fifoFed_ and pushColourZeroPixel.
+    fifoFed_ = true;
     ++fetcherX_;
     pushed_ = true;
 }
@@ -103,7 +98,6 @@ void PixelPipeline::sampleTileIndex(const Ppu& ppu) {
         // welded to the map column's read.
         discard_ = static_cast<int>(ppu.scx() & 0x07);
     }
-    fetchWindow_ = window;
     const u16 map = (window ? (ppu.lcdc() & 0x40) : (ppu.lcdc() & 0x08)) != 0 ? 0x9C00 : 0x9800;
     const u8 y = window ? static_cast<u8>(windowLineUsed_)
                         : static_cast<u8>(ppu.lineNumber() + ppu.scy());
@@ -203,7 +197,7 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
         //
         // The other two chances are the Sleep dots below, and they are not
         // decoration: an extra pixel pushed into the FIFO from outside the
-        // fetcher (see pushWindowShiftPixel) blocks this one, and the next
+        // fetcher (see pushColourZeroPixel) blocks this one, and the next
         // chance a dot later is what keeps that pixel costing no dots.
         pushed_ = false;
         tryPushRow();
@@ -523,7 +517,7 @@ void PixelPipeline::startWindow(Ppu& ppu) {
     // row of the Window's tilemap" - the background queue is cleared and the
     // fetcher restarts, which costs the documented kWindowRestartDots dots.
     window_ = true;
-    windowRendering_ = false;
+    fifoFed_ = false;
     queueSize_ = 0;
     queueHead_ = 0;
     step_ = Step::Tile;
@@ -579,15 +573,15 @@ void PixelPipeline::startWindow(Ppu& ppu) {
     ppu.advanceWindowLine();
 }
 
-void PixelPipeline::pushWindowShiftPixel() {
-    // See the header for Pan Docs' sentence and the two things it leaves to be
+void PixelPipeline::pushColourZeroPixel() {
+    // See the header for Pan Docs' two sentences and what they leave to be
     // measured. Marked as compared whether or not the FIFO had room, because the
     // comparator fired either way.
     windowComparedX_ = windowX_;
-    if (!windowRendering_) {
-        // Pan Docs: "after the window has started rendering". The window is on
-        // but has not put a pixel into the queue yet, so there is nothing for
-        // this to shift. See windowRendering_.
+    if (!fifoFed_) {
+        // There is no row in the FIFO for the pixel to go in front of: either
+        // the window has activated and its first row is still being fetched, or
+        // the line's own first row has not arrived. See fifoFed_.
         return;
     }
     if (queueSize_ % 8 != 0) {
@@ -698,15 +692,17 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
     // The counter is not compared for the first kWindowCounterLeadDots dots of
     // the line. Without that a WX of 0 would be matched on the line's very
     // first dot rather than by the counter's own first value, six dots in.
-    if (windowCounterLead_ == 0 && windowEnabled(ppu) &&
+    if (windowCounterLead_ == 0 && ppu.windowReached() &&
         windowX_ == static_cast<int>(wxPipe_.front())) {
-        if (!window_) {
+        if (windowConditions(ppu)) {
             startWindow(ppu);
         } else if (windowX_ > windowComparedX_) {
-            // The window is already drawing, so this is a WX that moved ahead
-            // of the counter mid-window rather than a second activation: it
-            // pushes one colour-0 pixel and leaves the window's row alone.
-            pushWindowShiftPixel();
+            // The match fired but background rendering is not reset - either
+            // the window is already drawing, so this is a WX moved ahead of the
+            // counter mid-window, or LCDC bit 5 is clear, so the window would
+            // have started here and did not. Pan Docs has a sentence for each
+            // and both push one colour-0 pixel; see pushColourZeroPixel.
+            pushColourZeroPixel();
         }
     }
     // The comparator's kWindowCounterWxLag dots of pipeline move on whether or

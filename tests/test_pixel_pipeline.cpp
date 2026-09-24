@@ -1038,10 +1038,17 @@ TEST_CASE("characterisation: the window's picture and mode-3 length for a spread
 TEST_CASE("characterisation: a line the window never reaches") {
     struct Row { u8 lcdc; u8 wy; int dots; const char* pixels; };
     static const Row rows[] = {
-        // LCDC bit 5 clear all line, and a line above WY: both plain
-        // background, both a 172-dot mode 3.
+        // LCDC bit 5 clear all line, and a line above WY: neither draws a
+        // window pixel and both keep mode 3 at its 172-dot minimum.
+        //
+        // The first row is not quite plain background, though, and that is Pan
+        // Docs rather than an accident: the ruler's WX = 39 would have started
+        // the window at screen x = 32, which is a background tile boundary, so
+        // a single colour-0 pixel is inserted there. The second row does not,
+        // because WY = 1 leaves the Y condition unmet - which is the same
+        // condition an activation needs. See pushColourZeroPixel.
         {0xD1, 0x00, 172,
-         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+         "11111111111111111111111111111111011111111111111111111111111111111111111111111111"
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
         {0xF1, 0x01, 172,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
@@ -1093,8 +1100,13 @@ TEST_CASE("characterisation: LCDC bit 5 set part-way through mode 3") {
         {39, 120, 180,
          "11111111111111111111111111111111321001233210012332100123321001233210012332100123"
          "32100123321001233210012332100123321001233210012332100123321001233210012332100123"},
+        // The window is never matched here, but the match still happened with
+        // bit 5 clear and screen x = 32 is a background tile boundary, so Pan
+        // Docs' colour-0 pixel is inserted there. The rows above, at WX = 0, 4
+        // and 7, show the other side of it: those matches land before the
+        // line's first row has reached the FIFO and insert nothing.
         {39, 200, 172,
-         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+         "11111111111111111111111111111111011111111111111111111111111111111111111111111111"
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
         {120, 120, 180,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
@@ -1579,7 +1591,12 @@ TEST_CASE("LCDC bit 5 set after the counter has gone past WX does not start the 
     Ppu ppu;
     setUpWindowRuler(ppu, 0xD1, 0x00, 0x27, 0x00); // window off to start with
     const CharLine late = characteriseWrites(ppu, {{240, 0xFF40, 0xF1}});
-    CHECK(late.pixels == std::string(160, '1'));
+    // Background all the way, save for the colour-0 pixel the match with bit 5
+    // clear inserts at x = 32; no window band and no window row. See
+    // pushColourZeroPixel.
+    std::string plain(160, '1');
+    plain[32] = '0';
+    CHECK(late.pixels == plain);
     CHECK(late.dots == 172);
     const CharLine next = characteriseWrites(ppu, {});
     CHECK(next.pixels.substr(32, 8) == kEvenWindowRow); // still row 0
@@ -1704,6 +1721,136 @@ TEST_CASE("an activation does not push a colour-0 pixel of its own on the dots t
     const CharLine got = characteriseWrites(ppu, {});
     CHECK(got.pixels.substr(0, 8) == kEvenWindowRow);
     CHECK(got.pixels.substr(152, 8) == kEvenWindowRow);
+}
+
+// ---------------------------------------------------------------------------
+// Pan Docs' other colour-0 pixel: the one a *disabled* window leaves behind
+//
+// Pan Docs, "Window behavior":
+//
+//   "On monochrome systems, if the Window is disabled via LCDC, but the other
+//   conditions are met and it would have started rendering exactly on a BG tile
+//   boundary, then where it would have started rendering, a single pixel with
+//   ID 0 is inserted."
+//
+// The same push as the sentence above it, from a match that does not reset
+// background rendering for the other reason. "Exactly on a BG tile boundary" is
+// the FIFO's one push port again: it takes the pixel only when the pixel it is
+// about to hand over starts a row. See docs/known-divergences.md, "A counter
+// match that does not reset background rendering pushes one colour-0 pixel".
+namespace {
+// setUpWindowOffRuler's ruler with LCDC bit 5 clear, so the window never draws:
+// background tile 0 is 2,1,1,1,1,1,1,1, which makes an inserted pixel tell
+// itself apart from a substituted one - the 2 that starts every tile moves one
+// pixel right.
+void setUpWindowDisabledRuler(Ppu& ppu, u8 scx, u8 wx, u8 wy = 0x00) {
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so writes land
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8000 + row), 0x7F); // tile 0: 2,1,1,1,1,1,1,1
+        ppu.vramWrite(static_cast<u16>(0x8001 + row), 0x80);
+        ppu.vramWrite(static_cast<u16>(0x8010 + row), 0xFF); // tile 1: flat colour 3
+        ppu.vramWrite(static_cast<u16>(0x8011 + row), 0xFF);
+    }
+    for (u16 i = 0; i < 0x400; ++i) {
+        ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00);
+        ppu.vramWrite(static_cast<u16>(0x9C00 + i), 0x01);
+    }
+    static_cast<void>(ppu.write(0xFF47, 0xE4)); // BGP: shade == colour
+    static_cast<void>(ppu.write(0xFF43, scx));
+    static_cast<void>(ppu.write(0xFF4A, wy));
+    static_cast<void>(ppu.write(0xFF4B, wx));
+    enableLcd(ppu, 0xD1); // LCD on, BG on, window *off*, window map 0x9C00
+}
+
+// The plain background the ruler draws with nothing inserted.
+std::string plainBackgroundLine(int scx) {
+    std::string out;
+    while (out.size() < 160 + 16) { out += "21111111"; }
+    return out.substr(static_cast<std::size_t>(scx % 8), 160);
+}
+} // namespace
+
+TEST_CASE("a counter match with LCDC bit 5 clear inserts one colour-0 pixel at a BG tile boundary") {
+    // WX = 39 would have started the window at screen x = 32, which is a
+    // background tile boundary at SCX = 0, so the pixel lands there - and it is
+    // an insertion, so the 2 that opens the tile moves to x = 33.
+    Ppu ppu;
+    setUpWindowDisabledRuler(ppu, /*scx=*/0x00, /*wx=*/0x27);
+    const CharLine got = characteriseWrites(ppu, {});
+    CHECK(got.pixels.substr(0, 32) == plainBackgroundLine(0).substr(0, 32));
+    CHECK(got.pixels[32] == '0');
+    CHECK(got.pixels.substr(33, 16) == "2111111121111111");
+    // The whole line moved one pixel right, so the last background tile's 2 -
+    // which an unshifted line puts at x = 152 - is at x = 153 and the line's
+    // last fetched pixel has fallen off the edge.
+    CHECK(got.pixels.substr(152, 8) == "12111111");
+    // No activation and no fetcher restart: mode 3 is its 172-dot minimum.
+    CHECK(got.dots == 172);
+}
+
+TEST_CASE("the boundary the disabled window's pixel needs is a background one, not a screen one") {
+    // At SCX = 3 the fine-scroll discard eats three pixels of the first tile,
+    // so the FIFO holds whole rows at screen x = 5, 13, 21 ... - the pixels at
+    // which a background tile starts. WX = 12 is reached at x = 5.
+    Ppu ppu;
+    setUpWindowDisabledRuler(ppu, /*scx=*/0x03, /*wx=*/0x0C);
+    const CharLine got = characteriseWrites(ppu, {});
+    CHECK(got.pixels.substr(0, 5) == plainBackgroundLine(3).substr(0, 5));
+    CHECK(got.pixels[5] == '0');
+    CHECK(got.pixels.substr(6, 8) == "21111111");
+    CHECK(got.dots == 176); // 172 + SCX % 8, sampled in whole M-cycles
+}
+
+TEST_CASE("a disabled window's match part-way through a background tile inserts nothing") {
+    // WX = 42 is reached at x = 35, three pixels into the tile that started at
+    // x = 32: the FIFO still holds five of that tile's pixels and the push
+    // finds no room. Fourteen lines of m3_lcdc_win_en_change_multiple_wx are
+    // this case and its reference shows no pixel on any of them.
+    Ppu ppu;
+    setUpWindowDisabledRuler(ppu, /*scx=*/0x00, /*wx=*/0x2A);
+    const CharLine got = characteriseWrites(ppu, {});
+    CHECK(got.pixels == plainBackgroundLine(0));
+    CHECK(got.dots == 172);
+}
+
+TEST_CASE("a disabled window's match before the FIFO has been fed inserts nothing") {
+    // WX = 0 is matched by the counter's first free increment and WX = 7 by its
+    // last, which is the dot the line's first row reaches the FIFO - and at the
+    // top of that dot the row is not there yet. There is no row for the pixel to
+    // go in front of, so nothing is inserted. Three ROMs in the suite leave the
+    // window disabled with WY = 0 and WX = 0 for whole frames, and their
+    // references show a plain picture.
+    for (const u8 wx : {u8{0x00}, u8{0x07}}) {
+        Ppu ppu;
+        setUpWindowDisabledRuler(ppu, /*scx=*/0x00, wx);
+        const CharLine got = characteriseWrites(ppu, {});
+        CHECK_MESSAGE(got.pixels == plainBackgroundLine(0), "WX ", wx);
+        CHECK_MESSAGE(got.dots == 172, "WX ", wx);
+    }
+}
+
+TEST_CASE("a disabled window's match needs the Y condition, like an activation does") {
+    // Pan Docs: "the other conditions are met". WY above the line is not that.
+    Ppu ppu;
+    // WY = 144 from the start: the PPU's Y latch is sticky for the frame, so
+    // writing it after a line has been drawn would be too late.
+    setUpWindowDisabledRuler(ppu, /*scx=*/0x00, /*wx=*/0x27, /*wy=*/0x90);
+    const CharLine got = characteriseWrites(ppu, {});
+    CHECK(got.pixels == plainBackgroundLine(0));
+}
+
+TEST_CASE("a disabled window's inserted pixel does not advance the window's row") {
+    // It is not an activation: Pan Docs advances "the coordinate of the active
+    // Window row" when a match resets background rendering, and this match does
+    // not. So the line after one that inserted a pixel, with bit 5 set again,
+    // must draw the window's row 0.
+    Ppu ppu;
+    setUpWindowDisabledRuler(ppu, /*scx=*/0x00, /*wx=*/0x27);
+    const CharLine first = characteriseWrites(ppu, {});
+    REQUIRE(first.pixels[32] == '0'); // the pixel was inserted
+    static_cast<void>(ppu.write(0xFF40, 0xF1)); // window on
+    const CharLine second = characteriseWrites(ppu, {});
+    CHECK(second.pixels.substr(32, 8) == "33333333"); // the window's first row
 }
 
 // ---------------------------------------------------------------------------
