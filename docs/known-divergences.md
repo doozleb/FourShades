@@ -812,6 +812,126 @@ alone explains it.
 - **Checked:** 2026-09-24, the whole of the mode-3 length arithmetic re-derived
   from the pipeline and left unchanged; see the coverage bullet above.
 
+## The background fetcher is five steps over eight dots, and the dot that leaves over (2026-09-24)
+
+Not a divergence: a structure FourShades now implements. It is recorded because
+Pan Docs gives the five steps but not which of their chances to push an
+undisturbed line uses, and because the arithmetic that settles that leaves one
+dot over which Pan Docs does not account for.
+
+- **Evidence, Pan Docs, [Pixel FIFO](https://gbdev.io/pandocs/pixel_fifo.html):**
+  "The pixel fetcher has 5 steps. The first four steps take 2 dots each and the
+  fifth step is attempted every dot until it succeeds" - Get tile, Get tile data
+  low, Get tile data high, Sleep, Push - and Get Tile Data High "also pushes a
+  row of background/window pixels to the FIFO. This extra push is not part of
+  the 8 steps, meaning there's 3 total chances to push pixels to the background
+  FIFO every time the complete fetcher steps are performed."
+- **What was here before.** Four steps over six dots: Get tile, both bitplanes
+  at two dots each, and then a Push step that took a dot of its own and was
+  retried until the FIFO emptied. Throughput and mode 3's length were right -
+  eight pixels per eight dots either way - but the dot each stage read its
+  register on was not, and it was not even consistent along a line. Writing P
+  for the dot a tile's first pixel is drawn on, the line's first drawn tile read
+  its index, low and high bytes on P-5, P-3 and P-1, and every tile after it on
+  P-6, P-4 and P-2, because those fetches spend a dot on a push the FIFO
+  refuses. A register write landing inside a fetch therefore had two different
+  answers on one line depending on which tile it caught.
+- **What it is now.** The five steps, the first four of two dots each, with the
+  push attempted at the end of Get Tile Data High, again on each Sleep dot, and
+  then every dot at the Push step. The chance at Get Tile Data High is the one
+  an undisturbed line uses, every time: a row feeds eight pixels and a complete
+  fetch is eight dots, so the FIFO empties exactly as that step completes. So
+  the tile's first pixel is drawn on the dot its high bitplane is read, its low
+  bitplane two dots earlier and its index two before that - **P-4, P-2 and P,
+  for every fetch on the line**, the first one included.
+- **The other two phases are ruled out, not chosen against.** A push only at
+  step 5, after the eight dots of steps 1-4, leaves one dot per tile with an
+  empty FIFO and nothing to emit: 160 pixels would take 180 dots, and mode 3 is
+  measured at 172. A push that lands on a Sleep dot in the steady state cannot
+  be reached from the top of a line, because the FIFO is empty when Get Tile
+  Data High completes there and that chance cannot be refused.
+- **The dot that is left over.** Twelve dots of rendering pass before a line's
+  first push. That is not a choice: mode 3's length is 160 plus that number
+  (`dotsRemaining` counts one dot per pixel not yet emitted, so the whole of the
+  warm-up is inside it) and pixel 0's dot is the render lag plus it, so the
+  hardware-verified 172-dot minimum and the Mealybug references' pixel 0 on line
+  dot 100 are two measurements of the same twelve. Pan Docs explains the 172 by
+  two warm-up fetches; two six-dot fetches come to twelve dots of *steps*, and
+  with the push landing on the last of them the first pixel is drawn on the
+  twelfth dot and the line comes out **171**. Letting the thrown-away fetch
+  sleep as well makes it **173**. Both break the `ppu timing` ROMs. One dot
+  charged to the fetcher's own reset - the dot the reset lands on, spent before
+  Get Tile begins - lands on twelve exactly. The window agrees independently:
+  `PixelPipeline::kWindowRestartDots` is six dots from the activation to the
+  pre-empted pixel, which a bare reset to Get Tile would make five, and those
+  six are held by four unit cases and by the previous task's SCX ruler. So two
+  measurements that have nothing to do with each other both want the same dot.
+  It is not in Pan Docs, and it is recorded here as what is left once the five
+  steps are in place rather than as something documented.
+- **What the second and third chances buy.** Nothing on an ordinary line: they
+  are for the dots an extra pixel is in the FIFO. The colour-0 pixel a
+  mid-window WX change pushes (see "A WX changed while the window is drawing
+  pushes one colour-0 pixel" below) takes the push port that Get Tile Data High
+  was going to use, and the chance one dot later is what keeps that pixel
+  costing no dots. Deleting the two Sleep chances is the one mutation of the
+  five tried that the new cases do *not* catch: it is caught by "a WX moved
+  ahead of the counter while the window draws pushes one colour-0 pixel", and by
+  nothing else in 480 cases.
+- **What moved.** No verdict: **147 / 165** before and after, `screen` 12 / 30
+  before and after. `m3_bgp_change` is the test that would have said the
+  seven-dot render lag and the new fetch length disagree, and it did not - it is
+  still exact, because the dot a row is pushed has not moved, only the reads
+  that feed it. `ppu timing` 12 / 12, `dmg-acid2`, `m2_win_en_toggle` and
+  `m3_scx_low_3_bits` all still exact. Six screenshot counts moved, all of them
+  tests that write a register into a background or window fetch:
+
+  | test | before | after |
+  | --- | --- | --- |
+  | `m3_scy_change` | 1256 | 2542 |
+  | `m3_lcdc_tile_sel_change` | 688 | 1144 |
+  | `m3_lcdc_bg_map_change` | 316 | 428 |
+  | `m3_scx_high_5_bits` | 80 | 86 |
+  | `m3_lcdc_win_en_change_multiple_wx` | 69 | 116 |
+  | `m3_lcdc_win_map_change` | 1448 | **792** |
+
+  Group D of the screen investigation (which dot of a background fetch samples
+  which register) goes 3195 -> 5055 and group E (the same for a window fetch)
+  2784 -> 2128; the `screen` group as a whole 17,405 -> 18,656. The reads are
+  now where the structure puts them and uniform along the line, which is what
+  pinning a register to a stage needs; the error those tests measure is not
+  smaller for it, and this entry does not claim it is.
+- **The choice this leaves, measured rather than argued.** Inside a two-dot step
+  the code samples registers when the step *completes*, which is the rule it
+  used before this task. The other reading - the address is latched on the
+  step's first dot and the data lands on its second - is equally compatible with
+  the five steps and moves every read one dot earlier, to P-5, P-3 and P-1. Both
+  were run over the full suite: **15,907** differing pixels for first-dot
+  sampling against **18,656** for the rule in the code, and 17,405 before this
+  task, with five of the six moved tests better under it and
+  `m3_lcdc_win_map_change` worse (852 against 792). No verdict changes either
+  way. It is deliberately left open, for the task that pins each register to its
+  stage: Mealybug's notes name different stages for TILE_SEL and for SCY, so the
+  answer may not be one rule for all three reads, and a 2,749-pixel aggregate is
+  not evidence about a stage. Worth noting the shape, though - first-dot
+  sampling under the *four*-step fetcher put the reads two dots before the
+  tile's first pixel and cost about 5,000 pixels (recorded under
+  "`m3_scx_high_5_bits`" in the screenshot table below); under the five-step
+  fetcher it puts them one dot before and gains about 1,500. The two
+  measurements bracket the same narrow window of dots.
+- **Tests.** `tests/test_pixel_pipeline.cpp`, "a background fetch reads its low
+  bitplane four dots before the tile's first pixel" and "consecutive background
+  fetches read their low bitplanes eight dots apart". Both were watched failing
+  first. They draw a line whose tile has a different low bitplane on row 1 and
+  row 2 and write SCY into the middle of it: the low bitplane is the one read
+  whose dot crosses an M-cycle boundary when the fetcher goes from four steps
+  over six dots to five over eight, so it is the only one of the three a test can
+  separate at all - a write can only land at the end of an M-cycle, and the index
+  and high reads move within one. Five mutations were tried and all five are
+  caught: a six-dot fetch (no Sleep step) by the two new cases and nothing else;
+  no extra push at Get Tile Data High by 30 cases; no reset dot by 37; a two-dot
+  reset by 30; no Sleep chances by the one case named above.
+- **Checked:** 2026-09-24.
+
 ## Palette writes short the old and new values together for one dot (2026-09-21)
 
 - **Test:** Mealybug Tearoom `m3_bgp_change` (DMG reference image,
@@ -1322,7 +1442,8 @@ and the fine scroll.
   which this read accounts for 371 to 126.
 
 Nothing else in either suite writes SCX inside that M-cycle, so nothing else
-moved. `m3_scx_high_5_bits` (80 pixels) and `m3_scy_change` (1256) are a
+moved. `m3_scx_high_5_bits` (80 pixels then, 86 after the five-step fetcher) and
+`m3_scy_change` (1256 then, 2542 after it) are a
 different question - which dot of which fetch stage reads what - and are
 untouched.
 
@@ -1409,9 +1530,9 @@ kept here because the diagnosis is what the fix was verified against.
 
 ## Screenshot tests still failing once the pixel pipeline was finished (2026-09-21)
 
-**Re-measured from a full run on 2026-09-24, after the window X counter work.**
-Eighteen of the thirty tests in the `screen` group still fail, and they come to
-17,405 differing pixels out of 23,040 each. Each is listed with its count, what
+**Re-measured from a full run on 2026-09-24, after the fetcher became five
+steps over eight dots.** Eighteen of the thirty tests in the `screen` group
+still fail, and they come to 18,656 differing pixels out of 23,040 each. Each is listed with its count, what
 it measures and why it is not fixed. Twelve pass: `acid/dmg-acid2`,
 `mooneye/manual-only/sprite_priority`, `daid/stop_instr`, `ashiepaws/bully`,
 and `mealybug-tearoom-tests/ppu/`'s `m2_win_en_toggle`, `m3_bgp_change` (this
@@ -1420,7 +1541,10 @@ section's own task), `m3_wx_4_change`, `m3_wx_4_change_sprites`,
 Passing tests have no row below; the notes after the table say what each of them
 was and what settled it. For the history of the figures: the group stood at
 47,378 before the mid-line LCDC bit 5 work of 2026-09-24, 40,108 after it,
-33,670 before the colour-0 push work, 32,804 after it, and 17,405 now.
+33,670 before the colour-0 push work, 32,804 after it, 17,405 after the free
+increments' timing, and 18,656 now - the last move a rise, from the five-step
+fetcher, which is explained in "The background fetcher is five steps over eight
+dots" above and changed no verdict.
 
 **What the window still gets wrong is the two mid-line LCDC bit 5 tests.** The
 paragraph that stood here said the window never re-activates mid-line and that
@@ -1437,37 +1561,42 @@ the window" and "The window can start more than once on a scanline" above. What
 is left is where inside a fetch a bit 5 write lands, which is the same open
 question as the mid-line LCDC, SCX and SCY rows below, and it is what
 `m3_lcdc_win_en_change_multiple` (468) and `m3_lcdc_win_en_change_multiple_wx`
-(69) still measure - down from 8,316 and 5,942.
+(116) still measure - down from 8,316 and 5,942.
 
 | test | pixels | why it still fails |
 | --- | --- | --- |
 | `ashiepaws/strikethrough` | 53 | not diagnosed |
-| `m3_lcdc_win_en_change_multiple_wx` | 69 | mid-line LCDC bit 5; 5942, then 77, then this |
-| `m3_scx_high_5_bits` | 80 | one background tile per affected line takes the wrong SCX |
+| `m3_lcdc_win_en_change_multiple_wx` | 116 | mid-line LCDC bit 5; 5942, then 77, then 69, then the five-step fetcher |
+| `m3_scx_high_5_bits` | 86 | one background tile per affected line takes the wrong SCX |
 | `m3_lcdc_obj_en_change` | 100 | mid-line LCDC bit 1 changes |
 | `m3_obp0_change` | 108 | object pixels in the leftmost 18 columns |
 | `m3_window_timing_wx_0` | 126 | one dot, only when SCX % 8 is not 0 (see the residual above) |
 | `m3_lcdc_obj_size_change_scx` | 270 | mid-line LCDC bit 2 changes |
-| `m3_lcdc_bg_map_change` | 316 | mid-line LCDC bit 3 changes |
+| `m3_lcdc_bg_map_change` | 428 | mid-line LCDC bit 3 changes; 316 before the five-step fetcher |
 | `m3_lcdc_obj_size_change` | 410 | mid-line LCDC bit 2 changes; 60 worse under the seven-dot shift, cause unknown (see below) |
 | `m3_lcdc_win_en_change_multiple` | 468 | mid-line LCDC bit 5; 8316, then 5760, then this |
 | `m3_lcdc_obj_en_change_variant` | 532 | mid-line LCDC bit 1 changes |
-| `m3_lcdc_tile_sel_change` | 688 | mid-line LCDC bit 4 changes |
+| `m3_lcdc_tile_sel_change` | 1144 | mid-line LCDC bit 4 changes; 688 before the five-step fetcher |
 | `m3_lcdc_bg_en_change` | 855 | mid-line LCDC bit 0 changes |
-| `m3_scy_change` | 1256 | mid-line SCY changes inside the fetch |
+| `m3_scy_change` | 2542 | mid-line SCY changes inside the fetch; 1256 before the five-step fetcher |
 | `m3_lcdc_tile_sel_win_change` | 1336 | mid-line LCDC bit 4 changes, with a window; 1904 before the counter work |
-| `m3_lcdc_win_map_change` | 1448 | mid-line LCDC bit 6 changes; 1646 before the counter work |
+| `m3_lcdc_win_map_change` | 792 | mid-line LCDC bit 6 changes; 1646 before the counter work, 1448 before the five-step fetcher |
 | `m3_bgp_change_sprites` | 2104 | as `m3_bgp_change`, plus objects |
 | `daid/ppu_scanline_bgp` | 7186 | disagrees with the Mealybug references by 12 dots |
 
 The mid-line LCDC, SCX and SCY entries above are all the same shape: the
-register is read live, at the dot the fetcher needs it, but which of a fetch's
-six dots reads what has not been pinned to the dot. Mealybug's PPU
+register is read live, at the dot the fetcher needs it, but which dot of a
+fetch's eight reads what has not been pinned to the dot. Mealybug's PPU
 documentation says TILE_SEL (bit 4) is read during the two bitplane stages and
 SCY during all three stages, which is what `PixelPipeline::stepFetcher` and
 `tileRowAddress` do; the remaining error is smaller than a stage, and the
 references have not been decoded far enough to say which dot of which stage is
-wrong. They are left failing rather than tuned by trial.
+wrong. They are left failing rather than tuned by trial. Six of these counts
+moved when the fetcher became five steps over eight dots, which put every
+fetch's three reads at the same offsets from its tile's first pixel for the
+first time; the entry for that says what moved, and records the one remaining
+whole-stage choice - sampling on a step's first dot rather than its last - as
+measured on both sides and open.
 
 Notes on the ones that are more than "a behaviour not written yet":
 
@@ -1495,10 +1624,14 @@ Notes on the ones that are more than "a behaviour not written yet":
 - **`m3_scx_high_5_bits` (80).** Only the third background tile of a line
   (x = 16-23) is ever wrong, and only on the 28 lines where SCX = LY crosses a
   tile boundary: the SCX write lands within a dot or two of that tile's map
-  read. Sampling the tile index, and both bitplane bytes, on the first dot of
+  read. 80 pixels until the five-step fetcher, **86** now.
+  Sampling the tile index, and both bitplane bytes, on the first dot of
   their two-dot fetch stages instead of the second was tried; it took this
   test from 80 to 77 but the `screen` group as a whole from 73,628 differing
-  pixels to 78,855, so it was reverted. Those two figures are the pair as it
+  pixels to 78,855, so it was reverted. Under the five-step fetcher the same
+  change goes the other way - 86 to 45, and the group as a whole to 15,907 -
+  because the stages themselves have moved; see "The background fetcher is five
+  steps over eight dots" above, which leaves that choice open on purpose. Those two figures are the pair as it
   was measured, before either power-on change moved `ashiepaws/bully` by
   56 pixels - down, then back up; the group's total today, and the sum of the
   table above, is 73,628. What decided the revert is the 5,000-pixel rise,

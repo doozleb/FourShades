@@ -11,6 +11,8 @@ u8 shadeFor(u8 palette, u8 colour) {
 void PixelPipeline::startLine(const Ppu& ppu) {
     step_ = Step::Tile;
     stepDots_ = 0;
+    pushed_ = false;
+    fetchReset_ = true; // the line's first dot is the reset's; see fetchReset_
     fetcherX_ = 0;
     discardFetch_ = true;
     queueSize_ = 0;
@@ -42,7 +44,34 @@ u16 PixelPipeline::tileRowAddress(const Ppu& ppu) const {
     return static_cast<u16>(base + (y & 7) * 2);
 }
 
+void PixelPipeline::tryPushRow() {
+    if (queueSize_ != 0) {
+        return; // one push port, and it takes a row only when the FIFO is empty
+    }
+    for (int bit = 7; bit >= 0; --bit) {
+        const u8 low = static_cast<u8>((tileLow_ >> bit) & 1);
+        const u8 high = static_cast<u8>((tileHigh_ >> bit) & 1);
+        queue_[static_cast<std::size_t>((queueHead_ + queueSize_) % 8)] =
+            static_cast<u8>((high << 1) | low);
+        ++queueSize_;
+    }
+    if (fetchWindow_) {
+        // Pan Docs' pixel FIFO page says the colour-0 pixel is pushed by a
+        // WX changed "after the window has started rendering". This is what
+        // starting to render is: window pixels in the queue. See
+        // windowRendering_ and pushWindowShiftPixel.
+        windowRendering_ = true;
+    }
+    ++fetcherX_;
+    pushed_ = true;
+}
+
 void PixelPipeline::stepFetcher(const Ppu& ppu) {
+    if (fetchReset_) {
+        // The dot a reset costs before Get Tile begins; see fetchReset_.
+        fetchReset_ = false;
+        return;
+    }
     switch (step_) {
     case Step::Tile:
         if (++stepDots_ < 2) {
@@ -93,35 +122,59 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
         tileHigh_ = ppu.peekVram(static_cast<u16>(tileRowAddress(ppu) + 1));
         if (discardFetch_) {
             // Pan Docs: two tile fetches happen before the first pixel. The
-            // first one's result is thrown away with no pixels queued, so it
-            // costs exactly the 6 dots of Tile+DataLow+DataHigh above, not a
-            // seventh dot for a Push step that has nothing to push.
+            // first one's result is thrown away, so this fetch costs exactly
+            // the 6 dots of Tile+DataLow+DataHigh above and none of the Sleep
+            // and Push steps below: those are where the fetcher waits for room
+            // in the FIFO, and a row that is thrown away has nothing to wait
+            // for. Six here and the reset's one dot before it (see
+            // fetchReset_) are what put the line's first push on the
+            // thirteenth dot of rendering.
             discardFetch_ = false;
             step_ = Step::Tile;
             return;
         }
-        step_ = Step::Push;
+        // Pan Docs: Get Tile Data High "also pushes a row of
+        // background/window pixels to the FIFO. This extra push is not part of
+        // the 8 steps, meaning there's 3 total chances to push pixels to the
+        // background FIFO every time the complete fetcher steps are performed."
+        //
+        // This is the chance an undisturbed line uses, every time: a row feeds
+        // eight pixels and the whole fetch is eight dots, so the FIFO empties
+        // exactly as this step completes. The tile's first pixel is therefore
+        // drawn on the dot its high bitplane is read, its low bitplane two dots
+        // earlier and its tile index two before that - the same three offsets
+        // for every fetch on the line, which is what the dot each register
+        // reaches the fetcher on is measured against. See
+        // docs/known-divergences.md, "The background fetcher is five steps over
+        // eight dots, and the dot that leaves over", for the measurements that
+        // pin this phase and the one choice it leaves open.
+        //
+        // The other two chances are the Sleep dots below, and they are not
+        // decoration: an extra pixel pushed into the FIFO from outside the
+        // fetcher (see pushWindowShiftPixel) blocks this one, and the next
+        // chance a dot later is what keeps that pixel costing no dots.
+        pushed_ = false;
+        tryPushRow();
+        step_ = Step::Sleep;
+        return;
+    case Step::Sleep:
+        if (!pushed_) {
+            tryPushRow(); // chances two and three
+        }
+        if (++stepDots_ < 2) {
+            return;
+        }
+        stepDots_ = 0;
+        // The Sleep dots are spent whether or not the row has gone in, which is
+        // what makes a complete fetch eight dots; the Push step below is only
+        // reached when all three chances found the FIFO occupied.
+        step_ = pushed_ ? Step::Tile : Step::Push;
         return;
     case Step::Push:
-        if (queueSize_ != 0) {
-            return; // retried every dot until the queue drains
+        tryPushRow();
+        if (pushed_) {
+            step_ = Step::Tile; // Get Tile begins on the dot after the push
         }
-        for (int bit = 7; bit >= 0; --bit) {
-            const u8 low = static_cast<u8>((tileLow_ >> bit) & 1);
-            const u8 high = static_cast<u8>((tileHigh_ >> bit) & 1);
-            queue_[static_cast<std::size_t>((queueHead_ + queueSize_) % 8)] =
-                static_cast<u8>((high << 1) | low);
-            ++queueSize_;
-        }
-        if (fetchWindow_) {
-            // Pan Docs' pixel FIFO page says the colour-0 pixel is pushed by a
-            // WX changed "after the window has started rendering". This is what
-            // starting to render is: window pixels in the queue. See
-            // windowRendering_ and pushWindowShiftPixel.
-            windowRendering_ = true;
-        }
-        ++fetcherX_;
-        step_ = Step::Tile;
         return;
     }
 }
@@ -233,23 +286,27 @@ int PixelPipeline::objectPenalty(const Ppu& ppu, std::size_t index, int& lastTil
 }
 
 int PixelPipeline::fetchStallDots() const {
-    // Dots the fetcher still owes before its Push step runs again. Tile,
-    // DataLow and DataHigh take two dots each (stepFetcher), and Push emits
-    // its first pixel on the dot it runs, so that dot is not counted here -
-    // it is one of the per-pixel dots the caller counts.
-    int dots = 0;
+    // Dots the fetcher still owes before the dot its next row reaches the FIFO.
+    // Tile, DataLow and DataHigh take two dots each and the row goes in as
+    // DataHigh completes (stepFetcher), which is also the dot that row's first
+    // pixel is drawn on - so that dot is not counted here: it is one of the
+    // per-pixel dots the caller counts.
+    int dots = fetchReset_ ? 1 : 0; // the reset's own dot; see fetchReset_
     switch (step_) {
     case Step::Tile:
-        dots = 6 - stepDots_;
+        dots += 5 - stepDots_;
         break;
     case Step::DataLow:
-        dots = 4 - stepDots_;
+        dots += 3 - stepDots_;
         break;
     case Step::DataHigh:
-        dots = 2 - stepDots_;
+        dots += 1 - stepDots_;
         break;
+    case Step::Sleep:
     case Step::Push:
-        dots = 0;
+        // The row is assembled and a chance to push it comes every dot from
+        // here, so on the only dots the caller asks about - the queue empty -
+        // it went in on this dot already and nothing is owed.
         break;
     }
     if (discardFetch_) {
@@ -262,7 +319,7 @@ int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
     // One dot per pixel still to be emitted, plus the stall the fetch in
     // progress still owes, plus the stalls the object fetches still to come
     // will owe. The SCX discard is spent in the line's first eight dots, and
-    // the fetcher feeds eight pixels per six-dot fetch, so it stays ahead of
+    // the fetcher feeds eight pixels per eight-dot fetch, so it stays ahead of
     // the pixel counter on its own - except across a window activation,
     // which is not a "keeping up" fetch but a full restart (see
     // kWindowRestartDots), so it is charged separately below, both while it
@@ -383,6 +440,12 @@ void PixelPipeline::startWindow(Ppu& ppu) {
     queueHead_ = 0;
     step_ = Step::Tile;
     stepDots_ = 0;
+    pushed_ = false;
+    // Pan Docs: "the fetcher is reset to step 1". The reset costs the dot it
+    // lands on before that step begins - the same dot the line's own start
+    // spends - and it is what makes the restart kWindowRestartDots dots rather
+    // than five. See fetchReset_.
+    fetchReset_ = true;
     // One fetch, not the two a line begins with: the thrown-away first fetch
     // belongs to the line, and a window that restarts part-way through it does
     // not owe it again. This is also what makes the restart cost

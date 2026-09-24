@@ -12,9 +12,15 @@ class Ppu;
 // "Palettes"): bits 1:0 for colour 0, 3:2 for 1, and so on.
 u8 shadeFor(u8 palette, u8 colour);
 
-// The hardware's rendering pipeline for one scanline. The fetcher's first
-// three steps take two dots each and its push is retried every dot until the
-// background queue is empty; meanwhile one pixel is emitted per dot.
+// The hardware's rendering pipeline for one scanline. Pan Docs, "Pixel FIFO":
+// the fetcher has five steps - Get tile, Get tile data low, Get tile data high,
+// Sleep, Push - the first four of two dots each and the fifth attempted every
+// dot until it succeeds; Get Tile Data High "also pushes a row of
+// background/window pixels to the FIFO", which with the two Sleep dots makes
+// "3 total chances to push pixels to the background FIFO every time the
+// complete fetcher steps are performed". Meanwhile one pixel is emitted per
+// dot. See stepFetcher for which of the three chances an undisturbed line uses
+// and what pins that.
 class PixelPipeline {
 public:
     // Called when mode 3 begins.
@@ -37,7 +43,7 @@ public:
     // alone: the object fetches still owed over the pixels that are left
     // stall them, and the hardware-verified object timing ROM measures
     // objects at OAM X 160-167 doing exactly that. The fetcher itself is not
-    // counted for ordinary background pixels - a fetch takes six dots and
+    // counted for ordinary background pixels - a fetch takes eight dots and
     // feeds eight pixels, so it never binds over the handful of dots at the
     // end of a line this is asked about - except across a window
     // activation: stepDot clears the queue and restarts the fetcher from
@@ -59,10 +65,11 @@ public:
     int dotsRemaining(const Ppu& ppu) const;
 
     // The dots a window activation forces the fetcher to spend before its
-    // first pixel reaches the queue: startWindow resets the fetcher to its
-    // Tile step and clears the queue when the window triggers, so
-    // Tile+DataLow+DataHigh (2 dots each, see stepFetcher) run once more
-    // with nothing pushed before Push can run again. One fetch and not two,
+    // first pixel reaches the queue: startWindow resets the fetcher and clears
+    // the queue when the window triggers, so the reset's own dot (see
+    // fetchReset_) and then Tile+DataLow+DataHigh (2 dots each, see
+    // stepFetcher) run once more, with the row going in at the end of the last
+    // of them. One fetch and not two,
     // whether or not the line's own thrown-away first fetch had finished - see
     // startWindow - which is what makes this the cost of an activation
     // anywhere on the line, the free increments included. dotsRemaining charges
@@ -95,10 +102,12 @@ public:
     // compared against WX at each of them.
     //
     // An undisturbed line pushes its first tile on the thirteenth dot of
-    // rendering - two six-dot fetches, the first of them thrown away, and then
-    // the Push step, which is also the dot that tile's first pixel leaves the
-    // FIFO (see stepFetcher). The last free increment falls on that dot, which
-    // is what lines a WX of kWindowCounterHeadStart up with screen x = 0, so
+    // rendering - the reset's own dot, a six-dot fetch that is thrown away, and
+    // a six-dot fetch whose Get-Tile-Data-High step both reads the high
+    // bitplane and pushes the row, which is therefore also the dot that tile's
+    // first pixel leaves the FIFO (see stepFetcher). The last free increment
+    // falls on that dot, which is what lines a WX of kWindowCounterHeadStart up
+    // with screen x = 0, so
     // value 0 is compared on the sixth dot of rendering and this many dots
     // pass before the counter is compared at all. Measured: see
     // docs/known-divergences.md, "The window's X counter is compared once per
@@ -116,9 +125,16 @@ public:
     static constexpr int kWindowCounterWxLag = 2;
 
 private:
-    enum class Step { Tile, DataLow, DataHigh, Push };
+    enum class Step { Tile, DataLow, DataHigh, Sleep, Push };
 
     void stepFetcher(const Ppu& ppu);
+    // Offers the row the fetcher has just assembled to the background FIFO.
+    // Pan Docs' "3 total chances" are three calls to this - one at the end of
+    // Get Tile Data High and one on each Sleep dot - and then the Push step
+    // calls it every dot until it succeeds. The FIFO has one push port and
+    // takes a row only when it is empty, so which of the chances succeeds is
+    // decided by the pixel stream, not by the fetcher: see stepFetcher.
+    void tryPushRow();
     // Pan Docs' two hardware conditions on a counter match: the "Y condition"
     // and LCDC bit 5, both read live, on the dot the match is tested. What the
     // match then does depends on whether the window is already drawing.
@@ -149,7 +165,7 @@ private:
     //
     // "onto the background FIFO" is taken at its word: the FIFO has one push
     // port and takes a push only when it is empty, exactly as the fetcher's
-    // push does (see Step::Push), so a match that lands part-way through a tile
+    // push does (see tryPushRow), so a match that lands part-way through a tile
     // is swallowed. That is measured, not assumed - see
     // docs/known-divergences.md, "A WX changed while the window is drawing
     // pushes one colour-0 pixel, and only onto an empty FIFO".
@@ -185,9 +201,10 @@ private:
     // not pixels. Measured - see the note on the function.
     void advanceWindowCounter();
     u16 tileRowAddress(const Ppu& ppu) const;
-    // Dots the fetcher still owes before its next Push, so dotsRemaining can
-    // charge a stall the queue cannot cover. Zero when Push is next, which
-    // is where an ordinary line spends the one dot its queue is empty.
+    // Dots the fetcher still owes before the dot its next row reaches the FIFO,
+    // not counting that dot itself, so dotsRemaining can charge a stall the
+    // queue cannot cover. Zero once the row is assembled, which is where an
+    // ordinary line spends the one dot its queue is empty.
     int fetchStallDots() const;
 
     struct ObjectPixel {
@@ -207,6 +224,25 @@ private:
 
     Step step_ = Step::Tile;
     int stepDots_ = 0;   // dots spent in the current step
+    // The row this fetch assembled has reached the FIFO, so the chances that
+    // are left - the Sleep dots and the Push step - have nothing to offer.
+    // Cleared for each fetch when its high bitplane is read.
+    bool pushed_ = false;
+    // A fetcher reset - the line's start and every window activation - costs
+    // the dot it lands on before Get Tile begins.
+    //
+    // That dot is not in Pan Docs; it is what the two hardware measurements
+    // leave once the steps above are right, and the two agree on it. Mode 3's
+    // hardware-verified 172-dot minimum and the Mealybug references' pixel 0 on
+    // line dot 100 both say twelve dots pass between the start of rendering and
+    // the line's first push (see kRenderLag and docs/known-divergences.md,
+    // "Rendering runs seven dots behind the mode-3 window"). With the push
+    // landing at the end of Get Tile Data High, the two warm-up fetches account
+    // for six dots each and leave exactly one over. Independently, the window's
+    // restart costs kWindowRestartDots = six dots from the activation to the
+    // pre-empted pixel, which a bare reset to Get Tile would make five. One dot
+    // charged to the reset itself satisfies both, and nothing else found does.
+    bool fetchReset_ = false;
     // The fetcher's tile column. It counts background tiles from the left of
     // the line, is reset to 0 when the window activates and then counts window
     // tiles, and keeps counting where it is when a cleared LCDC bit 5 hands the
