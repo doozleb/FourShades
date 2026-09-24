@@ -2,6 +2,7 @@
 
 #include "core/Ppu.h"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -1448,4 +1449,159 @@ TEST_CASE("an object fetch that stalls the line's warm-up does not hold the free
     // left edge, screen x = 0 showing its fourth. A held-back counter would
     // leave background as far as x = 33.
     CHECK(got.pixels == clippedWindowLine(kEvenWindowRow, 3));
+}
+
+// ---------------------------------------------------------------------------
+// Mode 3's length, derived to the dot
+//
+// STAT's mode field is the only thing mode 3's length shows in, and every case
+// above reads it in whole M-cycles: Ppu::tick is four dots and mode 3 begins on
+// a dot that is a multiple of four, so a raw length of L dots is reported as
+// the next multiple of four at or above L. One reading therefore pins L only to
+// within three dots - every window figure above is a 180, which is any of 177,
+// 178, 179 or 180 - and a length that is wrong by one, two or three dots is
+// invisible in it. Mode 3's length is what STAT reports and nothing else, so
+// such an error leaves every picture in this file perfect.
+//
+// SCX's low three bits are the finer ruler. They lengthen the line by one dot
+// each - the fine-scroll discard - and they do that independently of the
+// window, so sweeping SCX 0 to 7 over one scenario gives eight readings which
+// step from one multiple of four to the next at the two values of SCX where
+// L + SCX crosses one. Where those two steps fall says what L is: exactly one
+// L fits all eight readings, and solveRawDots asserts that there is exactly
+// one. The sweep is therefore part of every case here rather than a case of
+// its own, and it is also what pins the SCX term itself at one dot per bit -
+// a term of two dots per bit, or one that saturated, leaves no L fitting all
+// eight readings at all.
+namespace {
+// The one raw mode-3 length consistent with eight whole-M-cycle readings taken
+// at SCX 0 to 7. Fails if none fits, and fails if more than one does.
+int solveRawDots(const std::array<int, 8>& sampled) {
+    int found = -1;
+    int fits = 0;
+    for (int raw = 160; raw <= 320; ++raw) {
+        bool ok = true;
+        for (int scx = 0; scx < 8 && ok; ++scx) {
+            ok = ((raw + scx + 3) / 4) * 4 == sampled[static_cast<std::size_t>(scx)];
+        }
+        if (ok) {
+            found = raw;
+            ++fits;
+        }
+    }
+    CHECK_MESSAGE(fits == 1, "readings ", sampled[0], " ", sampled[1], " ", sampled[2], " ",
+                  sampled[3], " ", sampled[4], " ", sampled[5], " ", sampled[6], " ",
+                  sampled[7]);
+    return found;
+}
+
+// The raw mode-3 length of a line set up by setUpWindowRuler, measured by the
+// SCX sweep. `linesFirst` runs that many whole lines before the one measured,
+// which is how a case says it wants an ordinary line rather than line 0.
+int rawMode3Dots(u8 lcdc, u8 wx, u8 wy, int linesFirst = 0) {
+    std::array<int, 8> sampled{};
+    for (int scx = 0; scx < 8; ++scx) {
+        Ppu ppu;
+        setUpWindowRuler(ppu, lcdc, static_cast<u8>(scx), wx, wy);
+        for (int i = 0; i < linesFirst; ++i) {
+            runLine(ppu);
+        }
+        sampled[static_cast<std::size_t>(scx)] = characterise(ppu).dots;
+    }
+    return solveRawDots(sampled);
+}
+} // namespace
+
+TEST_CASE("mode 3 is 172 dots plus SCX's low three bits on a line with no window") {
+    // 172 and the SCX term are the two parts of this that hardware measures.
+    // Mooneye's intr_2_mode0_timing ("verified: DMG, MGB, SGB, SGB2, CGB, AGB,
+    // AGS") times the mode-2 interrupt to the mode-0 one on a bare line and
+    // pins the 172; hblank_ly_scx_timing-GS reads LY through the HBlank
+    // boundary for each of SCX 0 to 7 and pins the one dot per bit. Both are in
+    // the ppu timing group, and between them they are the only hardware
+    // measurements of mode 3's length the suite has.
+    CHECK(rawMode3Dots(0xD1, 0x27, 0x00) == 172); // LCDC bit 5 clear all line
+    CHECK(rawMode3Dots(0xF1, 0x27, 0x01) == 172); // the line is above WY
+    CHECK(rawMode3Dots(0xF1, 0xA7, 0x00) == 172); // WX = 167: the counter never reaches it
+    CHECK(rawMode3Dots(0xF1, 0xFF, 0x00) == 172); // WX = 255: the same
+}
+
+TEST_CASE("one window activation lengthens mode 3 by exactly six dots, wherever on the line it falls") {
+    // Six, not five and not seven: the restart puts the fetcher back at its
+    // Tile step with the queue cleared, and Tile+DataLow+DataHigh take two dots
+    // each before Push can run again. The pixel the match pre-empts is already
+    // in the one-dot-per-pixel count, so six is the whole of the extra.
+    //
+    // The same six for every WX from 0 to 166 is the substance: below 7 the
+    // match comes early among the counter's free increments and the leftover
+    // increments are charged as discarded pixels, at 166 it pre-empts the
+    // line's very last pixel and the cost has to keep being counted while the
+    // restart is actually running. Both ends are arithmetic that could be out
+    // by a dot or two without any picture moving.
+    CHECK(rawMode3Dots(0xF1, 0x00, 0x00) == 178); // WX = 0
+    CHECK(rawMode3Dots(0xF1, 0x01, 0x00) == 178);
+    CHECK(rawMode3Dots(0xF1, 0x04, 0x00) == 178); // WX below 7: pixels off the left edge
+    CHECK(rawMode3Dots(0xF1, 0x06, 0x00) == 178);
+    CHECK(rawMode3Dots(0xF1, 0x07, 0x00) == 178); // WX = 7: the window from pixel 0
+    CHECK(rawMode3Dots(0xF1, 0x08, 0x00) == 178);
+    CHECK(rawMode3Dots(0xF1, 0x27, 0x00) == 178); // WX = 39: an ordinary mid-line start
+    CHECK(rawMode3Dots(0xF1, 0xA0, 0x00) == 178); // WX = 160: the trigger lands at pixel 153,
+                                                  //   where a plain line has only its lag left
+    CHECK(rawMode3Dots(0xF1, 0xA5, 0x00) == 178);
+    CHECK(rawMode3Dots(0xF1, 0xA6, 0x00) == 178); // WX = 166: the trigger pre-empts pixel 159
+}
+
+TEST_CASE("the charge for an activation still to come is exactly six dots, and only an ordinary line measures it") {
+    // Every other figure in this file is measured on line 0, and line 0 cannot
+    // measure this one. dotsRemaining charges an activation it can see coming
+    // kWindowRestartDots dots, and that charge is only ever the term that
+    // decides the boundary if the boundary would otherwise be decided *before*
+    // the activation fires - which needs 160 - pixelX_ + 6 to be down at the
+    // line's render lag while the trigger is still ahead of the counter. On
+    // line 0 the lag is three dots (it draws four dots early, see "line 0
+    // starts drawing four dots earlier" above), so that never happens for any
+    // WX at all: the activation has always fired first and the charge has
+    // dropped out. On an ordinary line the lag is seven and the two cross at
+    // WX = 165 and WX = 166, where the trigger pre-empts the line's last two
+    // pixels.
+    //
+    // So those two values are the only place in the suite where the *size* of
+    // the charge shows at all, and it shows there as one raw dot - which whole
+    // M-cycles round away, and which no picture anywhere reflects. Without the
+    // SCX ruler above, charging five dots or seven instead of six passes every
+    // other case in this file and all 165 test ROMs.
+    CHECK(rawMode3Dots(0xF1, 0xA5, 0x00, 1) == 178); // WX = 165
+    CHECK(rawMode3Dots(0xF1, 0xA6, 0x00, 1) == 178); // WX = 166
+    // And the lengths an ordinary line shares with line 0, so that the
+    // four-dot cancellation itself is pinned rather than assumed.
+    CHECK(rawMode3Dots(0xD1, 0x27, 0x00, 1) == 172);
+    CHECK(rawMode3Dots(0xF1, 0x00, 0x00, 1) == 178);
+    CHECK(rawMode3Dots(0xF1, 0x07, 0x00, 1) == 178);
+    CHECK(rawMode3Dots(0xF1, 0x27, 0x00, 1) == 178);
+    CHECK(rawMode3Dots(0xF1, 0xA0, 0x00, 1) == 178);
+}
+
+TEST_CASE("two window activations on one line lengthen mode 3 by exactly twelve dots") {
+    // The row-advance side of this line is pinned by "the window activates
+    // twice on one line ..." above; this is its dot count, to the dot. Each
+    // activation is a full fetcher restart, and the stop in between costs
+    // nothing at all - Mealybug's notes have the background resuming on a tile
+    // boundary with the queue intact, so nothing is refetched.
+    //
+    // Nothing in either suite measures this length. It is derived from the
+    // six-dot restart the case above pins, applied twice.
+    std::array<int, 8> sampled{};
+    for (int scx = 0; scx < 8; ++scx) {
+        Ppu ppu;
+        setUpWindowRuler(ppu, 0xF1, static_cast<u8>(scx), 0x27, 0x00);
+        // WX = 39 starts the window at screen x = 32; LCDC bit 5 is then
+        // cleared, WX moved to 120 - which the counter reaches around line dot
+        // 219, after every write here whatever SCX is - and bit 5 set again.
+        sampled[static_cast<std::size_t>(scx)] =
+            characteriseWrites(ppu, {{160, 0xFF40, 0xD1},
+                                     {164, 0xFF4B, 0x78},
+                                     {168, 0xFF40, 0xF1}})
+                .dots;
+    }
+    CHECK(solveRawDots(sampled) == 184); // 172 + 6 + 6
 }

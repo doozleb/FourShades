@@ -738,6 +738,66 @@ alone explains it.
   mode 0 on that dot or an earlier one first. It stays
   in as a guard against a future regression in the formula, not because
   anything currently reaches it.
+- **What measures mode 3's length, and what does not (re-derived 2026-09-24).**
+  The length is `dotsRemaining`'s whole output and STAT's mode field is the
+  only place it appears, so an error of one, two or three dots is invisible in
+  every picture *and* in every unit case that reads `Ppu::mode()` between
+  ticks - `Ppu::tick` is four dots and mode 3 begins on a multiple of four, so
+  a raw length of 177, 178, 179 or 180 all read as 180. That made the
+  arithmetic the one part of the window work that could be wrong silently, and
+  it was checked by measuring, not by reading:
+  - **The terms.** Mode 3 is `Ppu::kMinDrawDots` (172) + SCX % 8 + six dots
+    per window activation on the line + the object penalties. The three
+    lengthening terms are independent and additive, and there is nothing else
+    in it.
+  - **What the ROM suite measures, established by mutation.** Making every
+    line's count one dot long breaks seven of the twelve `ppu timing` ROMs:
+    `hblank_ly_scx_timing-GS`, `intr_2_0_timing`, `intr_2_mode0_timing`,
+    `intr_2_mode0_timing_sprites`, `intr_2_oam_ok_timing`, `lcdon_timing-GS`
+    and `lcdon_write_timing-GS`. Dropping the SCX fine-scroll discard breaks
+    `hblank_ly_scx_timing-GS` (and two pictures, `dmg-acid2` and
+    `m3_scx_low_3_bits`). Dropping the object penalties from the count breaks
+    `intr_2_mode0_timing_sprites` and nothing else. So the 172, the SCX term
+    and the object term each have hardware-verified ROMs behind them.
+  - **The window's term has no ROM behind it at all.** Charging an activation
+    five dots instead of six, or seven instead of six, or not charging a
+    pending activation while it is still to come, or narrowing the predicate
+    from `>=` to `>`, or moving the WX bound by one - every one of those
+    leaves the ROM suite at exactly 147 / 165, with the same differing-pixel
+    count in every `screen` test. The window's six dots are derived from the
+    restart the fetcher actually performs (`kWindowRestartDots`: Tile,
+    DataLow and DataHigh at two dots each before Push can run again), and
+    they are held by unit tests only.
+  - **How the unit tests get below an M-cycle.** SCX's low three bits
+    lengthen the line by one dot each and do it independently of the window,
+    so running one scenario at each of SCX 0 to 7 gives eight whole-M-cycle
+    readings that step from one multiple of four to the next at the two SCX
+    values where the raw length crosses one. Exactly one raw length fits all
+    eight. `tests/test_pixel_pipeline.cpp`'s `solveRawDots` asserts that there
+    is exactly one and returns it, which makes every figure in the cases under
+    "Mode 3's length, derived to the dot" an exact dot count rather than a
+    rounded one. It also pins the SCX term itself: a term of two dots per bit,
+    or one that saturated, leaves no length fitting all eight readings.
+  - **Where the size of the pending charge shows, and where it cannot.**
+    `dotsRemaining` charges an activation it can see coming six dots, and that
+    charge only decides the boundary when the boundary would otherwise be
+    decided before the activation fires - which needs `160 - pixelX_ + 6` to be
+    down at the line's render lag while the trigger is still ahead of the
+    counter. On line 0 the lag is three dots, and there it never happens for
+    any WX: the activation has always fired first. On an ordinary line the lag
+    is seven and the two cross at WX = 165 and WX = 166 only. Every other
+    window figure in `tests/test_pixel_pipeline.cpp` is measured on line 0, so
+    before this was checked the *size* of the charge was measured by nothing
+    at all - five dots, six or seven all passed 474 unit cases and all 165
+    ROMs. "The charge for an activation still to come is exactly six dots, and
+    only an ordinary line measures it" is the case that closes it.
+  - **Two activations on one line cost twelve dots**, one restart each, with
+    the stop in between costing nothing. Nothing in either suite measures
+    that length either; it is the six-dot restart applied twice.
+  - **Outcome.** The arithmetic was found correct, to the dot, in every case
+    listed: no line of `dotsRemaining` changed. What this task added is the
+    ruler and eight mutations that the ruler catches and the ROM suite does
+    not.
 - **What this is physically.** The natural reading is that mode 3 ends when
   the PPU has finished reading VRAM for the line while pixels are still
   shifting out of the FIFO, which is also why the fetcher can start a little
@@ -749,7 +809,8 @@ alone explains it.
   (every `intr_2_*`), and delaying mode 3 itself by seven dots breaks eight
   of them. Both were tried and reverted; the lag is the only placement
   measured that satisfies both sets.
-- **Checked:** 2026-09-22.
+- **Checked:** 2026-09-24, the whole of the mode-3 length arithmetic re-derived
+  from the pipeline and left unchanged; see the coverage bullet above.
 
 ## Palette writes short the old and new values together for one dot (2026-09-21)
 
