@@ -87,6 +87,26 @@ private:
     // Resets background rendering to the window's tilemap, as a counter match
     // does on hardware.
     void startWindow(Ppu& ppu);
+    // Hands the line back to the background if LCDC bit 5 has gone low while
+    // the window was drawing. Mealybug Tearoom's PPU notes, quoted in
+    // docs/known-divergences.md:
+    //
+    //   "WIN_EN can be disabled during mode 3. The disabling will take effect
+    //   at the end of the current window tile being drawn. When the current
+    //   window tile has finished being drawn, the PPU will start drawing
+    //   background tiles again."
+    //   "When the background resumes drawing it is on a tile boundary. The low
+    //   3 bits of SCX have no effect."
+    //
+    // The pixels already in the queue are the window tile being drawn and are
+    // emitted unchanged, so the disabling first shows in the tile after them -
+    // the one the fetcher is working on when bit 5 goes low, which becomes a
+    // background fetch wherever among its steps the write lands. The queue is
+    // not cleared and the fetcher is not restarted, so the switch costs no
+    // dots and no fresh SCX fine-scroll discard is taken: that, plus the
+    // fetcher keeping its column counter (see fetcherX_), is the second
+    // sentence.
+    void stopWindowIfDisabled(const Ppu& ppu);
     // Takes the counter's kWindowCounterHeadStart free increments, testing it
     // against WX at each of them.
     void takeWindowHeadStart(Ppu& ppu);
@@ -113,8 +133,24 @@ private:
 
     Step step_ = Step::Tile;
     int stepDots_ = 0;   // dots spent in the current step
-    int fetcherX_ = 0;   // tile column within the line
+    // The fetcher's tile column. It counts background tiles from the left of
+    // the line, is reset to 0 when the window activates and then counts window
+    // tiles, and keeps counting where it is when a cleared LCDC bit 5 hands the
+    // line back to the background - the fetcher has one column counter, not
+    // one per source. So a background tile fetched after the window has been
+    // switched off is the column the window's count reached, not the column
+    // that would have been there had the window never drawn: the resumed
+    // background is tile-aligned to where the window stopped, which is the
+    // shape Mealybug's "the low 3 bits of SCX have no effect" describes.
+    int fetcherX_ = 0;
     bool discardFetch_ = true; // the line's first completed fetch is thrown away
+    // Whether the fetch in progress read its tile index from the window's
+    // tilemap, latched at the step that read it. A clear of LCDC bit 5 that
+    // lands after that step leaves a window tile index being addressed with
+    // the background's row - the same shape as the bitplane mixing Mealybug's
+    // notes describe for TILE_SEL and SCY - and, more visibly, decides whether
+    // the windowSkip_ clip below has a window tile to apply to.
+    bool fetchWindow_ = false;
     u8 tileIndex_ = 0;
     u8 tileLow_ = 0;
     u8 tileHigh_ = 0;
@@ -123,7 +159,21 @@ private:
     int queueHead_ = 0;
     int pixelX_ = 0;   // pixels emitted (0-160)
     int discard_ = 0;  // SCX % 8 pixels dropped at the start of the line
-    bool window_ = false;        // drawing the window on this line
+    // The fetcher is drawing the window right now. Set when the X counter
+    // matches WX and cleared again by stopWindowIfDisabled when LCDC bit 5
+    // goes low part-way along the line.
+    bool window_ = false;
+    // The window has been activated on this line. Unlike window_ this is a
+    // latch, never cleared before the next line: this model still activates
+    // the window at most once per line (see windowConditions), and Mealybug's
+    // notes are why a stopped window must not simply restart when bit 5 comes
+    // back - "setting WIN_EN again during mode 3 on the same scanline will
+    // have no effect unless WX has been updated to set the window to activate
+    // on a pixel that hasn't been drawn yet". Re-activation, with the window
+    // row advance that goes with it, is the next task; until it lands, setting
+    // bit 5 again after a stop does nothing at all, which is what the notes
+    // say happens whenever WX has not moved.
+    bool windowActivated_ = false;
     // The window's scanline X counter (kWindowCounterHeadStart). It is what
     // WX is compared against: 0 at the top of the line, then the free
     // increments, then one per pixel rendered. Nothing else in the pipeline

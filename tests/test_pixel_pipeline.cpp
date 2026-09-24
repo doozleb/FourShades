@@ -856,3 +856,156 @@ TEST_CASE("characterisation: four consecutive lines of window, and the row each 
         CHECK_MESSAGE(got.pixels == row.pixels, "WX ", row.wx, " line ", row.line);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Clearing LCDC bit 5 part-way along a line
+//
+// Mealybug Tearoom's own PPU notes, quoted in full in docs/known-divergences.md
+// ("The window's scanline X counter, and the evidence for it, quoted"), under
+// LCDC bit 5:
+//
+//   "WIN_EN can be disabled during mode 3. The disabling will take effect at
+//   the end of the current window tile being drawn. When the current window
+//   tile has finished being drawn, the PPU will start drawing background tiles
+//   again."
+//   "When the background resumes drawing it is on a tile boundary. The low 3
+//   bits of SCX have no effect."
+//
+// The cases below need to tell background pixels from window pixels and to see
+// where the resumed background's tile boundaries fall, so they use a ruler of
+// their own rather than setUpWindowRuler's: the window tile is a flat colour 3
+// and the background tile carries colour 2 in its leftmost pixel and colour 1
+// in the other seven, so every background tile boundary is a visible 2 and
+// every window pixel is a 3.
+namespace {
+void setUpWindowOffRuler(Ppu& ppu, u8 scx, u8 wx) {
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so writes land
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8000 + row), 0x7F); // tile 0: 2,1,1,1,1,1,1,1
+        ppu.vramWrite(static_cast<u16>(0x8001 + row), 0x80);
+        ppu.vramWrite(static_cast<u16>(0x8010 + row), 0xFF); // tile 1: flat colour 3
+        ppu.vramWrite(static_cast<u16>(0x8011 + row), 0xFF);
+    }
+    for (u16 i = 0; i < 0x400; ++i) {
+        ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00);
+        ppu.vramWrite(static_cast<u16>(0x9C00 + i), 0x01);
+    }
+    static_cast<void>(ppu.write(0xFF47, 0xE4)); // BGP: shade == colour
+    static_cast<void>(ppu.write(0xFF43, scx));
+    static_cast<void>(ppu.write(0xFF4A, 0x00)); // WY = 0: every line is below it
+    static_cast<void>(ppu.write(0xFF4B, wx));
+    enableLcd(ppu, 0xF1); // LCD on, BG on, window on, window map 0x9C00
+}
+
+// The screen x at which the line'"'"'s run of window 3s gives way to background
+// again, or -1 if the window never drew or never stopped.
+int backgroundResumesAt(const std::string& pixels) {
+    const std::size_t first = pixels.find('3');
+    if (first == std::string::npos) { return -1; }
+    const std::size_t after = pixels.find_first_not_of('3', first);
+    return after == std::string::npos ? -1 : static_cast<int>(after);
+}
+} // namespace
+
+TEST_CASE("clearing LCDC bit 5 part-way along a line stops the window at the end of its tile") {
+    // WX = 39 puts the window's first pixel on screen x = 32, a tile boundary
+    // of its own, so every window tile spans x = 32 + 8k .. 32 + 8k + 7 and the
+    // dot the write lands on picks which of them is the last one drawn.
+    Ppu ppu;
+    setUpWindowOffRuler(ppu, 0x00, 0x27);
+    // 0xD1 is 0xF1 with bit 5 (window enable) cleared and nothing else.
+    const CharLine got = characterise(ppu, 200, 0xFF40, 0xD1);
+    CHECK(got.pixels.substr(0, 32) == "21111111211111112111111121111111");
+    const int resume = backgroundResumesAt(got.pixels);
+    REQUIRE(resume > 32); // the window drew at least one tile, then stopped
+    CHECK((resume - 32) % 8 == 0); // ...at the end of one of its tiles
+    // From there on it is background again, and the resumed background starts
+    // a tile of its own at that pixel.
+    std::string expected;
+    for (int x = resume; x < Ppu::kWidth; ++x) {
+        expected.push_back(((x - resume) % 8) == 0 ? '2' : '1');
+    }
+    CHECK(got.pixels.substr(static_cast<std::size_t>(resume)) == expected);
+}
+
+TEST_CASE("the background that resumes when LCDC bit 5 is cleared ignores SCX's low 3 bits") {
+    // Mealybug: "When the background resumes drawing it is on a tile boundary.
+    // The low 3 bits of SCX have no effect." SCX = 5 shifts the background
+    // drawn before the window by five pixels - its tile boundaries land on
+    // x = 3, 11, 19 ... - and the background that resumes after the window
+    // must ignore that shift and start a tile where the window stopped.
+    Ppu ppu;
+    setUpWindowOffRuler(ppu, 0x05, 0x27);
+    const CharLine got = characterise(ppu, 200, 0xFF40, 0xD1);
+    CHECK(got.pixels.substr(0, 32) == "11121111111211111112111111121111");
+    const int resume = backgroundResumesAt(got.pixels);
+    REQUIRE(resume > 32);
+    CHECK((resume - 32) % 8 == 0);
+    CHECK(got.pixels[static_cast<std::size_t>(resume)] == '2');
+    CHECK(got.pixels[static_cast<std::size_t>(resume) + 1] == '1');
+}
+
+TEST_CASE("setting LCDC bit 5 again after a mid-line stop does not bring the window back") {
+    // Mealybug: "Setting WIN_EN again during mode 3 on the same scanline will
+    // have no effect unless WX has been updated to set the window to activate
+    // on a pixel that hasn't been drawn yet." WX is left where it is here, so
+    // the second write must change nothing and the background must run to the
+    // end of the line. (Re-activation with a moved WX, and the window row
+    // advance that comes with it, is a later task; until then the window
+    // activates once per line at most.)
+    Ppu ppu;
+    setUpWindowOffRuler(ppu, 0x00, 0x27);
+    // Clear bit 5 early in the window, set it again twenty-odd pixels later.
+    while (ppu.mode() != 3) { ppu.tick(); }
+    const int line = ppu.lineNumber();
+    bool cleared = false;
+    bool set = false;
+    while (ppu.mode() == 3) {
+        if (!cleared && ppu.lineDot() >= 150) {
+            static_cast<void>(ppu.write(0xFF40, 0xD1)); // window off
+            cleared = true;
+        } else if (cleared && !set && ppu.lineDot() >= 200) {
+            static_cast<void>(ppu.write(0xFF40, 0xF1)); // window on again
+            set = true;
+        }
+        ppu.tick();
+    }
+    while (ppu.lineNumber() == line) { ppu.tick(); }
+    const std::string pixels = lineDigits(ppu, line);
+    REQUIRE(set);
+    const int resume = backgroundResumesAt(pixels);
+    REQUIRE(resume > 32);
+    CHECK(pixels.find('3', static_cast<std::size_t>(resume)) == std::string::npos);
+}
+
+TEST_CASE("a window stopped before it pushes a tile does not clip the background instead") {
+    // WX = 4 is matched during the counter's free increments, so the window's
+    // three leftmost pixels are owed to the clip at its first push (see
+    // PixelPipeline::startWindow and "A WX below 7 pushes the window's leftmost
+    // pixels off the screen" in docs/known-divergences.md). Clearing LCDC bit 5
+    // anywhere in the dots before that push must leave the clip unspent: those
+    // three pixels are the window's, and taking them out of the background tile
+    // pushed in its place would shift the whole rest of the line left by three.
+    //
+    // WX = 4 puts the window's first visible pixel on screen x = 0 and leaves
+    // five pixels of its first tile on screen, so a window that drew n tiles
+    // hands the line back at x = 5 + 8(n - 1), and one that drew none hands it
+    // back at x = 0. Either way the background that follows starts a tile of
+    // its own right there. The sweep covers the dots either side of the first
+    // push without depending on which of them it is.
+    for (int writeDot = 88; writeDot <= 112; writeDot += 4) {
+        Ppu ppu;
+        setUpWindowOffRuler(ppu, 0x00, 0x04);
+        const CharLine got = characterise(ppu, writeDot, 0xFF40, 0xD1);
+        const std::size_t first = got.pixels.find_first_not_of('3');
+        REQUIRE_MESSAGE(first != std::string::npos, "dot ", writeDot);
+        const int resume = static_cast<int>(first);
+        const bool onATileBoundary = resume == 0 || (resume - 5) % 8 == 0;
+        CHECK_MESSAGE(onATileBoundary, "dot ", writeDot, " resume ", resume);
+        std::string expected;
+        for (int x = resume; x < Ppu::kWidth; ++x) {
+            expected.push_back(((x - resume) % 8) == 0 ? '2' : '1');
+        }
+        CHECK_MESSAGE(got.pixels.substr(first) == expected, "dot ", writeDot);
+    }
+}
