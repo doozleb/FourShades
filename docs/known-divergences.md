@@ -918,10 +918,20 @@ since the same page has the cancel lengthening mode 3 too.
   the pixel is drawn, so the emission-time test cannot account for the result -
   but disabling the cancel entirely moves **no** ROM by a single pixel. The two
   ROMs that clear bit 1 mid-line, `m3_lcdc_obj_en_change` and its `_variant`,
-  leave it low for twenty M-cycles, long past the dot the pixels are drawn on, so
+  leave it low long past the dot the pixels are drawn on, so
   the emission-time test hides those objects with or without the cancel. This is
   recorded because it is a behaviour the suite does not arbitrate: it is here
   because Pan Docs documents it, not because a test demanded it.
+  **Correction, 2026-09-24:** this bullet used to say both ROMs leave bit 1 low
+  "for twenty M-cycles". `m3_lcdc_obj_en_change` does - it writes $81 at line dot
+  108 (112 on lines 64-143) and $83 again at 204 - but the `_variant` writes $83
+  again at 124, sixteen dots later, not twenty M-cycles. Both write-dot figures
+  are traced; see "The LCDC bits that choose a pixel's colour are read one dot
+  before the palette shades it" below. The conclusion is unchanged and was
+  re-measured after that dot moved: disabling the cancel entirely still moves no
+  ROM in the 165 by a single pixel, because the emission-time test hides the
+  objects either way. What the `_variant`'s shorter pulse means for the cancel on
+  each band was not worked out, and does not need to be for that.
 - **Effect, and who gets the credit.** The start dot is worth 2,333 differing
   pixels on its own, `m3_scy_change` and the two window-fetch ROMs among them.
   The four object-LCDC ROMs improve too - `m3_lcdc_obj_en_change` 100 -> 56,
@@ -1602,6 +1612,201 @@ other decides whether the object's fetch runs on that dot or waits another
   than 117, and a BGP write on dot 116 separates the two: the palette short
   (above) makes the three shades 1, 3 and 2 name the three sides of that
   boundary. Reverting the ordering is caught by that case and by the 148 pixels.
+
+- **Checked:** 2026-09-24.
+
+## The LCDC bits that choose a pixel's colour are read one dot before the palette shades it (2026-09-24)
+
+Not a divergence: a dot Pan Docs does not give and Mealybug's notes do not
+mention, measured from three of his DMG photographs and implemented.
+
+- **Tests:** `m3_lcdc_bg_en_change` **376 -> 0**, `m3_lcdc_obj_en_change`
+  **56 -> 0**, `m3_lcdc_obj_en_change_variant` **152 -> 96**. Two verdicts
+  flipped; the suite went 149 -> 151.
+- **Pan Docs:** silent. [LCDC](https://gbdev.io/pandocs/LCDC.html) says of bit 0
+  only that when it is cleared "both background and window become blank (white),
+  and the Window Display Bit is ignored in that case", and of bit 1 only that it
+  enables objects. Neither sentence says when during mode 3 a change takes
+  effect.
+- **Mealybug's own notes:** silent too. The three passages quoted whole in "The
+  window's scanline X counter, and the evidence for it, quoted" below cover
+  `WIN_EN`, `TILE_SEL` and `SCY`, and say nothing at all about `BG_EN` or
+  `OBJ_EN`. That is why none of plan 2's fetch work moved a single pixel of
+  `m3_lcdc_bg_en_change`: these two bits are not fetch inputs.
+
+### What the ROMs do, traced
+
+All three are built the way the four of "Group D's residual is the OBJ penalty's
+tile term" below are, and it was worth re-tracing rather than assuming:
+
+- **One marker object per 8-line band, at OAM X = the band's index.** OAM entry
+  *b* has Y = 16 + 8*b* and X = *b*, for *b* = 0...17. So band *b*'s object
+  stalls the line by the OBJ penalty its own X earns - 11, 10, 9, 8, 7, 6, 6, 6
+  dots for bands 0-7, the same again for bands 8-15 whose objects sit at screen
+  x = 0...7, then 11 and 10 for bands 16 and 17. **That walk is the ROMs'
+  sweep:** the register writes sit on the same dots of every line, and the
+  object's stall slides the pixel stream under them band by band, one dot at a
+  time. `m3_lcdc_bg_en_change`'s object tile is blank, so it is an invisible
+  lever; the two `obj_en` ROMs use tile $19, a visible ring, because bit 1 is
+  what decides whether it is drawn at all.
+- **A four-write pulse on the same dots of every line.** `m3_lcdc_bg_en_change`
+  writes LCDC = $92 on the M-cycle ending at line dot 108, $93 at 120, $92 at
+  128 and $93 at 136, so bit 0 is low over dots 109-120 and 129-136. Line 0's
+  four writes land at 104, 116, 124 and 132 - the four dots of `line_0_fix`, and
+  line 0 draws four dots early to match ("Line 0 starts drawing four dots early"
+  below), so the picture comes out the same.
+- **The `obj_en` pair writes bit 1 twice a line, and moves the dot half way down
+  the screen.** `m3_lcdc_obj_en_change` writes LCDC = $81 at line dot **108** on
+  lines 0-63 and at **112** on lines 64-143, and $83 again at 204 (208 on the
+  same lower lines), so objects are off across most of the line and the pulse's
+  own edge is swept by four dots as well as by the object walk.
+  `m3_lcdc_obj_en_change_variant` writes $81 at 108/112 and $83 at 124/128 - a
+  short pulse instead of a long one - and then a BGP pulse at 256/260 and
+  272/276, near the end of the line.
+- **The background is text, not a flat colour,** so a blanked pixel only shows
+  where the glyph under it is not colour 0. Every count below is therefore a
+  lower bound on the dots that were wrong, which is why the sweep's numbers are
+  worth recording as a table rather than as one figure.
+
+### The residual's shape
+
+The whole 376 was *one pixel per edge of the pulse*, on every line, and always in
+the same direction: **every edge of the reference sits one pixel to the right of
+where FourShades put it.** Band by band, with `P` the band's penalty and the
+line's first pixel drawn on dot 100 + `P`, FourShades put the four edges at
+pixels 9-`P`, 21-`P`, 29-`P`, 37-`P` and the photographs put them at 10-`P`,
+22-`P`, 30-`P`, 38-`P`. Eighteen bands, four edges, and only the edges that fall
+on a non-zero glyph pixel show - 376 of them.
+
+That is a clean one-dot lag, and nothing about a fetch: the edges land in the
+middle of background tiles (x = 10, 18, 26 with SCX = 0), not on tile
+boundaries. **So the answer to the other half of the question is settled by the
+same measurement: clearing bit 0 blanks pixels that are already in the FIFO.** If
+it only reached the pixels fetched after the write, every edge in the reference
+would sit at a multiple of 8. None of them does.
+
+### The sweep
+
+Every candidate lag, measured on the whole `screen` group. Only the three ROMs
+that write these two bits mid-line move at all; the other 27 tests are identical
+in every column, so only these three rows are given.
+
+| lag on bit 0 | `bg_en` | lag on bit 1 | `obj_en` | `obj_en_variant` |
+| --- | --- | --- | --- | --- |
+| 0 dots (before) | 376 | 0 dots (before) | 56 | 152 |
+| **1 dot** | **4** | **1 dot** | **2** | **98** |
+| 2 dots | 403 | 2 dots | 60 | 156 |
+| 3 dots | 855 | 3 dots | 100 | 196 |
+
+**This is why the one dot is a finding and not a fit.** Three separate hardware
+photographs, two different LCDC bits, one shared constant: each moves towards its
+reference by exactly one dot and each moves *away* from it at two. Nothing in
+`bg_en`'s pixels chose the value that `obj_en` also wants.
+
+### Which read moved, and which did not
+
+The dot is a **difference** between two reads of the same pixel, not a claim
+about where the pixel stream sits, and that is what makes it independent of every
+constant the stream is pinned by. The palette is read on the pixel's own dot, and
+that is measured from the other side: a BGP write shows its old-OR-new short on
+the pixel drawn on the first dot after the writing M-cycle ("Palette writes short
+the old and new values together for one dot" below), and `m3_bgp_change`,
+`m3_bgp_change_sprites` and `m3_obp0_change` are all exact. Lagging the palette
+by the same dot as LCDC - a mutation run to check exactly this - takes
+`m3_bgp_change` from 0 to **992** and `m3_bgp_change_sprites` from 0 to **706**
+while leaving `bg_en` and `obj_en` at 0. So the dot sits *between* the colour
+being chosen and the palette shading it, and moving the stream cannot produce it.
+
+### The line's first pixel is the exception, and it is measured too
+
+A one-dot lag alone leaves **4** pixels of `bg_en` and **2** of `obj_en`, and
+every one of the six is the same pixel: **band 2, screen x = 0** - on the four
+lines of that band where what `bg_en` draws there is not colour 0, and the two
+where `obj_en`'s object covers it with a colour of its own. Band 2's object is at
+OAM X = 2, whose penalty is nine dots, so the line's first pixel is drawn on dot
+109 - the first dot the write landing at 108 is seen on, and `obj_en` writes at
+108 on the lines band 2 covers. Both photographs show the *new* bit at that pixel:
+`bg_en` blanks it and `obj_en` hides its object. A plain one-dot lag shows the old
+bit in both.
+
+It cannot be the penalty. If band 2's stall were ten dots the first edge would
+land right, but the second would move to pixel 12 and both references put it at
+13. `P` = 9 is pinned by the three later edges of the same line.
+
+The rule that fits all eighteen bands of both ROMs is that **the lag is the gap
+between one pixel's colour being chosen and the previous one being shaded, so the
+line's first pixel - which has no predecessor - is chosen on the dot it is
+shaded.** Equivalently: the sample is taken from the previous dot, but never from
+before the line's first pixel.
+
+Two wider readings were tried and both are refuted by measurement, which is what
+makes this an exception found rather than an exception assumed:
+
+| reading | `bg_en` | `obj_en` | `obj_en_variant` |
+| --- | --- | --- | --- |
+| lag 1, no exception | 4 | 2 | 98 |
+| lag 1, **the line's first pixel only** | **0** | **0** | **96** |
+| lag 1, every pixel that finds the queue empty | 4 | 2 | 98 |
+| lag 1, every first pixel after an object stall | 0 | 4 | 100 |
+| lag 2, the line's first pixel only | 395 | 54 | 150 |
+
+- **"Every first pixel after an object stall"** is the reading the mechanism
+  would suggest, and `obj_en` refutes it: its band 15 puts the object at OAM X =
+  15, screen x = 7, and photographs the pixel that fetch pre-empts with the *old*
+  bit. So a stall does not reset the stage; only the start of a line does.
+- **"Every pixel that finds the queue empty"** - the reading that would have
+  explained the exception as "the first pixel cannot be taken from the FIFO a dot
+  early because it has not been pushed yet" - is refuted too, and by band 2
+  itself: the fetcher's three dots of lead (`kObjectFetcherLead`) have already put
+  that row in the queue by then, so the queue is not empty and the reading gives
+  the unexceptional answer. **The physical reason for the exception is therefore
+  not established.** What is established is that the one dot does not apply to
+  the line's first pixel, from two references, and that neither wider rule holds.
+
+Nothing in the suite arbitrates whether a *window activation*, which also clears
+the queue and restarts the fetcher, resets the stage: the two readings differ
+nowhere in the 165 (`m3_lcdc_win_en_change_multiple` is 468 under every column
+above). The stage is modelled as holding its pixel across an activation, which is
+the narrower claim.
+
+### FourShades
+
+`PixelPipeline::kLcdcSelectLag` (1) and `lcdcSelectPipe_`, shifted once per dot
+beside `wxPipe_` - the dots an object fetch stalls included, because the lag is in
+dots - and `pixelStreamStarted_` for the exception, set when the first pixel
+leaves the queue, a discarded one included. The two emission-time LCDC reads take
+`selectLcdc`; `ppu.bgp()` and `ppu.obp()` keep the register. Nothing else changed:
+bit 1's other two readers - the condition on starting an object fetch, and
+`cancelObjectIfDisabled` - still read the register live, because they are fetch
+dots and not emission dots, and no measurement here touches them.
+
+### Mutations
+
+Each was built on a forced rebuild and checked against the unit suite and a ROM
+run; each restore was verified behaviourally, not by timestamp.
+
+| mutation | unit cases failed | `bg_en` |
+| --- | --- | --- |
+| the lag removed (`ppu.lcdc()` at emission) | 3 | 376 |
+| the exception removed (always the pipe) | 1 | 4 |
+| the lag made two dots | 3 | 395 |
+| the palette lagged the same dot | 0 | 0, but `m3_bgp_change` 992 |
+
+The last row is why the palette's own read is quoted above as measured from the
+other side: the unit suite does not catch it, and three pictures do.
+
+### What is left
+
+`m3_lcdc_obj_en_change_variant`'s remaining **96** pixels are a different thing
+and are not touched by any of this - they are identical in every column of both
+tables above, at 96, while the rest of that ROM's residual goes 152 -> 96. They
+are a six-pixel block at the right edge of the line: x = 150-155 on band 16 and
+151-156 on band 17, on all eight lines of each, shade 3 where the reference draws
+0. Those are the two bands with the longest object stall (11 and 10 dots) and the
+only two whose object is far enough right to delay the end of the line, and that
+ROM's second pair of writes is the BGP pulse at dots 256/260 and 272/276 - so
+what the block measures is where a line's *last* pixels land under the longest
+stall, not anything about bit 1. It is the only `obj_en` residual left.
 
 - **Checked:** 2026-09-24.
 
@@ -2465,17 +2670,21 @@ kept here because the diagnosis is what the fix was verified against.
 
 ## Screenshot tests still failing once the pixel pipeline was finished (2026-09-21)
 
-**Re-measured from a full run on 2026-09-24, after the object fetch's dots were
-split between the fetcher and the pixels and the window's fetches were
-re-measured on top of that.** Sixteen of the thirty tests in the
-`screen` group still fail, and they come to 11,399 differing pixels out of
+**Re-measured from a full run on 2026-09-24, after the LCDC bits that choose a
+pixel's colour were separated from the palette by one dot** (see "The LCDC bits
+that choose a pixel's colour are read one dot before the palette shades it"
+above; before that, and after the object fetch's dots were split between the
+fetcher and the pixels and the window's fetches were re-measured on top of that,
+sixteen failed and came to 11,399). **Fourteen** of the thirty tests in the
+`screen` group still fail, and they come to **10,911** differing pixels out of
 23,040 each. Each is listed with its count, what
-it measures and why it is not fixed. Fourteen pass: `acid/dmg-acid2`,
+it measures and why it is not fixed. Sixteen pass: `acid/dmg-acid2`,
 `mooneye/manual-only/sprite_priority`, `daid/stop_instr`, `ashiepaws/bully`,
 and `mealybug-tearoom-tests/ppu/`'s `m2_win_en_toggle`, `m3_bgp_change` (this
 section's own task), `m3_bgp_change_sprites`, `m3_obp0_change`,
 `m3_wx_4_change`, `m3_wx_4_change_sprites`,
-`m3_wx_5_change`, `m3_wx_6_change`, `m3_window_timing` and `m3_scx_low_3_bits`.
+`m3_wx_5_change`, `m3_wx_6_change`, `m3_window_timing`, `m3_scx_low_3_bits`,
+`m3_lcdc_bg_en_change` and `m3_lcdc_obj_en_change`.
 Passing tests have no row below; the notes after the table say what each of them
 was and what settled it. For the history of the figures: the group stood at
 47,378 before the mid-line LCDC bit 5 work of 2026-09-24, 40,108 after it,
@@ -2487,11 +2696,13 @@ samples its registers on its first dot"), 11,547 once an object fetch stopped
 charging the pixels three dots less than Pan Docs' sum and stopped happening
 before the line's warm-up ("An object fetch costs the pixels three dots more than
 it costs the fetcher and mode 3", and "An object fetch waits for the pixel it
-pre-empts"), and **11,399 now**, once an object fetch stopped waiting for the
-window's row on the dot the window activates. The object move is the only one of
-the five that changed a verdict, and it changed two. Every figure in the table
+pre-empts"), 11,399 once an object fetch stopped waiting for the
+window's row on the dot the window activates, and **10,911 now**, once LCDC's two
+colour-selection bits were separated from the palette by a dot. The object move
+changed two verdicts and the LCDC dot changed two more; the other four moves
+changed none. Every figure in the table
 below was re-checked against a fresh full run on 2026-09-24, at the end of the
-piece, and all sixteen agree to the pixel.
+piece, and all fourteen agree to the pixel.
 
 **What the window still gets wrong is the two mid-line LCDC bit 5 tests.** The
 paragraph that stood here said the window never re-activates mid-line and that
@@ -2514,23 +2725,25 @@ question as the mid-line LCDC, SCX and SCY rows below, and it is what
 | --- | --- | --- |
 | `m3_scx_high_5_bits` | 12 | one background tile per affected line takes the wrong SCX; 80, then 86, then 45 once the fetch stages were pinned |
 | `ashiepaws/strikethrough` | 53 | an OAM DMA still copying through line 68's object scan; diagnosed and left failing, see its own entry above |
-| `m3_lcdc_obj_en_change` | 56 | mid-line LCDC bit 1 changes; 100 before the object fetch's dots |
 | `m3_lcdc_win_en_change_multiple_wx` | 85 | mid-line LCDC bit 5; 5942, then 77, then 69, then 116 under the five-step fetcher |
+| `m3_lcdc_obj_en_change_variant` | 96 | not bit 1 any more: a six-pixel block at the right edge of the last two bands, where the longest object stall meets its end-of-line BGP pulse; 532 before the object fetch's dots, 152 before LCDC's colour-selection dot. See "The LCDC bits that choose a pixel's colour are read one dot before the palette shades it" above |
 | `m3_lcdc_bg_map_change` | 124 | mid-line LCDC bit 3 changes; 316, 428, then 182 |
 | `m3_window_timing_wx_0` | 126 | one dot, only when SCX % 8 is not 0 (see the residual above) |
-| `m3_lcdc_obj_en_change_variant` | 152 | mid-line LCDC bit 1 changes; 532 before the object fetch's dots |
 | `m3_lcdc_obj_size_change_scx` | 190 | mid-line LCDC bit 2 changes; 270 before it |
 | `m3_scy_change` | 259 | mid-line SCY; 1256, 2542, then 661 |
 | `m3_lcdc_obj_size_change` | 310 | mid-line LCDC bit 2 changes; 350, 410, then this |
-| `m3_lcdc_bg_en_change` | 376 | mid-line LCDC bit 0 changes, which is read at emission and not by a fetch; 855 before the object fetch's dots |
 | `m3_lcdc_tile_sel_change` | 410 | mid-line LCDC bit 4 changes; 688, 1144, then 534 |
 | `m3_lcdc_win_en_change_multiple` | 468 | mid-line LCDC bit 5; 8316, then 5760, then this |
 | `m3_lcdc_win_map_change` | 724 | mid-line LCDC bit 6 changes; 1646 before the counter work, 1448 before the five-step fetcher, 792, then 852. Not sampling either: same entry |
 | `m3_lcdc_tile_sel_win_change` | 868 | mid-line LCDC bit 4 changes, with a window; 1904 before the counter work, 1336, then 1016. Not sampling: see "Group E, measured to the dot and not solved" above |
 | `daid/ppu_scanline_bgp` | 7186 | disagrees by 12 dots, which are three M-cycles in its once-a-frame `halt` -> LYC-interrupt sync and not in the pipeline; see its own entry above |
 
-The mid-line LCDC, SCX and SCY entries above are all the same shape: the
-register is read live, at the dot the fetcher needs it. Which dot that is **is**
+The mid-line LCDC, SCX and SCY entries left in the table are all the same shape:
+the register is read live, at the dot the fetcher needs it. (**The two that were
+not** - LCDC bits 0 and 1, which are read when a pixel leaves the FIFO and not by
+any fetch - both pass since 2026-09-24; see "The LCDC bits that choose a pixel's
+colour are read one dot before the palette shades it" above. That is why none of
+the fetch-sampling work ever moved them.) Which dot that is **is**
 now pinned - Mealybug's PPU documentation names the stages (TILE_SEL at the two
 bitplane stages, SCY at all three), and each stage reads on the first of its two
 dots; see "Each fetch stage samples its registers on its first dot" above for the

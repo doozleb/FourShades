@@ -158,6 +158,28 @@ public:
     // fetch reads its row two dots before the pixel it pre-empts".
     static constexpr int kObjectDataDots = 2;
 
+    // The dots by which the LCDC bits that choose a pixel's colour lag the
+    // register. Two of them are read when a pixel leaves the FIFO - bit 0,
+    // which blanks the background and the window, and bit 1, which lets an
+    // object cover them - and neither is read on the dot the pixel is shaded:
+    // both are read the dot before it.
+    //
+    // It is measured as a *difference* rather than as an absolute dot, which
+    // is what makes it independent of where the pixel stream itself is pinned.
+    // A Mealybug Tearoom reference writes BGP during mode 3 and photographs the
+    // seam, and the seam sits on the pixel drawn on the first dot after the
+    // writing M-cycle: the palette is read on the pixel's own dot (see
+    // Ppu::bgp and docs/known-divergences.md, "Palette writes short the old and
+    // new values together for one dot"). Three more references write these two
+    // LCDC bits during mode 3 at that same kind of dot, and all three put their
+    // seams one pixel further right than the palette's - and all three move
+    // further from their photographs, not closer, if the lag is made two dots.
+    // So the colour a pixel carries is chosen one dot before the palette shades
+    // it, whatever dot that turns out to be. See docs/known-divergences.md,
+    // "The LCDC bits that choose a pixel's colour are read one dot before the
+    // palette shades it".
+    static constexpr int kLcdcSelectLag = 1;
+
 private:
     enum class Step { Tile, DataLow, DataHigh, Sleep, Push };
 
@@ -371,6 +393,25 @@ private:
     // register as of the previous dot. Shifted once per dot, whether or not the
     // line moves a pixel, because the lag is in dots.
     std::array<u8, kWindowCounterWxLag> wxPipe_{};
+    // The colour-selection stage's view of LCDC, one entry per dot of
+    // kLcdcSelectLag: [0] is what this dot's pixel is masked and muxed with,
+    // and the last entry is the register as of the previous dot. Shifted once
+    // per dot whether or not the line moves a pixel - the dots an object fetch
+    // stalls included - because the lag is in dots, exactly as wxPipe_ above.
+    std::array<u8, kLcdcSelectLag> lcdcSelectPipe_{};
+    // Whether a pixel has left the queue on this line yet. kLcdcSelectLag is
+    // the gap between one pixel's colour being chosen and the previous one
+    // being shaded, so the line's first pixel has nothing to lag behind: it is
+    // chosen on the dot it is shaded. Two of the three references above measure
+    // that. Each puts one object off the left edge of every line, at an OAM X
+    // that walks the stall's length band by band, and on the one band where the
+    // stall ends exactly on the dot the write lands both photograph the line's
+    // first pixel with the *new* bit rather than the old one. It is the first
+    // pixel of the line and not the first after any stall: another band of one
+    // of them puts its object mid-line and photographs the pixel that fetch
+    // pre-empts with the old bit, which rules the wider reading out. Same entry
+    // in docs/known-divergences.md.
+    bool pixelStreamStarted_ = false;
     // The window has put at least one tile into the queue since it started.
     // Pan Docs' pixel-FIFO sentence is about a WX changed "after the window has
     // started rendering", and the six dots between an activation and its first

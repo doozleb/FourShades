@@ -26,6 +26,8 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     windowComparedX_ = -1;
     windowCounterLead_ = kWindowCounterLeadDots;
     wxPipe_.fill(ppu.wx());
+    lcdcSelectPipe_.fill(ppu.lcdc());
+    pixelStreamStarted_ = false;
     windowRendering_ = false;
     objects_ = {};
     objectDots_ = 0;
@@ -652,6 +654,11 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
     // see docs/known-divergences.md, "A window fetch samples on the same dot a
     // background fetch does, and the object fetch that lands on the activation".
     const bool pixelDue = queueSize_ > 0 || fetchStallDots() == 0;
+    // The LCDC the colour-selection stage reads for the pixel this dot draws:
+    // the register as of the dot before, or the register itself for the line's
+    // first pixel, which has no predecessor to lag behind. Read here, before the
+    // pipe below moves on. See kLcdcSelectLag and pixelStreamStarted_.
+    const u8 selectLcdc = pixelStreamStarted_ ? lcdcSelectPipe_.front() : ppu.lcdc();
     // Pan Docs: "When this counter is equal to WX ... background rendering is
     // reset". An equality, tested on every dot the counter has started on, and
     // every match that finds the window not already drawing is an activation -
@@ -682,6 +689,10 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
         wxPipe_[i] = wxPipe_[i + 1];
     }
     wxPipe_.back() = ppu.wx();
+    for (std::size_t i = 0; i + 1 < lcdcSelectPipe_.size(); ++i) {
+        lcdcSelectPipe_[i] = lcdcSelectPipe_[i + 1];
+    }
+    lcdcSelectPipe_.back() = ppu.lcdc();
     advanceWindowCounter();
     // After the activation test, so that a line whose LCDC bit 5 is clear
     // throughout cannot start the window and stop it on the same dot, and
@@ -734,6 +745,10 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
     stepFetcher(ppu);
     if (queueSize_ > 0) {
         const u8 background = queue_[static_cast<std::size_t>(queueHead_)];
+        // A pixel the discard throws away still goes through the stage: what
+        // pixelStreamStarted_ records is that the stage has held a pixel, not
+        // that the LCD has been sent one.
+        pixelStreamStarted_ = true;
         queueHead_ = (queueHead_ + 1) % static_cast<int>(queue_.size());
         --queueSize_;
         if (discard_ > 0) {
@@ -751,9 +766,12 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
                 objects_[i] = objects_[i + 1];
             }
             objects_[objects_.size() - 1] = ObjectPixel{};
-            const u8 bgColour = (ppu.lcdc() & 0x01) != 0 ? background : 0;
+            // LCDC's two colour-selection bits come from selectLcdc, a dot
+            // behind the register, and the palettes from the register itself:
+            // see kLcdcSelectLag for the two measurements that separate them.
+            const u8 bgColour = (selectLcdc & 0x01) != 0 ? background : 0;
             u8 shade = shadeFor(ppu.bgp(), bgColour);
-            const bool objectWins = object.colour != 0 && (ppu.lcdc() & 0x02) != 0 &&
+            const bool objectWins = object.colour != 0 && (selectLcdc & 0x02) != 0 &&
                                     (!object.behind || bgColour == 0);
             if (objectWins) {
                 shade = shadeFor(ppu.obp(object.palette), object.colour);
