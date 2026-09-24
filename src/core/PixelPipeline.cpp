@@ -66,6 +66,39 @@ void PixelPipeline::tryPushRow() {
     pushed_ = true;
 }
 
+// Mealybug Tearoom's PPU notes name the stage `B`: the tile-index fetch. Every
+// register that goes into its VRAM address is read here, on the stage's first
+// dot - see stepFetcher for what pins that dot - which makes this one sample of
+// SCX, one of SCY and one of LCDC's map-select bit per fetch.
+void PixelPipeline::sampleTileIndex(const Ppu& ppu) {
+    const bool window = window_;
+    if (discardFetch_) {
+        // The fine-scroll discard is the low three bits of the same SCX this
+        // stage reads to pick the line's first tile column - one sample serving
+        // both - and it is read here rather than when mode 3 begins.
+        //
+        // Two Mealybug Tearoom references pin the M-cycle. One sweeps the dot
+        // it rewrites SCX on, and over the lines where the write lands on the
+        // M-cycle ending just before this stage, its photograph follows the new
+        // value; reading SCX when mode 3 begins is an M-cycle too early and
+        // puts four to six pixels of each of those lines in the wrong place.
+        // The other agrees from the other side, on a line where the two values
+        // differ by seven. See docs/known-divergences.md, "The fine-scroll
+        // discard reads SCX at the line's first tile fetch". Which of the
+        // stage's two dots it is read on is the one thing those two do not
+        // decide - both give the identical picture either way - so it stays
+        // welded to the map column's read.
+        discard_ = static_cast<int>(ppu.scx() & 0x07);
+    }
+    fetchWindow_ = window;
+    const u16 map = (window ? (ppu.lcdc() & 0x40) : (ppu.lcdc() & 0x08)) != 0 ? 0x9C00 : 0x9800;
+    const u8 y = window ? static_cast<u8>(windowLineUsed_)
+                        : static_cast<u8>(ppu.lineNumber() + ppu.scy());
+    const u8 x = window ? static_cast<u8>(fetcherX_ & 0x1F)
+                        : static_cast<u8>(((ppu.scx() / 8) + fetcherX_) & 0x1F);
+    tileIndex_ = ppu.peekVram(static_cast<u16>(map + (y / 8) * 32 + x));
+}
+
 void PixelPipeline::stepFetcher(const Ppu& ppu) {
     if (fetchReset_) {
         // The dot a reset costs before Get Tile begins; see fetchReset_.
@@ -73,53 +106,52 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
         return;
     }
     switch (step_) {
+    // Each of the three fetch stages below is two dots, and each samples the
+    // registers its VRAM address is built from on the **first** of them: the
+    // address goes out on the bus on one dot and the byte comes back on the
+    // next. That is one dot, and it is the whole of what this task settled.
+    //
+    // Mealybug Tearoom's PPU notes name the stages a register is read at - SCY
+    // at `B`, `0` and `1`, TILE_SEL at `0` and `1`, quoted in
+    // docs/known-divergences.md - but not which dot of a stage, and on a plain
+    // line nothing can: a write lands at the end of an M-cycle, and every
+    // stage's two dots then sit on the same side of every M-cycle boundary. A
+    // transparent object's fetch, whose dot cost the OBJ penalty algorithm can
+    // make odd, moves the rest of the line's stages across that grid and
+    // separates them; four unit cases do exactly that, one per stage plus the
+    // bitplane mixing the notes describe for TILE_SEL. The three stages were
+    // also measured one at a time against the reference photographs, and all
+    // three independently want their first dot - so they share one rule rather
+    // than needing three. See docs/known-divergences.md, "Each fetch stage
+    // samples its registers on its first dot".
     case Step::Tile:
+        if (stepDots_ == 0) {
+            sampleTileIndex(ppu);
+        }
         if (++stepDots_ < 2) {
             return;
         }
         stepDots_ = 0;
-        {
-            const bool window = window_;
-            if (discardFetch_) {
-                // The fine-scroll discard is the low three bits of the same SCX
-                // this step reads to pick the line's first tile column, and it
-                // is read here rather than when mode 3 begins.
-                //
-                // Two Mealybug Tearoom references pin it. One sweeps the dot
-                // it rewrites SCX on, and over the lines where the write lands
-                // on the M-cycle ending one dot before this step, its
-                // photograph follows the new value; reading SCX when mode 3
-                // begins is an M-cycle too early and puts four to six pixels of
-                // each of those lines in the wrong place. The other agrees from
-                // the other side, on a line where the two values differ by
-                // seven. See docs/known-divergences.md, "The fine-scroll
-                // discard reads SCX at the line's first tile fetch".
-                discard_ = static_cast<int>(ppu.scx() & 0x07);
-            }
-            fetchWindow_ = window;
-            const u16 map = (window ? (ppu.lcdc() & 0x40) : (ppu.lcdc() & 0x08)) != 0 ? 0x9C00 : 0x9800;
-            const u8 y = window ? static_cast<u8>(windowLineUsed_)
-                                 : static_cast<u8>(ppu.lineNumber() + ppu.scy());
-            const u8 x = window ? static_cast<u8>(fetcherX_ & 0x1F)
-                                 : static_cast<u8>(((ppu.scx() / 8) + fetcherX_) & 0x1F);
-            tileIndex_ = ppu.peekVram(static_cast<u16>(map + (y / 8) * 32 + x));
-        }
         step_ = Step::DataLow;
         return;
     case Step::DataLow:
+        if (stepDots_ == 0) {
+            tileLow_ = ppu.peekVram(tileRowAddress(ppu));
+        }
         if (++stepDots_ < 2) {
             return;
         }
         stepDots_ = 0;
-        tileLow_ = ppu.peekVram(tileRowAddress(ppu));
         step_ = Step::DataHigh;
         return;
     case Step::DataHigh:
+        if (stepDots_ == 0) {
+            tileHigh_ = ppu.peekVram(static_cast<u16>(tileRowAddress(ppu) + 1));
+        }
         if (++stepDots_ < 2) {
             return;
         }
         stepDots_ = 0;
-        tileHigh_ = ppu.peekVram(static_cast<u16>(tileRowAddress(ppu) + 1));
         if (discardFetch_) {
             // Pan Docs: two tile fetches happen before the first pixel. The
             // first one's result is thrown away, so this fetch costs exactly
@@ -140,14 +172,15 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
         //
         // This is the chance an undisturbed line uses, every time: a row feeds
         // eight pixels and the whole fetch is eight dots, so the FIFO empties
-        // exactly as this step completes. The tile's first pixel is therefore
-        // drawn on the dot its high bitplane is read, its low bitplane two dots
-        // earlier and its tile index two before that - the same three offsets
-        // for every fetch on the line, which is what the dot each register
-        // reaches the fetcher on is measured against. See
+        // exactly as this step completes. Writing P for the dot the tile's
+        // first pixel is drawn on, that puts the push on P, the high bitplane's
+        // read on P-1, the low bitplane's on P-3 and the tile index's on P-5 -
+        // the same three offsets for every fetch on the line, which is what the
+        // dot each register reaches the fetcher on is measured against. See
         // docs/known-divergences.md, "The background fetcher is five steps over
         // eight dots, and the dot that leaves over", for the measurements that
-        // pin this phase and the one choice it leaves open.
+        // pin this phase, and "Each fetch stage samples its registers on its
+        // first dot" for the three reads inside it.
         //
         // The other two chances are the Sleep dots below, and they are not
         // decoration: an extra pixel pushed into the FIFO from outside the

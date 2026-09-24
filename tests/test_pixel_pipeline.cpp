@@ -394,6 +394,163 @@ TEST_CASE("consecutive background fetches read their low bitplanes eight dots ap
     CHECK(row[24] == 1); // read on dot 122
 }
 
+// ---------------------------------------------------------------------------
+// Which dot of a two-dot fetch stage samples the registers it needs
+//
+// A fetch stage is two dots. The registers that build its VRAM address are
+// sampled on the stage's first dot; the byte arrives at the end of the second.
+// Mealybug Tearoom's PPU notes name the stages a register is read at - SCY at
+// the tile-index stage `B` and both bitplane stages `0` and `1`, TILE_SEL at
+// `0` and `1` - but not which of a stage's two dots, and the cases above
+// cannot separate them: a write lands at the end of an M-cycle, and on a plain
+// line every stage's two dots sit on the same side of every M-cycle boundary,
+// so both readings give the same picture.
+//
+// A transparent object breaks that alignment. Its fetch stalls the background
+// fetcher by a number of dots the OBJ penalty algorithm decides, and an odd
+// number of them moves the rest of the line's stages across the M-cycle grid,
+// so a write can then land between a stage's two dots. The object draws
+// nothing - its tile is all colour 0 - so only the stall shows.
+namespace {
+// Parks a fully transparent object at OAM X `x` on every line, and enables
+// objects. Its fetch costs 6 dots plus Pan Docs' tile term minus the
+// first-object rebate: 7 dots at OAM X = 9 and 5 at OAM X = 11 (see
+// PixelPipeline::objectPenalty), both odd, and both taken after the line's
+// first pixels rather than before its warm-up.
+void addStallingObject(Ppu& ppu, u8 x) {
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so OAM and VRAM land
+    for (u16 row = 0; row < 16; ++row) {
+        ppu.vramWrite(static_cast<u16>(0x8020 + row), 0x00); // tile 2: all colour 0
+    }
+    ppu.oamWrite(0xFE00, 0x10); // Y = 16: on every line drawn here
+    ppu.oamWrite(0xFE01, x);
+    ppu.oamWrite(0xFE02, 0x02); // tile 2, fully transparent
+    ppu.oamWrite(0xFE03, 0x00);
+    enableLcd(ppu, 0x93); // as 0x91, plus objects enabled
+}
+
+// The ruler of setUpScyRowRuler, with the difference between the two rows moved
+// to whichever bitplane a case is about. Row 1 of tile 0 is colour 0; row 2 is
+// colour 1 if the difference is in the low bitplane and colour 2 if it is in
+// the high one. So a tile that took one bitplane from each row shows colour 3,
+// which neither row can produce on its own.
+void setUpScyPlaneRuler(Ppu& ppu, bool highPlane) {
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so writes land
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8000 + row), 0x00);
+        ppu.vramWrite(static_cast<u16>(0x8001 + row), 0x00);
+    }
+    ppu.vramWrite(static_cast<u16>(highPlane ? 0x8005 : 0x8004), 0xFF); // row 2
+    for (u16 i = 0; i < 0x400; ++i) {
+        ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00);
+    }
+    static_cast<void>(ppu.write(0xFF47, 0xE4));
+    static_cast<void>(ppu.write(0xFF42, 0x00)); // SCY = 0: line 1 reads row 1
+}
+} // namespace
+
+TEST_CASE("SCY reaches the low bitplane stage on the stage's first dot") {
+    // Mealybug Tearoom's PPU notes: "the SCY register is read during the
+    // background tile fetch B, 0 and 1 stages". This is stage 0, to the dot.
+    //
+    // The object at OAM X = 9 is fetched once screen pixel 1 is due, on line
+    // dot 101, and stalls the fetcher for seven dots. The tile at x = 8-15
+    // therefore has its first pixel on line dot 115 and its stages on dots
+    // 110-111 (index), 112-113 (low) and 114-115 (high). A SCY written on dot
+    // 112 is visible from dot 113, so the low bitplane is read before it and
+    // the high bitplane after it: the tile keeps row 1's low bitplane, which
+    // is colour 0. Sampling on a stage's last dot reads the low bitplane on
+    // dot 113 instead and draws colour 1. Line 1, not line 0: line 0 draws
+    // four dots early.
+    Ppu ppu;
+    setUpScyPlaneRuler(ppu, /*highPlane=*/false);
+    addStallingObject(ppu, 9);
+    const u8* row = lineWithWriteAt(ppu, 1, 112, 0xFF42, 0x01);
+    CHECK(row[8] == 0);
+    CHECK(row[15] == 0);
+    CHECK(row[16] == 1); // the next tile reads both bitplanes after the write
+}
+
+TEST_CASE("SCY reaches the high bitplane stage on the stage's first dot") {
+    // Stage 1 of the same sentence. The object at OAM X = 11 costs five dots
+    // and is taken once screen pixel 3 is due, on line dot 103, so the tile at
+    // x = 8-15 has its first pixel on dot 113 and its stages on dots 108-109,
+    // 110-111 and 112-113. A SCY written on dot 112 is visible from dot 113:
+    // every stage of this tile is over before it, so the tile is row 1
+    // throughout, colour 0. Sampling on a stage's last dot reads the high
+    // bitplane on dot 113 and mixes row 2's high bitplane into it - colour 2.
+    Ppu ppu;
+    setUpScyPlaneRuler(ppu, /*highPlane=*/true);
+    addStallingObject(ppu, 11);
+    const u8* row = lineWithWriteAt(ppu, 1, 112, 0xFF42, 0x01);
+    CHECK(row[8] == 0);
+    CHECK(row[15] == 0);
+    CHECK(row[16] == 2); // the next tile reads both bitplanes after the write
+}
+
+TEST_CASE("SCY reaches the tile-index stage on the stage's first dot") {
+    // Stage B of the same sentence, which is the one that picks the tile-map
+    // row. Map row 0 is tile 0 and map row 1 is tile 1, and tile 1's row 1 is
+    // colour 3, so SCY = 8 swaps the tile the whole line draws without moving
+    // the row within it: only stage B can see the difference.
+    //
+    // The object at OAM X = 11 again, so the tile at x = 8-15 reads its index
+    // on dot 108. A SCY written on dot 108 is visible from dot 109, so this
+    // tile keeps map row 0 - tile 0, colour 0 - and the tile after it takes
+    // tile 1. Sampling on a stage's last dot reads the index on dot 109 and
+    // draws tile 1 here already.
+    Ppu ppu;
+    setUpScyPlaneRuler(ppu, /*highPlane=*/false);
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8010 + row), 0xFF); // tile 1: colour 3
+        ppu.vramWrite(static_cast<u16>(0x8011 + row), 0xFF);
+    }
+    for (u16 i = 0; i < 32; ++i) {
+        ppu.vramWrite(static_cast<u16>(0x9820 + i), 0x01); // map row 1: tile 1
+    }
+    addStallingObject(ppu, 11);
+    const u8* row = lineWithWriteAt(ppu, 1, 108, 0xFF42, 0x08);
+    CHECK(row[8] == 0);
+    CHECK(row[15] == 0);
+    CHECK(row[16] == 3); // the next tile reads its index on dot 116
+}
+
+TEST_CASE("LCDC bit 4 written between a fetch's two bitplane stages mixes two tile patterns") {
+    // Mealybug Tearoom's PPU notes: "TILE_SEL is read during the 0 and 1
+    // stages of background tile data fetching. Changing its value during
+    // background tile data fetch allows for mixing tile bitplane data from two
+    // different tile patterns." This is that mixing, and it only happens if
+    // each bitplane stage reads the bit on its own first dot.
+    //
+    // Tile 0 at 0x8000 - the area LCDC bit 4 set selects - has a low bitplane
+    // of 0xFF and no high one; tile 0 at 0x9000, which a clear bit 4 selects,
+    // has the high bitplane and no low one. Neither can draw colour 3 alone.
+    //
+    // The object at OAM X = 9 puts this tile's stages on dots 110-111,
+    // 112-113 and 114-115. Clearing bit 4 on dot 112 is visible from dot 113,
+    // so the low bitplane comes from 0x8000 and the high one from 0x9000:
+    // colour 3. Sampling on a stage's last dot reads the low bitplane on dot
+    // 113 as well, takes both from 0x9000, and draws colour 2.
+    Ppu ppu;
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so writes land
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8000 + row), 0xFF); // bit 4 set: low only
+        ppu.vramWrite(static_cast<u16>(0x8001 + row), 0x00);
+        ppu.vramWrite(static_cast<u16>(0x9000 + row), 0x00); // bit 4 clear: high only
+        ppu.vramWrite(static_cast<u16>(0x9001 + row), 0xFF);
+    }
+    for (u16 i = 0; i < 0x400; ++i) {
+        ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00);
+    }
+    static_cast<void>(ppu.write(0xFF47, 0xE4));
+    static_cast<void>(ppu.write(0xFF42, 0x00));
+    addStallingObject(ppu, 9);
+    const u8* row = lineWithWriteAt(ppu, 1, 112, 0xFF40, 0x83); // LCDC bit 4 clear
+    CHECK(row[8] == 3);  // low from 0x8000, high from 0x9000
+    CHECK(row[15] == 3);
+    CHECK(row[16] == 2); // the next tile reads both bitplanes from 0x9000
+}
+
 namespace {
 // Background tile 0 = colour 1 everywhere; window tile 1 = colour 3 everywhere;
 // background map at 0x9800 (all tile 0), window map at 0x9C00 (all tile 1).
