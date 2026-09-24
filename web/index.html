@@ -37,6 +37,9 @@
   #drop {
     position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
     background: rgba(13,15,18,0.92); color: var(--fg-dim); font-size: 0.9rem; padding: 1rem;
+    /* #screen-wrap is line-height: 0 so the canvas leaves no gap beneath it;
+       without this the two lines of text here draw on top of each other. */
+    line-height: 1.5;
   }
   #drop.hidden { display: none; }
   #drop strong { color: var(--fg); font-weight: 400; display: block; margin-bottom: 0.4rem; }

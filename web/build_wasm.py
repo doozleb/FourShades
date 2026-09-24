@@ -77,7 +77,7 @@ def find_empp(emsdk: pathlib.Path) -> pathlib.Path:
     if direct:
         return pathlib.Path(direct)
     upstream = emsdk / "upstream" / "emscripten"
-    for name in ("em++.bat", "em++"):
+    for name in ("em++.exe", "em++.bat", "em++"):
         candidate = upstream / name
         if candidate.exists():
             return candidate
