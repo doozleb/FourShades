@@ -1164,8 +1164,9 @@ one part of them that is **still not explained**.
   variant 30 pixels and the `_scx` variant nothing, and reading both halves on one
   dot loses the `_scx` variant's last 30 - but **not from the other**: a dot
   *earlier* was not swept until 2026-09-24, and it is where the last 15 pixels
-  were. The sweep is in the entry named two bullets above. `intr_2_mode0_timing_sprites` is
-  untouched by all of it: no dot moved, only which byte each read fetched.
+  were. The sweep is in the entry named two bullets above.
+  `intr_2_mode0_timing_sprites` is untouched by all of it: no dot moved, only
+  which byte each read fetched.
 - **What is *not* arbitrated.** That a cancel can no longer happen once the lower
   address is retrieved is Pan Docs' sentence and a unit case, and **no ROM in the
   165 measures it** - the two ROMs that clear bit 1 mid-line leave it clear past
@@ -1330,7 +1331,7 @@ answer two different parts of one residual.
 2. **The clamp.** The fetch's two reads are dots of the stall, so an object off
    the left edge is read at most as early as the stall's own first dot. With
    SCX = 0 the clamp is never binding (for OAM X = 0 to 5 it is exactly
-   saturated, which is why those five are all read on dot 100); with a non-zero
+   saturated, which is why all six of them are read on dot 100); with a non-zero
    SCX it can be, and no ROM in the 165 reaches it. Without it such a fetch would
    be due on a dot its stall never has and would silently drop half a row.
 3. **Which dots the discarded row's eight pixels really occupy.** FourShades
