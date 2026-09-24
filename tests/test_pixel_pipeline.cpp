@@ -1934,3 +1934,141 @@ TEST_CASE("an object fetch leaves the fetcher three dots ahead of the pixels") {
     CHECK(row[15] == 0);
     CHECK(row[16] == 3); // the tile after it reads its index on dot 119
 }
+
+TEST_CASE("an object fetch triggered on the dot the window activates does not wait for the window's row") {
+    // The two things that can happen on the dot the line's first row reaches the
+    // FIFO: the X counter reaches WX and the window resets the fetcher, and an
+    // object at screen x = 0 pre-empts the pixel that row was about to feed.
+    // Which of them the other sees decides whether the object's fetch runs now
+    // or waits another six dots for the window's own first row - and a Mealybug
+    // Tearoom reference says now: the pixel was due, so the fetch that pre-empts
+    // it starts, whether or not the window then takes the fetcher away. See
+    // docs/known-divergences.md, "The window's fetches, and the object fetch that
+    // lands on the same dot as the activation".
+    //
+    // WX = 7 puts the activation on line dot 100 and the object at OAM X = 8
+    // costs eleven dots, so pixel 0 is drawn on dot 114. Waiting for the
+    // window's row instead puts the whole eleven-dot fetch six dots later and
+    // pixel 0 on dot 117. BGP is rewritten on dot 116: the palette shorts the old
+    // and new values together for the one dot after the write (dot 117), so the
+    // three shades 1, 3 and 2 name the three sides of that boundary and say
+    // exactly which dot pixel 0 was drawn on. Line 1, not line 0.
+    Ppu ppu;
+    // LCDC $B3: window on with its map at $9800, where every tile is tile 0 -
+    // colour 1 across - so the whole line is one colour and the shades below are
+    // BGP's alone.
+    setUpWindowRuler(ppu, 0xB3, /*scx=*/0x00, /*wx=*/0x07, /*wy=*/0x00);
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so OAM and VRAM land
+    for (u16 row = 0; row < 16; ++row) {
+        ppu.vramWrite(static_cast<u16>(0x8020 + row), 0x00); // tile 2: transparent
+    }
+    ppu.oamWrite(0xFE00, 0x10); // Y = 16: on every line drawn here
+    ppu.oamWrite(0xFE01, 0x08); // X = 8: screen x = 0, fetched at pixel 0
+    ppu.oamWrite(0xFE02, 0x02);
+    ppu.oamWrite(0xFE03, 0x00);
+    enableLcd(ppu, 0xB3);
+    // BGP $E4 shades colour 1 to 1, $08 shades it to 2, and the two shorted
+    // together ($EC) to 3.
+    const u8* row = lineWithWriteAt(ppu, 1, 116, 0xFF47, 0x08);
+    CHECK(row[0] == 1); // drawn on dot 114, before the write
+    CHECK(row[2] == 1); // dot 116
+    CHECK(row[3] == 3); // dot 117: the palette short
+    CHECK(row[4] == 2); // dot 118: the new palette
+}
+
+// ---------------------------------------------------------------------------
+// The same question for a window fetch, and it needs no object at all
+//
+// A window fetch reads the same three stages' worth of registers as a
+// background fetch, with LCDC bit 6 in place of bit 3 for the tilemap. Whether
+// it samples them on the same dot of each stage is a separate question - the
+// Mealybug notes say nothing about window fetches - and it can be asked without
+// a stalling object, because the window's own restart puts its stages wherever
+// WX says: the counter reaches WX on line dot 93 + WX, the activation spends
+// that dot resetting the fetcher, and the stages follow. A WX chosen so that a
+// stage's first dot is the last dot of an M-cycle separates the stage's two dots
+// on an otherwise undisturbed line.
+namespace {
+// The window drawing tile 0 of its map everywhere, with map $9800's tile 0
+// colour 1 and map $9C00's tile 1 colour 3, so which map a window fetch read is
+// the colour it drew. LCDC bit 6 starts clear.
+void setUpWindowMapRuler(Ppu& ppu, u8 wx) {
+    setUpWindowRuler(ppu, 0xB3, /*scx=*/0x00, wx, /*wy=*/0x00);
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8010 + row), 0xFF); // tile 1: colour 3
+        ppu.vramWrite(static_cast<u16>(0x8011 + row), 0xFF);
+    }
+}
+} // namespace
+
+TEST_CASE("a window fetch reads LCDC bit 6 on the tile-index stage's first dot") {
+    // WX = 6 puts the activation on line dot 99, so the window's first fetch has
+    // its tile-index stage on dots 100-101. LCDC bit 6 written on dot 100 is
+    // visible from 101: the first dot reads the window's tilemap at $9800 - tile
+    // 0, colour 1 - and the stage's last dot would read $9C00 and draw tile 1's
+    // colour 3 here instead. The window's second fetch reads its index on dot
+    // 108 either way and draws colour 3, which is what says the write landed.
+    // Line 1, not line 0: line 0 draws four dots early.
+    Ppu ppu;
+    setUpWindowMapRuler(ppu, /*wx=*/0x06);
+    const u8* row = lineWithWriteAt(ppu, 1, 100, 0xFF40, 0xF3); // bit 6 set from 101
+    CHECK(row[0] == 1); // the window's first tile: map $9800
+    CHECK(row[6] == 1);
+    CHECK(row[7] == 3); // its second tile: map $9C00
+}
+
+// The bitplane-mixing ruler of the case above, as a helper: tile 0 at $8000 has
+// a low bitplane only and tile 0 at $9000 a high one only, so a fetch that took
+// one from each area draws colour 3 and neither area can do it alone. LCDC bit 4
+// starts set, and the window's map is $9800 where every tile is tile 0.
+namespace {
+void setUpWindowPlaneRuler(Ppu& ppu, u8 wx) {
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so writes land
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8000 + row), 0xFF); // bit 4 set: low only
+        ppu.vramWrite(static_cast<u16>(0x8001 + row), 0x00);
+        ppu.vramWrite(static_cast<u16>(0x9000 + row), 0x00); // bit 4 clear: high only
+        ppu.vramWrite(static_cast<u16>(0x9001 + row), 0xFF);
+    }
+    for (u16 i = 0; i < 0x400; ++i) {
+        ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00);
+    }
+    static_cast<void>(ppu.write(0xFF47, 0xE4));
+    static_cast<void>(ppu.write(0xFF4A, 0x00)); // WY = 0
+    static_cast<void>(ppu.write(0xFF4B, wx));
+    enableLcd(ppu, 0xB3); // window on, bit 4 set, both maps $9800
+}
+} // namespace
+
+TEST_CASE("a window fetch reads LCDC bit 4 on the low bitplane stage's first dot") {
+    // Mealybug's TILE_SEL sentence is about background fetches; this is the same
+    // mixing for a window fetch, and the case that `m3_lcdc_tile_sel_win_change`
+    // photographs. Tile 0 at $8000 - what a set bit 4 selects - has a low
+    // bitplane only, and tile 0 at $9000, which a clear bit 4 selects, has a high
+    // one only, so neither can draw colour 3 alone.
+    //
+    // WX = 4 puts the activation on dot 97 and the window's first fetch's
+    // bitplane stages on dots 100-101 and 102-103. Clearing bit 4 on dot 100 is
+    // visible from 101, so the low bitplane comes from $8000 and the high one
+    // from $9000: colour 3. Sampling on each stage's last dot reads both from
+    // $9000 and draws colour 2.
+    Ppu ppu;
+    setUpWindowPlaneRuler(ppu, /*wx=*/0x04);
+    const u8* row = lineWithWriteAt(ppu, 1, 100, 0xFF40, 0xA3); // bit 4 clear from 101
+    CHECK(row[0] == 3); // one bitplane from each area
+    CHECK(row[3] == 3);
+}
+
+TEST_CASE("a window fetch reads LCDC bit 4 on the high bitplane stage's first dot") {
+    // The other bitplane stage, and the other WX that lands a window stage on an
+    // M-cycle boundary. WX = 6 puts the activation on dot 99 and the window's
+    // first fetch's stages on dots 100-101, 102-103 and 104-105. Clearing bit 4
+    // on dot 104 is visible from 105, so both bitplanes come from $8000 - a low
+    // plane and no high one, colour 1 - while the stage's last dot would read the
+    // high plane from $9000 and mix colour 3 out of the two areas.
+    Ppu ppu;
+    setUpWindowPlaneRuler(ppu, /*wx=*/0x06);
+    const u8* row = lineWithWriteAt(ppu, 1, 104, 0xFF40, 0xA3); // bit 4 clear from 105
+    CHECK(row[0] == 1); // both bitplanes from $8000
+    CHECK(row[5] == 1);
+}

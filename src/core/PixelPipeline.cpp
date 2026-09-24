@@ -641,6 +641,17 @@ void PixelPipeline::stopWindowIfDisabled(const Ppu& ppu) {
 }
 
 bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
+    // Whether a pixel is due to leave the FIFO on this dot: one is waiting, or
+    // the fetcher's row arrives before the dot is over. It is what an object
+    // fetch needs to pre-empt (see the scan below), and it is read *here*, ahead
+    // of the window's counter, because a window activation on this very dot
+    // clears the FIFO and sends the fetcher back to its first step: the pixel was
+    // due, and the fetch that pre-empts it begins whether or not the window then
+    // takes the fetcher away. The alternative - the object waiting another
+    // kWindowRestartDots for the window's own first row - is measured and wrong;
+    // see docs/known-divergences.md, "A window fetch samples on the same dot a
+    // background fetch does, and the object fetch that lands on the activation".
+    const bool pixelDue = queueSize_ > 0 || fetchStallDots() == 0;
     // Pan Docs: "When this counter is equal to WX ... background rendering is
     // reset". An equality, tested on every dot the counter has started on, and
     // every match that finds the window not already drawing is an activation -
@@ -697,11 +708,11 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
     // not empty". The fetch waits for a pixel to pre-empt, in other words, so an
     // object at screen x = 0 is fetched on the dot the line's first row reaches
     // the FIFO rather than on the line's first rendering dot, and the warm-up
-    // that feeds that row is left alone. fetchStallDots() == 0 is the fetcher's
-    // own statement that the row arrives on this dot; see
-    // docs/known-divergences.md, "An object fetch waits for the pixel it
+    // that feeds that row is left alone. pixelDue, at the top of this function,
+    // is that condition, read before the window could have taken the row away;
+    // see docs/known-divergences.md, "An object fetch waits for the pixel it
     // pre-empts".
-    if ((ppu.lcdc() & 0x02) != 0 && (queueSize_ > 0 || fetchStallDots() == 0)) {
+    if ((ppu.lcdc() & 0x02) != 0 && pixelDue) {
         const auto& list = ppu.lineObjects();
         for (std::size_t i = 0; i < list.size(); ++i) {
             if ((drawn_ & (1u << i)) != 0) {
