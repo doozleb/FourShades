@@ -1605,6 +1605,170 @@ other decides whether the object's fetch runs on that dot or waits another
 
 - **Checked:** 2026-09-24.
 
+## Group D's residual is the OBJ penalty's tile term, and two references contradict each other over it (2026-09-24)
+
+An open question, recorded with its measurements because the measurements are
+exact, the residual's shape is sharp, and two of the four references turn out to
+be **mutually inconsistent** with the structure of the fetch - which is worth
+knowing before anyone spends another task on them.
+
+The four ROMs are `m3_lcdc_tile_sel_change` (410 differing pixels),
+`m3_scy_change` (259), `m3_lcdc_bg_map_change` (124) and `m3_scx_high_5_bits`
+(12) - 805 together, and the four of the mid-line-register group that are pure
+background fetches. Their frames were diffed line by line against the references
+on 2026-09-24.
+
+### What the four ROMs actually do
+
+All four are built the same way, read off an instrumented run (a temporary trace
+of every `$FF40`-`$FF4B` write with its line and dot, of every tile-index, low-
+and high-bitplane read with its dot and value, and a dump of both tilemaps, the
+tile data and OAM; added, measured, reverted, revert verified behaviourally):
+
+- **One object per 8-line band, at OAM X = the band's index.** OAM entry *b* has
+  Y = 16 + 8*b* (so it covers screen rows 8*b* to 8*b*+7) and X = *b*, for
+  *b* = 0 to 17. So band *b*'s object sits at screen x = *b* - 8, and its OBJ
+  penalty and the pixel it pre-empts change from band to band. **That is the
+  ROMs' sweep**: the register writes are at a fixed dot, and it is the object
+  that moves the fetch grid under them. In `m3_scy_change` and
+  `m3_scx_high_5_bits` the object's tile is blank, so it is invisible and does
+  nothing but move the dots; in the two LCDC ROMs it is a visible marker.
+- **The register is written in a fixed eight-dot pulse on every visible line.**
+  `m3_lcdc_bg_map_change` writes LCDC = $8B on the M-cycle ending at line dot
+  108 and $83 on the one ending at 116; `m3_lcdc_tile_sel_change` writes $93 and
+  $83 at the same two dots. So a read at line dots **109-116** sees the bit set
+  and a read outside them does not. `m3_scy_change` walks SCY 0, 1, 2, 3, 4, 3,
+  2, 1, 0 and round again, one write every eight dots from dot 84;
+  `m3_scx_high_5_bits` writes SCX = 0 at dot 52 and SCX = LY & $F8 at dot 116.
+- The tilemaps and tiles make each background tile uniform, so one tile column of
+  one band is one bit of information. `m3_lcdc_bg_map_change`: map 0 is all tile
+  $00 and map 1 all tile $01, with LCDC bit 4 clear throughout, so `$9000`
+  (blank) against `$9010` (`FF FF` eight times over, solid) - the column is solid
+  exactly when its **tile-index** read fell in the pulse.
+  `m3_lcdc_tile_sel_change`: map 0 is all tile $00 with LCDC bit 3 clear
+  throughout, `$8000` is `FF FF` eight times over and `$9000` is blank - the
+  column's colour is `2 x (high read in the pulse) + (low read in the pulse)`, so
+  it reports the **two bitplane** reads separately.
+
+Note that the two LCDC ROMs have **identical** OAM, SCX = SCY = 0 and identical
+write dots, and were measured to have identical fetch grids band for band. They
+differ only in which LCDC bit they toggle, and therefore in which stage of the
+fetch reports it.
+
+### The shape of the residual
+
+Every one of the 805 pixels is in **one background tile column of one band**, and
+the bands and columns are these:
+
+| ROM | bands 8-12, column 1 (x = 8-15) | bands 16-17, column 2 (x = 16-23) | elsewhere |
+| --- | --- | --- | --- |
+| `m3_lcdc_tile_sel_change` | 64, 60, 58, 54, 50 | 64, 60 | none |
+| `m3_scy_change` | 32, 34, 34, 28, 33 | 45, 18 | 35, at the columns' left edge |
+| `m3_lcdc_bg_map_change` | 64, band 8 only | 60, band 17 only | none |
+| `m3_scx_high_5_bits` | none | 12, band 16 only | none |
+
+A full tile is 64 pixels; the 60s are a full tile with four pixels of the marker
+object's own glyph overlapping it. `m3_scy_change`'s 35 stragglers are one to
+four pixels each - 29 in column 0 and 6 at x = 8 - and **every one of them is on
+a line with LY % 8 = 6 or 7**, where the SCY walk moves the map row as well as
+the row within the tile. They are a separate, much smaller effect and not part of
+this shape.
+
+**Band *b*'s object sits at screen x = *b* - 8, and the wrong tile is always the
+one after the tile that pixel lands in.** Bands 8-12 put it at x = 0-4, inside
+background tile 0, and tile 1 comes out wrong; bands 16-17 put it at x = 8-9,
+inside tile 1, and tile 2 comes out wrong. And the bands that are **right** are
+just as telling:
+
+- **bands 13, 14, 15** - the object at x = 5, 6, 7. Its offset within the tile is
+  5 or more, so Pan Docs' OBJ penalty tile term (`7 - (x & 7)`, minus 2, floored
+  at zero) is **zero** and the penalty is the flat six dots.
+- **bands 0-7** - the object at x = -8 to -1, off the left edge. The term is
+  nonzero (5, 4, 3, 2, 1, 0, 0, 0) but the tile it is counted against is the
+  pre-line tile the fetcher throws away.
+
+So the whole 805-pixel residual lives in the **tile term**: the one to five dots
+Pan Docs' step 2 charges for waiting for the background fetcher to finish the
+tile, and only when that wait is against a tile the screen actually shows. Where
+the term is zero, or where it is charged against the discarded fetch, all four
+references are exact. FourShades spends the penalty as one stall of
+`penalty - kObjectFetcherLead` dots (see "An object fetch costs the pixels three
+dots more than it costs the fetcher and mode 3" above), which splits the affected
+fetch - its tile index is read before the stall and its bitplane bytes after -
+and that is what the references disagree with.
+
+### First impossibility: band 0 against band 8
+
+Bands 0 and 8 put the object at OAM X = 0 and OAM X = 8. Pan Docs gives both an
+**11-dot** penalty (the X = 0 exception, and the general formula, agreeing at
+SCX = 0), and both pre-empt **pixel 0**. So under any model whose object cost is
+a function of (the dot the object pre-empts, the penalty in dots) the two bands
+are bit-identical - and FourShades produces identical fetch grids for them,
+traced dot for dot.
+
+The references do not agree with each other. `m3_lcdc_bg_map_change` has column 1
+solid in band 0 and blank in band 8; `m3_lcdc_tile_sel_change` the same.
+
+**This is the same pair that blocks group E**, one entry below, where the
+window's fetches show it instead of the background's. That entry says the X = 0
+versus X = 8 pair "is the only place in the whole `screen` group where two lines
+that this model says are identical photograph differently" - **that is now known
+to be wrong**: it is also the cause of 64 of `m3_lcdc_bg_map_change`'s pixels and
+64 of `m3_lcdc_tile_sel_change`'s, in the background fetcher, with no window in
+sight. Whatever explains it explains part of both groups.
+
+### Second impossibility: bands 16 and 17, one reference against the other
+
+This one is new, and it is the harder of the two. Take band 16 (lines 128-135,
+the object at OAM X = 16, screen x = 8) and call the dots on which fetch 2 - the
+fetch that feeds screen column 2 - reads its tile index, its low bitplane and its
+high bitplane T, L and H.
+
+- `m3_lcdc_bg_map_change` draws column 2 blank, so **T is not in 109-116**.
+- `m3_lcdc_tile_sel_change` draws column 2 solid shade 3, so **L and H are both
+  in 109-116**.
+- But T < L < H within a fetch (the tile index is what the bitplane addresses are
+  built from), and on an undisturbed line fetch 2 reads its tile index on dot
+  **111** - an object fetch can only delay the fetcher, never advance it. So
+  T >= 111, and T outside 109-116 forces T >= 117, whence L > 117. Contradiction.
+
+Band 17 is the same with the object at OAM X = 17.
+
+This was checked exhaustively rather than argued only: with the pulse at 109-116
+and the fetch grid as measured, a search over **every** trigger dot from 89 to
+139 and **every subset** of the penalty's dots as the set the fetcher loses - the
+most permissive physical family there is - finds a solution for all of bands 0 to
+15 and **none at all** for bands 16 and 17.
+
+Relaxing the structure until they can be solved says what would have to give: the
+map-select bit (LCDC.3) has to reach the fetcher at least **three dots later**
+than the tile-data-select bit (LCDC.4) does. With the two offset by three dots or
+more, every band becomes solvable - but the per-band trigger dots and stall
+lengths the solutions then want (trigger dots scattered over 89-108, stalls of 1
+to 11 dots, in no relation to the object's X) are not a rule, and fitting them
+would be exactly the tuning this project's rules forbid.
+
+### Action, and what the next task should do
+
+**Left failing, at 410 + 259 + 124 + 12 = 805 pixels, no line of `src/`
+changed.** There is no mechanism here that explains all four references, and
+there is no mechanism that explains even the two LCDC ones at bands 16 and 17.
+
+- Start from the shape, not the ROMs: the residual is the OBJ penalty's **tile
+  term**, and only where the term is charged against a visible tile. Anything
+  that does not change how those one to five dots are spent cannot move these 805
+  pixels, and anything that changes the flat six dots will move
+  `intr_2_mode0_timing_sprites`, which is hardware-verified and passing.
+- The X = 0 versus X = 8 pair is the thing to explain first, and it is now worth
+  more than the group-E entry says it is.
+- The band-16/17 contradiction needs a *third* reference or a hardware
+  measurement, not more thought: it says one of three things this model treats as
+  structural is wrong - the pulse's dots (pinned by bands 0-7 of these same two
+  ROMs), the T-before-L-before-H order inside a fetch (pinned by the VRAM address
+  arithmetic), or the undisturbed grid (pinned by `m3_scx_low_3_bits`,
+  `m3_bgp_change`, `m3_window_timing` and `ppu timing` 12/12, all passing).
+- **Checked:** 2026-09-24.
+
 ## Group E, measured to the dot and not solved: what the window's fetch cadence has to be (2026-09-24)
 
 An open question, recorded with its evidence because the evidence is exact and
@@ -1675,8 +1839,13 @@ above without that would be fitting six blocks and breaking ten.
 - **What the next task should do:** start from the table, not from the ROM. The
   two rules are worth testing against `m3_lcdc_tile_sel_win_change` as well,
   whose residual is the same shape, and the X = 0 versus X = 8 pair is the thing
-  to explain first - it is the only place in the whole `screen` group where two
-  lines that this model says are identical photograph differently.
+  to explain first. **Correction, 2026-09-24:** this bullet used to call that pair
+  "the only place in the whole `screen` group where two lines that this model says
+  are identical photograph differently". It is not - the four background ROMs of
+  group D show the same pair, in the background fetcher and with no window
+  involved, for 128 of their 805 remaining pixels. See "Group D's residual is the
+  OBJ penalty's tile term, and two references contradict each other over it"
+  above.
 - **Checked:** 2026-09-24.
 
 ## Palette writes short the old and new values together for one dot (2026-09-21)
@@ -2369,7 +2538,9 @@ per-stage measurements and the four unit cases that separate the two dots. Its o
 "what is left in group D" bullet blamed the residual on the object fetch's start
 dot, and that turned out to be right and to be worth more than it guessed: the
 four of these that are pure background fetches came to 2,277 pixels then and come
-to 805 now. What is left of *them* has not been traced to anything.
+to 805 now. What is left of *them* is the OBJ penalty's tile term, and two of the
+four references contradict each other over it: see "Group D's residual is the OBJ
+penalty's tile term, and two references contradict each other over it" above.
 
 Notes on the ones that are more than "a behaviour not written yet":
 
@@ -2415,8 +2586,12 @@ Notes on the ones that are more than "a behaviour not written yet":
   - **45 to 12** came later the same day, with the object fetch's dots: this ROM
     parks an object on every line, so it moved with the four other background
     ROMs. See "An object fetch costs the pixels three dots more than it costs the
-    fetcher and mode 3" above. The 12 that are left have not been traced to
-    anything.
+    fetcher and mode 3" above. The 12 that are left are all in **band 16** - lines
+    128-134, the band whose object sits at OAM X = 16, screen x = 8 - and they are
+    the OBJ penalty's tile term rather than a mid-line SCX question. The sentence
+    above about SCX = LY crossing a tile boundary is the old diagnosis and is
+    superseded: see "Group D's residual is the OBJ penalty's tile term, and two
+    references contradict each other over it" above.
 - **`m3_lcdc_obj_size_change` (310) and `m3_lcdc_obj_size_change_scx`
   (190).** These two probe the same thing - LCDC bit 2, the object height
   bit, written during mode 3 - and the seven-dot rendering lag moved them in
