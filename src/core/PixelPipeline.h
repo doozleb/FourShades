@@ -124,6 +124,40 @@ public:
     // in docs/known-divergences.md.
     static constexpr int kWindowCounterWxLag = 2;
 
+    // The dots of the line's first object fetch that the background fetcher
+    // keeps. An object fetch stalls the line, and two hardware sources measure
+    // that stall from opposite sides:
+    //
+    //   - a Mealybug Tearoom reference rewrites BGP at known dots on a line
+    //     with one object and photographs the seams, which say which pixel was
+    //     being drawn on each of those dots. Over eighteen different OAM X
+    //     values it puts the line's pixels exactly Pan Docs' full OBJ penalty
+    //     behind an object-free line - no rebate at all;
+    //   - the hardware-verified object timing ROM measures mode 3's length and
+    //     puts it three dots short of that same sum, once per scanline.
+    //
+    // Both hold at once if the line's first object fetch costs the background
+    // fetcher three dots less than it costs the pixels: the fetcher runs on
+    // through this many of the stall's dots (see objectLeadDots_), the FIFO
+    // carries the pixels it gains (see fifoLead_), and mode 3 ends with the
+    // fetcher rather than with the last pixel (see dotsRemaining). Once per
+    // line, because that is what the timing ROM's 104 cases measure. See
+    // docs/known-divergences.md, "An object fetch costs the pixels three dots
+    // more than it costs the fetcher and mode 3".
+    static constexpr int kObjectFetcherLead = 3;
+
+    // Dots from the dot an object fetch reads its row out of VRAM to the dot
+    // the pixel it pre-empts is drawn. Pan Docs, "Pixel FIFO", ends the object
+    // fetch with "the lower address for the row of pixels of the target object
+    // tile is now retrieved and lengthens mode 3 by 1 dot. Once the address is
+    // retrieved this is the last chance for object fetch cancel to occur.
+    // Exiting object fetch lengthens mode 3 by 1 dot" - the read, then one more
+    // dot, then the pixel. Everything the address is built from is read on that
+    // dot and not before: the object's height (LCDC bit 2), its tile, its row.
+    // Measured, not only counted: see docs/known-divergences.md, "An object
+    // fetch reads its row two dots before the pixel it pre-empts".
+    static constexpr int kObjectDataDots = 2;
+
 private:
     enum class Step { Tile, DataLow, DataHigh, Sleep, Push };
 
@@ -218,8 +252,24 @@ private:
         bool behind = false; // the object's priority flag
     };
 
-    // Fetches line object `index` and merges it into the pixels in the queue.
+    // Begins the fetch of line object `index`: charges its dots and leaves the
+    // reads to fetchObjectRow, kObjectDataDots dots before the pixel the fetch
+    // pre-empts. Nothing of the object is read here, which is what lets a
+    // write that lands in between change it - or cancel the fetch outright.
     void startObject(const Ppu& ppu, std::size_t index);
+    // The end of an object fetch: reads the object's row out of VRAM with the
+    // height LCDC bit 2 gives now, and merges it into the pixels the queue is
+    // about to emit. Not called at all if the fetch was cancelled.
+    void fetchObjectRow(const Ppu& ppu);
+    // Pan Docs, "Pixel FIFO": "Object fetching may be canceled if LCDC.1 is
+    // disabled while the PPU is fetching an object from OAM", and the last
+    // chance for that is the dot the row's address is retrieved on. A cancelled
+    // fetch still costs every dot it was charged - Pan Docs has the cancel
+    // lengthening mode 3 too - so only the merge is skipped. A Mealybug
+    // Tearoom reference measures both halves of that: it clears bit 1 across
+    // the middle of a fetch and sets it again before the pixel is drawn, so
+    // the emission-time test cannot account for what its photograph shows.
+    void cancelObjectIfDisabled(const Ppu& ppu);
     // The dots line object `index` costs, given the running state of the
     // per-line penalty memo. Takes that state by reference so dotsRemaining
     // can walk the objects still to come over its own copy of it without
@@ -270,7 +320,12 @@ private:
     u8 tileIndex_ = 0;
     u8 tileLow_ = 0;
     u8 tileHigh_ = 0;
-    std::array<u8, 8> queue_{}; // background colours waiting to be emitted
+    // Background colours waiting to be emitted. A row is eight of them, and
+    // the extra kObjectFetcherLead are the pixels the fetcher gains at the
+    // line's first object fetch: the hardware FIFO is sixteen pixels deep and
+    // can carry them, so a push does not have to wait for the queue to be bare
+    // once the fetcher is running ahead. tryPushRow is where that is decided.
+    std::array<u8, 8 + kObjectFetcherLead> queue_{};
     int queueSize_ = 0;
     int queueHead_ = 0;
     int pixelX_ = 0;   // pixels emitted (0-160)
@@ -345,6 +400,18 @@ private:
 
     std::array<ObjectPixel, 8> objects_{}; // pixels waiting, index 0 is next
     int objectDots_ = 0;      // dots of penalty still owed for a fetch
+    // The object whose fetch is running, if any: its reads happen at the end of
+    // the stall (see kObjectDataDots), so the fetch has to remember which
+    // object it is for.
+    std::size_t objectIndex_ = 0;
+    bool objectFetching_ = false;
+    // Dots of the stall the background fetcher still runs through; granted once
+    // per line at the first object fetch. See kObjectFetcherLead.
+    int objectLeadDots_ = 0;
+    // Pixels the FIFO carries beyond a row, which is what the fetcher's lead is
+    // held in once it has been taken. Zero until the line's first object fetch,
+    // so a line without objects pushes exactly as it always did.
+    int fifoLead_ = 0;
     unsigned drawn_ = 0;      // bitmask of line objects already fetched
     // Background tile that already paid its share. Tile numbers can be
     // negative (an object off the left edge), so the "none yet" case needs

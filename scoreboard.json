@@ -4,7 +4,7 @@
     "total": 500
   },
   "test_roms": {
-    "passing": 147,
+    "passing": 149,
     "total": 165,
     "groups": [
       {
@@ -81,11 +81,11 @@
       },
       {
         "group": "screen",
-        "passing": 12,
+        "passing": 14,
         "total": 30,
         "first_failure": {
-          "test": "mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG)",
-          "reason": "differs from the reference in 2104 pixels"
+          "test": "mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb (DMG)",
+          "reason": "differs from the reference in 376 pixels"
         }
       },
       {

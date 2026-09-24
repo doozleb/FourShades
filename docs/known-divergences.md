@@ -572,6 +572,16 @@ keeping them apart is what lets both bodies of evidence be satisfied at once.
   fetcher would have spent stalled anyway - but nothing in the test
   distinguishes that from the constant belonging somewhere else, so the code
   says only what was measured.
+  - **Settled on 2026-09-24, and that reading was right about the mechanism and
+    wrong about who pays.** A Mealybug Tearoom reference measures the same three
+    dots from the pixel side and finds them *not* taken: the pixels pay Pan
+    Docs' sum in full. The three dots are the fetcher's, and mode 3 ends with
+    the fetcher. The sum this entry describes is no longer subtracted in
+    `objectPenalty`; it is subtracted in `dotsRemaining` instead, which leaves
+    every one of the 104 cases' figures exactly as they were. See "An object
+    fetch costs the pixels three dots more than it costs the fetcher and mode 3"
+    immediately below, which supersedes this bullet and nothing else in this
+    entry.
 - **Known limitation: the tile term ignores the window.** The tile-index half
   of the penalty (`PixelPipeline::startObject`'s `penaltyTile`) is computed in
   background coordinates - SCX plus the object's own X - unconditionally.
@@ -615,6 +625,179 @@ keeping them apart is what lets both bodies of evidence be satisfied at once.
     reaches one at a non-zero SCX, so the exception is kept as Pan Docs states
     it.
 - **Checked:** 2026-09-21.
+
+## An object fetch costs the pixels three dots more than it costs the fetcher and mode 3 (2026-09-24)
+
+Not a divergence: a timing model, and the answer to the "what is not settled"
+bullet in the entry above. Two bodies of hardware evidence measure the same
+object fetch from opposite sides and disagree by exactly three dots. Both are
+satisfied, and neither is bent, only if the fetch costs the pixel stream three
+dots more than it costs the background fetcher.
+
+### The two measurements
+
+- **The pixels: Pan Docs' sum in full.** Mealybug Tearoom's
+  `m3_bgp_change_sprites` puts one object on every scanline - OAM X = 1 on lines
+  0-7, X = 2 on lines 8-15, and so on up to X = 18 - and rewrites BGP at four
+  known dots per line over a background that is entirely colour 0. Every pixel
+  therefore shows the BGP in force on the dot it was drawn, and the seams say
+  which pixel that was. Its sibling `m3_bgp_change`, which has no objects and
+  the same handler shape, matches FourShades to the pixel, so the dots the
+  writes land on are not in question.
+  - Before this change FourShades' seams were **three pixels further along the
+    line than the reference's, on all eighteen line blocks at once** - a uniform
+    offset, independent of the object's X, so not the tile term and not the
+    warm-up. Reading each block's seam back as a dot gives the penalty hardware
+    charged the pixels: 10 dots at OAM X = 1, 9 at X = 2, 8 at 3, 7 at 4, 6 at
+    5, 6 and 7, 11 at 8, 10 at 9 ... 11 at 16, 9 at 18. Those are Pan Docs' OBJ
+    penalty algorithm exactly - flat 6 plus the tile term - **with no rebate**,
+    at all eighteen values.
+- **Mode 3: three dots less.** The hardware-verified
+  `intr_2_mode0_timing_sprites` measures mode 3's length across 104 cases and
+  wants that sum minus three, once per scanline. The entry above shows that no
+  other constant fits it.
+
+### The model, and what it predicts
+
+The line's first object fetch stalls the pixel stream for Pan Docs' full sum,
+and the background fetcher for three dots less: `PixelPipeline`'s
+`kObjectFetcherLead`. The fetcher runs on through the stall's first three dots
+(`objectLeadDots_`), the pixels it gains are carried in the FIFO
+(`fifoLead_` - the hardware FIFO is sixteen pixels deep and has room for them
+where a bare eight-pixel queue would not), and mode 3 ends with the fetcher
+rather than with the last pixel, so `dotsRemaining` takes the three dots off
+there instead. The last pixels of such a line reach the LCD three dots further
+into HBlank than `kRenderLag` alone says.
+
+That is one constant doing three jobs, and each of them is measured:
+
+| what the lead does | what measures it |
+| --- | --- |
+| the pixels pay the full sum | `m3_bgp_change_sprites` (exact after this change), `m3_obp0_change` (exact), `m3_lcdc_bg_en_change` 855 -> 376 |
+| the fetcher keeps three dots | `m3_scy_change` 661 -> 259, `m3_lcdc_tile_sel_change` 534 -> 410, `m3_lcdc_bg_map_change` 182 -> 124, `m3_scx_high_5_bits` 45 -> 12 |
+| mode 3 ends with the fetcher | `intr_2_mode0_timing_sprites`, unmoved at 1/1 |
+
+The three are separable and were separated. Each row below is a mutation run on
+a forced rebuild with both executables' hashes recorded, against the filtered
+unit set (`test_pixel_pipeline`, `test_objects`, `test_stat`, `test_ppu`,
+`test_screen`: 105 cases) and a full ROM run:
+
+| mutation | unit cases | test ROMs | `screen` pixels |
+| --- | --- | --- | --- |
+| the object fetch starts on the line's first rendering dot again | 5 | 146 | +2,333 |
+| the fetcher is frozen for the whole stall (no lead) | 5 | 149 | +7,812 |
+| the pixels are charged the rebated sum | 6 | 146 | +11,324 |
+| mode 3 ends with the pixels, not the fetcher | 4 | **148** | 0 |
+| the object's row is read when the fetch is triggered | 1 | 149 | +60 |
+| the row read one dot later (`kObjectDataDots` = 1) | 1 | 149 | +40 |
+| the row read one dot earlier (= 3) | 1 | 149 | +20 |
+| LCDC bit 1 cannot cancel a fetch in flight | 1 | 149 | 0 |
+| a push waits for a bare queue again (no FIFO lead) | **0** | 149 | +2,351 |
+| the window's colour-0 pixel needs a bare queue again | **0** | **148** | +1 |
+
+The clean tree was re-measured through the same harness before and after -
+105/105 and 149/165 - and the restore was verified behaviourally as well as by
+diff, since MSVC output is not bit-reproducible. The last two rows are the two
+mutations no unit case catches; the last of them is caught by a verdict
+(`m3_wx_4_change_sprites`, which the whole-row push rule below is there for) and
+the other by nothing but pixel counts, which is recorded at the end of this
+entry rather than guarded.
+
+### What is still not explained
+
+Why *three*, and why mode 3 follows the fetcher rather than the pixels. Pan
+Docs' dot-by-dot walk of the object fetch has a fetcher advancement at each end
+of it and calls one of them free when the line is over ("this advancement
+lengthens mode 3 by 1 dot **if** the X coordinate of the current scanline is not
+160"), which is the right shape for a fetcher that ends the line ahead of the
+pixels, but it does not add up to three. What is claimed here is only that one
+constant in one place satisfies both hardware sources at once, where the old
+model satisfied the timing ROM and missed every picture with an object in it by
+three pixels.
+
+- **One measured rule had to be restated, not changed: the window's colour-0
+  pixel.** "A WX changed while the window is drawing pushes one colour-0 pixel,
+  and only onto an empty FIFO" (below) was measured when the FIFO was bare
+  exactly on the dot a row went in. With the lead it is never bare on a line with
+  an object, so "empty" stops picking out that dot and the rule has to be said in
+  terms of what it always meant: the push lands only when the pixel the FIFO is
+  about to hand over starts a row, i.e. when the queue holds whole rows
+  (`queueSize_ % 8 == 0`). On every line without an object that is *identical* to
+  the old test, and on a line with one it is what keeps `m3_wx_4_change_sprites`
+  exact - the loose reading, "as much room as the fetcher's own push needs",
+  inserts a pixel on a line hardware does not and still misses the one it does.
+- **Also left open: the FIFO's depth is modelled only as far as the lead needs.**
+  `queue_` is eight pixels plus `kObjectFetcherLead`, not the hardware's
+  sixteen, and `tryPushRow` takes a row when the queue is down to the lead
+  rather than Pan Docs' "only if it's empty" (which it still is on every line
+  without an object). A full sixteen-pixel FIFO would be a different model of
+  the same measurement; nothing here distinguishes them, because the lead is
+  the only thing that ever occupies the extra space. Making the push wait for a
+  bare queue again is caught by **no** unit case and **no** verdict - only by
+  2,351 differing pixels across four references - which is recorded rather than
+  guarded.
+
+- **Effect:** test ROMs 147 -> **149 / 165** (`m3_bgp_change_sprites` and
+  `m3_obp0_change` gained, nothing lost); `screen` 12 -> 14 / 30 and its
+  differing pixels 15,907 -> 11,547. `ppu timing` 12/12,
+  `intr_2_mode0_timing_sprites`, `m3_bgp_change`, `m3_scx_low_3_bits`,
+  `dmg-acid2` and `oam bug` 7/7 all unmoved.
+- **Checked:** 2026-09-24.
+
+## An object fetch waits for the pixel it pre-empts, and reads its row two dots before it (2026-09-24)
+
+Not a divergence: Pan Docs' pixel-FIFO page walked dot by dot instead of as a
+lump penalty. Three separate things come out of it, and each is measured.
+
+**1. The fetch waits.** Pan Docs: "the fetcher is advanced one step until it's
+at step 5 **or until the background FIFO is not empty**". An object fetch needs a
+pixel to pre-empt, so the line's first object is fetched on the dot the first row
+reaches the FIFO - line dot 100 - and not on the line's first rendering dot,
+which is where FourShades fetched it until now. Mode 3's length is identical
+either way, which is why no timing ROM ever saw it, but the reads are not: the
+old dot pushed the whole twelve-dot warm-up behind the stall and moved every
+register read on the line with it. The first tile of `m3_scy_change`'s lines came
+out as the reference's *previous* line because of it. `fetchStallDots() == 0` is
+the fetcher's own statement that the row arrives on this dot, so the wait needs
+no new state.
+
+**2. The fetch reads its row two dots before that pixel, not when it is
+triggered.** Pan Docs ends the fetch with "the lower address for the row of
+pixels of the target object tile is now retrieved and lengthens mode 3 by 1 dot.
+Once the address is retrieved this is the last chance for object fetch cancel to
+occur. Exiting object fetch lengthens mode 3 by 1 dot" - the address, then one
+more dot, then the pixel. `kObjectDataDots` is that 2, and it is measured rather
+than counted: 1 costs `m3_lcdc_obj_size_change_scx` 40 pixels, 3 and 4 cost
+`m3_lcdc_obj_size_change` 20, and 5 costs it 60. Two unit cases pin it from both
+sides, the second of which needs a second object on the line to break the
+M-cycle grid.
+
+**3. LCDC can change under the fetch.** Everything the address is built from is
+read on that dot: the object's height from LCDC bit 2, its tile, its row. A write
+that lands between the trigger and the read therefore changes the object's height
+mid-fetch, which is what `m3_lcdc_obj_size_change` and its `_scx` sibling
+photograph (410 -> 310 and 270 -> 190). And Pan Docs: "Object fetching may be
+canceled if LCDC.1 is disabled while the PPU is fetching an object from OAM" - so
+bit 1 going low before the read drops the object's pixels while keeping its dots,
+since the same page has the cancel lengthening mode 3 too.
+
+- **The cancel is implemented and nothing in either suite measures it.** A unit
+  case pins it - bit 1 cleared across the middle of a fetch and set again before
+  the pixel is drawn, so the emission-time test cannot account for the result -
+  but disabling the cancel entirely moves **no** ROM by a single pixel. The two
+  ROMs that clear bit 1 mid-line, `m3_lcdc_obj_en_change` and its `_variant`,
+  leave it low for twenty M-cycles, long past the dot the pixels are drawn on, so
+  the emission-time test hides those objects with or without the cancel. This is
+  recorded because it is a behaviour the suite does not arbitrate: it is here
+  because Pan Docs documents it, not because a test demanded it.
+- **Effect, and who gets the credit.** The start dot is worth 2,333 differing
+  pixels on its own, `m3_scy_change` and the two window-fetch ROMs among them.
+  The four object-LCDC ROMs improve too - `m3_lcdc_obj_en_change` 100 -> 56,
+  `_variant` 532 -> 152, `m3_lcdc_obj_size_change` 410 -> 310, `_scx` 270 ->
+  190 - but that is mostly the fetch's *dots* (the entry above) rather than these
+  two reads: of the four, only the two size ROMs respond to the read dot at all,
+  by the 20-60 pixels the sweep above quotes, and the cancel moves none of them.
+- **Checked:** 2026-09-24.
 
 ## Rendering runs seven dots behind the mode-3 window (2026-09-21)
 
@@ -1042,6 +1225,15 @@ of a stage's two dots.
   stages did. That is the object fetch's question (groups F and G of the screen
   investigation), not this entry's, and it is recorded here because it is what
   stands between group D and zero.
+  - **Settled the same day, and it was bigger than this entry guessed:** see
+    "An object fetch costs the pixels three dots more than it costs the fetcher
+    and mode 3" below. The wait for the first push is real and is implemented,
+    and with it group D's four sampling ROMs come to 805 pixels where they were
+    2,277 here. The two interact - the object fetch's dots are what moved the
+    stages across the M-cycle grid in this entry's own unit cases - so the
+    figures below supersede the ones here, and the per-stage sweep was run again
+    on top of them: see "Each fetch stage still samples its registers on its
+    first dot once the object fetch's dots are right" below.
 - **Effect:** `screen` 12 / 30 either way and 147 / 165 either way; the `screen`
   group's differing pixels 18,656 -> 15,907. `ppu timing` stays 12 / 12, and
   `m3_bgp_change`, `m3_scx_low_3_bits`, `dmg-acid2` and `m2_win_en_toggle` stay
@@ -1067,12 +1259,19 @@ of a stage's two dots.
   value is used. $FF47-$FF49 always read back the value written.
 - **Effect:** with this and the seven-dot lag above, `m3_bgp_change` matches
   its reference in all 23,040 pixels.
-- **The object half is unconfirmed.** Every measurement above is BGP's.
-  Extending the same one-dot short to OBP0 and OBP1 assumes the three palette
-  registers behave alike; nothing here measures that. `m3_obp0_change`, the
-  test that would show it, still fails (432 differing pixels) for a reason
-  that has not been separated from this one, so the object half is neither
-  confirmed nor refuted.
+- **The object half: what has changed.** Every measurement
+  above was BGP's, and extending the same one-dot short to OBP0 and OBP1 assumed
+  the three palette registers behave alike. `m3_obp0_change`, the test that shows
+  it, failed at 432 differing pixels then, 108 once the window and fetcher work
+  landed, and **0** since the object fetch's dots were split between the fetcher
+  and the pixels (2026-09-24). It writes OBP0 during mode 3 over objects at the
+  left edge of every line, so it exercises the object palette's short on the same
+  dot BGP's is measured on, and the assumption is at least consistent with a
+  hardware photograph now instead of resting on nothing. What has *not* been done
+  is the mutation that would make it a measurement: removing the short from OBP
+  alone and checking that this ROM notices. Until that is run, "confirmed" is too
+  strong - the honest statement is that the test which would have refuted the
+  assumption now passes.
 - **Checked:** 2026-09-21, extended 2026-09-22.
 
 ## Line 0 starts drawing four dots early (2026-09-21)
@@ -1400,6 +1599,16 @@ needed.
   references show it, and the lines that should be untouched shift. So the
   colour-0 pixel contends for the FIFO's single push port exactly as the
   fetcher's own push does.
+  - **Restated on 2026-09-24, same behaviour.** Once the FIFO carries the three
+    pixels an object fetch leaves the fetcher ahead by ("An object fetch costs
+    the pixels three dots more than it costs the fetcher and mode 3" above), it
+    is no longer bare on the dot a row goes in, so "empty" stops naming the dot
+    this bullet measured. The test is now that the queue holds whole rows -
+    `queueSize_ % 8 == 0`, i.e. the pixel it is about to hand over starts a row -
+    which on every line without an object is bit-for-bit the old test and on a
+    line with one keeps `m3_wx_4_change_sprites` exact. The pixel is also
+    inserted in front of the row now rather than written into a queue known to be
+    empty, which is the same insertion this entry measured.
 - **The pixel is a background colour 0, not a shade.** `m3_wx_4_change_sprites`
   runs the same sequence under `BGP = $1B`, where background colour 0 shades to
   3, and its reference shows the pushed pixel as shade 3 on a band that is
@@ -1646,24 +1855,29 @@ kept here because the diagnosis is what the fix was verified against.
 
 ## Screenshot tests still failing once the pixel pipeline was finished (2026-09-21)
 
-**Re-measured from a full run on 2026-09-24, after each fetch stage was pinned
-to the dot that samples its registers.** Eighteen of the thirty tests in the
-`screen` group still fail, and they come to 15,907 differing pixels out of
+**Re-measured from a full run on 2026-09-24, after the object fetch's dots were
+split between the fetcher and the pixels.** Sixteen of the thirty tests in the
+`screen` group still fail, and they come to 11,547 differing pixels out of
 23,040 each. Each is listed with its count, what
-it measures and why it is not fixed. Twelve pass: `acid/dmg-acid2`,
+it measures and why it is not fixed. Fourteen pass: `acid/dmg-acid2`,
 `mooneye/manual-only/sprite_priority`, `daid/stop_instr`, `ashiepaws/bully`,
 and `mealybug-tearoom-tests/ppu/`'s `m2_win_en_toggle`, `m3_bgp_change` (this
-section's own task), `m3_wx_4_change`, `m3_wx_4_change_sprites`,
+section's own task), `m3_bgp_change_sprites`, `m3_obp0_change`,
+`m3_wx_4_change`, `m3_wx_4_change_sprites`,
 `m3_wx_5_change`, `m3_wx_6_change`, `m3_window_timing` and `m3_scx_low_3_bits`.
 Passing tests have no row below; the notes after the table say what each of them
 was and what settled it. For the history of the figures: the group stood at
 47,378 before the mid-line LCDC bit 5 work of 2026-09-24, 40,108 after it,
 33,670 before the colour-0 push work, 32,804 after it, 17,405 after the free
 increments' timing, 18,656 after the five-step fetcher - a rise, explained in
-"The background fetcher is five steps over eight dots" above - and 15,907 now,
-once each of that fetcher's three stages was pinned to its first dot ("Each
-fetch stage samples its registers on its first dot"). Neither of the last two
-moves changed a verdict.
+"The background fetcher is five steps over eight dots" above - 15,907 once each
+of that fetcher's three stages was pinned to its first dot ("Each fetch stage
+samples its registers on its first dot"), and **11,547** now, once an object
+fetch stopped charging the pixels three dots less than Pan Docs' sum and stopped
+happening before the line's warm-up ("An object fetch costs the pixels three dots
+more than it costs the fetcher and mode 3", and "An object fetch waits for the
+pixel it pre-empts"). That last move is the only one of the four that changed a
+verdict, and it changed two.
 
 **What the window still gets wrong is the two mid-line LCDC bit 5 tests.** The
 paragraph that stood here said the window never re-activates mid-line and that
@@ -1684,23 +1898,21 @@ question as the mid-line LCDC, SCX and SCY rows below, and it is what
 
 | test | pixels | why it still fails |
 | --- | --- | --- |
+| `m3_scx_high_5_bits` | 12 | one background tile per affected line takes the wrong SCX; 80, then 86, then 45 once the fetch stages were pinned |
 | `ashiepaws/strikethrough` | 53 | not diagnosed |
+| `m3_lcdc_obj_en_change` | 56 | mid-line LCDC bit 1 changes; 100 before the object fetch's dots |
 | `m3_lcdc_win_en_change_multiple_wx` | 85 | mid-line LCDC bit 5; 5942, then 77, then 69, then 116 under the five-step fetcher |
-| `m3_scx_high_5_bits` | 45 | one background tile per affected line takes the wrong SCX; 80, then 86, then the fetch stages' first dot |
-| `m3_lcdc_obj_en_change` | 100 | mid-line LCDC bit 1 changes |
-| `m3_obp0_change` | 108 | object pixels in the leftmost 18 columns |
+| `m3_lcdc_bg_map_change` | 124 | mid-line LCDC bit 3 changes; 316, 428, then 182 |
 | `m3_window_timing_wx_0` | 126 | one dot, only when SCX % 8 is not 0 (see the residual above) |
-| `m3_lcdc_obj_size_change_scx` | 270 | mid-line LCDC bit 2 changes |
-| `m3_lcdc_bg_map_change` | 182 | mid-line LCDC bit 3 changes; 316, then 428 under the five-step fetcher |
-| `m3_lcdc_obj_size_change` | 410 | mid-line LCDC bit 2 changes; 60 worse under the seven-dot shift, cause unknown (see below) |
+| `m3_lcdc_obj_en_change_variant` | 152 | mid-line LCDC bit 1 changes; 532 before the object fetch's dots |
+| `m3_lcdc_obj_size_change_scx` | 190 | mid-line LCDC bit 2 changes; 270 before it |
+| `m3_scy_change` | 259 | mid-line SCY; 1256, 2542, then 661 |
+| `m3_lcdc_obj_size_change` | 310 | mid-line LCDC bit 2 changes; 350, 410, then this |
+| `m3_lcdc_bg_en_change` | 376 | mid-line LCDC bit 0 changes, which is read at emission and not by a fetch; 855 before the object fetch's dots |
+| `m3_lcdc_tile_sel_change` | 410 | mid-line LCDC bit 4 changes; 688, 1144, then 534 |
 | `m3_lcdc_win_en_change_multiple` | 468 | mid-line LCDC bit 5; 8316, then 5760, then this |
-| `m3_lcdc_obj_en_change_variant` | 532 | mid-line LCDC bit 1 changes |
-| `m3_lcdc_tile_sel_change` | 534 | mid-line LCDC bit 4 changes; 688, then 1144 under the five-step fetcher |
-| `m3_lcdc_bg_en_change` | 855 | mid-line LCDC bit 0 changes |
-| `m3_scy_change` | 661 | mid-line SCY, and an object stalling the line's warm-up; 1256, then 2542 under the five-step fetcher |
-| `m3_lcdc_tile_sel_win_change` | 1336 | mid-line LCDC bit 4 changes, with a window; 1904 before the counter work |
-| `m3_lcdc_win_map_change` | 852 | mid-line LCDC bit 6 changes; 1646 before the counter work, 1448 before the five-step fetcher, 792 before its stages were pinned |
-| `m3_bgp_change_sprites` | 2104 | as `m3_bgp_change`, plus objects |
+| `m3_lcdc_win_map_change` | 724 | mid-line LCDC bit 6 changes; 1646 before the counter work, 1448 before the five-step fetcher, 792, then 852 |
+| `m3_lcdc_tile_sel_win_change` | 1016 | mid-line LCDC bit 4 changes, with a window; 1904 before the counter work, then 1336 |
 | `daid/ppu_scanline_bgp` | 7186 | disagrees with the Mealybug references by 12 dots |
 
 The mid-line LCDC, SCX and SCY entries above are all the same shape: the
@@ -1708,12 +1920,11 @@ register is read live, at the dot the fetcher needs it. Which dot that is **is**
 now pinned - Mealybug's PPU documentation names the stages (TILE_SEL at the two
 bitplane stages, SCY at all three), and each stage reads on the first of its two
 dots; see "Each fetch stage samples its registers on its first dot" above for the
-per-stage measurements, the four unit cases that separate the two dots, and what
-the residual turned out to be. It is not sampling: what is left of these counts
-is one tile per line, and in `m3_scy_change` it traces to an object at OAM X = 8
-whose fetch FourShades takes before the line's warm-up rather than after its
-first push, which moves every read on the line by eight dots. That belongs to the
-object fetch's own cost, which no task has reached yet.
+per-stage measurements and the four unit cases that separate the two dots. Its own
+"what is left in group D" bullet blamed the residual on the object fetch's start
+dot, and that turned out to be right and to be worth more than it guessed: the
+four of these that are pure background fetches came to 2,277 pixels then and come
+to 805 now. What is left of *them* has not been traced to anything.
 
 Notes on the ones that are more than "a behaviour not written yet":
 
@@ -1738,7 +1949,7 @@ Notes on the ones that are more than "a behaviour not written yet":
   tile fetch reads SCX for its map column; see "The fine-scroll discard reads
   SCX at the line's first tile fetch" above. It is no longer a "mid-line SCX
   change inside the fetch" at all.
-- **`m3_scx_high_5_bits` (45).** Only the third background tile of a line
+- **`m3_scx_high_5_bits` (12).** Only the third background tile of a line
   (x = 16-23) is ever wrong, and only on the 28 lines where SCX = LY crosses a
   tile boundary: the SCX write lands within a dot or two of that tile's map
   read. 80 pixels until the five-step fetcher, 86 under it, **45** once the
@@ -1756,13 +1967,22 @@ Notes on the ones that are more than "a behaviour not written yet":
   then back up - and before the window counter work; the group's total today is
   15,907. What decided the first revert was the 5,000-pixel rise, which neither
   power-on change touches either way.
-- **`m3_lcdc_obj_size_change` (410) and `m3_lcdc_obj_size_change_scx`
-  (270).** These two probe the same thing - LCDC bit 2, the object height
+- **`m3_lcdc_obj_size_change` (310) and `m3_lcdc_obj_size_change_scx`
+  (190).** These two probe the same thing - LCDC bit 2, the object height
   bit, written during mode 3 - and the seven-dot rendering lag moved them in
   opposite directions: the plain variant went from 350 differing pixels to
   410, its `_scx` sibling from 350 to 270. **Why is not known.** The count
   rose by 60 under a change that lowered the group as a whole by 22%, and
   nothing here explains the sign.
+  - **Partly answered on 2026-09-24:** LCDC bit 2 was being read when the object
+    fetch was *triggered*, so a write landing inside the fetch could not change
+    the height it used. It is now read on the dot the fetch builds its address,
+    two dots before the pixel it pre-empts, and these are the two ROMs that pin
+    that dot - from either side, by 20 and 40 pixels. See "An object fetch waits
+    for the pixel it pre-empts, and reads its row two dots before it" above.
+    Together with the fetch's dots that takes them to 310 and 190. The 60-pixel
+    divergence between them under the rendering lag is not explained by this and
+    is still not explained.
   - What the diff map does show, comparing the produced frame with the
     reference pixel by pixel: the errors are not spread over the image. They
     sit in two narrow column clusters per 16-line block, each two to five
