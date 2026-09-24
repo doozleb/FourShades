@@ -49,10 +49,13 @@ public:
     int dotsRemaining(const Ppu& ppu) const;
 
     // The dots a window activation forces the fetcher to spend before its
-    // first pixel reaches the queue: stepDot resets the fetcher to its Tile
-    // step and clears the queue when the window triggers, so
+    // first pixel reaches the queue: startWindow resets the fetcher to its
+    // Tile step and clears the queue when the window triggers, so
     // Tile+DataLow+DataHigh (2 dots each, see stepFetcher) run once more
-    // with nothing pushed before Push can run again. dotsRemaining charges
+    // with nothing pushed before Push can run again. One fetch and not two,
+    // whether or not the line's own thrown-away first fetch had finished - see
+    // startWindow - which is what makes this the cost of an activation
+    // anywhere on the line, the free increments included. dotsRemaining charges
     // exactly this much for an activation it sees coming but that has not
     // happened yet, so the two must be kept in agreement if stepDot's
     // restart cost ever changes.
@@ -75,6 +78,32 @@ public:
     // screen x = 0, and a smaller one is matched during the free increments,
     // leaving the window's leftmost pixels off the screen.
     static constexpr int kWindowCounterHeadStart = 7;
+
+    // Where the free increments fall. Pan Docs gives their number but not
+    // their timing, and they are taken one per dot: the counter holds each of
+    // the kWindowCounterHeadStart + 1 values 0 to 7 for one dot and is
+    // compared against WX at each of them.
+    //
+    // An undisturbed line pushes its first tile on the thirteenth dot of
+    // rendering - two six-dot fetches, the first of them thrown away, and then
+    // the Push step, which is also the dot that tile's first pixel leaves the
+    // FIFO (see stepFetcher). The last free increment falls on that dot, which
+    // is what lines a WX of kWindowCounterHeadStart up with screen x = 0, so
+    // value 0 is compared on the sixth dot of rendering and this many dots
+    // pass before the counter is compared at all. Measured: see
+    // docs/known-divergences.md, "The window's X counter is compared once per
+    // dot, against a WX two dots old".
+    static constexpr int kWindowCounterLeadDots = 5;
+
+    // The dots by which the value WX reaches the comparator lags the register.
+    // A Mealybug Tearoom reference fixes it: it rewrites WX four dots before
+    // the line's first pixel, and its photograph shows which counter values
+    // were compared against the old value and which against the new one.
+    // Modelled as a lag on WX rather than on the comparator's result, so that
+    // the counter itself stays Pan Docs' counter, reading
+    // kWindowCounterHeadStart on the dot the first pixel is drawn. Same entry
+    // in docs/known-divergences.md.
+    static constexpr int kWindowCounterWxLag = 2;
 
 private:
     enum class Step { Tile, DataLow, DataHigh, Push };
@@ -114,6 +143,11 @@ private:
     // is swallowed. That is measured, not assumed - see
     // docs/known-divergences.md, "A WX changed while the window is drawing
     // pushes one colour-0 pixel, and only onto an empty FIFO".
+    //
+    // "after the window has started rendering" is taken at its word too, and it
+    // is not the same as "the window is on": a window that has just activated
+    // has an empty FIFO and a fetcher six dots from its first push, and a WX
+    // reached again in those dots pushes nothing. See windowRendering_.
     void pushWindowShiftPixel();
     // Hands the line back to the background if LCDC bit 5 has gone low while
     // the window was drawing. Mealybug Tearoom's PPU notes, quoted in
@@ -135,9 +169,11 @@ private:
     // fetcher keeping its column counter (see fetcherX_), is the second
     // sentence.
     void stopWindowIfDisabled(const Ppu& ppu);
-    // Takes the counter's kWindowCounterHeadStart free increments, testing it
-    // against WX at each of them.
-    void takeWindowHeadStart(Ppu& ppu);
+    // Moves the counter on by one of its free increments, or spends one of the
+    // kWindowCounterLeadDots that come first. Called once per dot of mode 3,
+    // including the dots an object fetch stalls: the free increments are dots,
+    // not pixels. Measured - see the note on the function.
+    void advanceWindowCounter();
     u16 tileRowAddress(const Ppu& ppu) const;
     // Dots the fetcher still owes before its next Push, so dotsRemaining can
     // charge a stall the queue cannot cover. Zero when Push is next, which
@@ -176,8 +212,8 @@ private:
     // tilemap, latched at the step that read it. A clear of LCDC bit 5 that
     // lands after that step leaves a window tile index being addressed with
     // the background's row - the same shape as the bitplane mixing Mealybug's
-    // notes describe for TILE_SEL and SCY - and, more visibly, decides whether
-    // the windowSkip_ clip below has a window tile to apply to.
+    // notes describe for TILE_SEL and SCY - and it also decides whether a push
+    // counts as the window having started rendering (see windowRendering_).
     bool fetchWindow_ = false;
     u8 tileIndex_ = 0;
     u8 tileLow_ = 0;
@@ -186,7 +222,15 @@ private:
     int queueSize_ = 0;
     int queueHead_ = 0;
     int pixelX_ = 0;   // pixels emitted (0-160)
-    int discard_ = 0;  // SCX % 8 pixels dropped at the start of the line
+    // Pixels shifted out of the queue and thrown away before the line's first
+    // pixel: SCX % 8 of them for the fine-scroll adjustment, and, once the
+    // window has been started by one of the counter's free increments, the
+    // kWindowCounterHeadStart - WX of its leftmost pixels that fall off the
+    // left edge. One counter for both, because on the hardware they are the
+    // same pixels: each costs a dot, and neither advances pixelX_ or the
+    // window's X counter. See startWindow, and stepFetcher's Tile step for
+    // where the fine-scroll half of it is read.
+    int discard_ = 0;
     // The fetcher is drawing the window right now. Set when the X counter
     // matches WX and cleared again by stopWindowIfDisabled when LCDC bit 5
     // goes low part-way along the line. It also carries the whole of the
@@ -203,17 +247,35 @@ private:
     // of restarting the window, so a match there is not an activation.
     bool window_ = false;
     // The window's scanline X counter (kWindowCounterHeadStart). It is what
-    // WX is compared against, for equality, on every dot: 0 at the top of the
-    // line, then the free increments, then one per pixel rendered. Every match
+    // WX is compared against, for equality, on every dot from
+    // kWindowCounterLeadDots dots in: 0 at the top of the line, then the
+    // free increments one per dot, then one per pixel rendered. Every match
     // that finds the window not already drawing activates it and advances the
     // window's row, so one line can start the window any number of times.
     int windowX_ = 0;
-    bool windowXHeadStart_ = false; // the free increments have been taken
+    bool windowXHeadStart_ = false; // all the free increments have been taken
+    // Dots still to pass before the counter is compared at all; see
+    // kWindowCounterLeadDots. Until it reaches zero the counter reads 0 and is
+    // not compared, which is what keeps a WX of 0 from being matched on the
+    // line's very first dot.
+    int windowCounterLead_ = 0;
+    // The comparator's view of WX, one entry per dot of kWindowCounterWxLag:
+    // [0] is the value it compares against this dot and the last entry is the
+    // register as of the previous dot. Shifted once per dot, whether or not the
+    // line moves a pixel, because the lag is in dots.
+    std::array<u8, kWindowCounterWxLag> wxPipe_{};
+    // The window has put at least one tile into the queue since it started.
+    // Pan Docs' pixel-FIFO sentence is about a WX changed "after the window has
+    // started rendering", and the six dots between an activation and its first
+    // push are not that: the window is on, the queue is empty, and a WX reached
+    // again there pushes nothing. Cleared by every activation, because each one
+    // empties the queue and sends the fetcher back to its first step.
+    bool windowRendering_ = false;
     // The highest counter value already compared against WX, or -1 if none has
     // been. The comparison runs every dot but the counter does not move every
     // dot: it stands still for the six dots an activation's fetcher restart
-    // takes, for every dot an object fetch stalls, and - all at once, in one dot
-    // - across the whole of its kWindowCounterHeadStart free increments. Pan
+    // takes, for every dot an object fetch stalls, and for every pixel the
+    // discard throws away. Pan
     // Docs' pixel FIFO sentence is about a WX the counter "is reached again",
     // so a value the counter is merely already sitting on is not one: this is
     // what tells the two apart. Only pushWindowShiftPixel reads it, because a
@@ -223,7 +285,6 @@ private:
     // or below kWindowCounterHeadStart would push one for a counter value the
     // free increments had already been through.
     int windowComparedX_ = -1;
-    int windowSkip_ = 0;         // window pixels off the left edge, for WX < 7
     // The window's own line counter as it stood when the window started on
     // this line, cached so every fetch on the line reads the row the window
     // is actually drawing rather than the value left behind once

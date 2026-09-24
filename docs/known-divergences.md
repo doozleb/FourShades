@@ -916,22 +916,20 @@ available here: implement what both say.
 ### What FourShades does with it now
 
 `PixelPipeline` keeps the counter as `windowX_`: zero at `startLine`, then
-`kWindowCounterHeadStart` (7) free increments taken by `takeWindowHeadStart`,
-then one per pixel rendered. WX is compared against it rather than against
-`pixelX_` arithmetic, and a match runs `startWindow`.
+`kWindowCounterHeadStart` (7) free increments taken one per dot by
+`advanceWindowCounter`, then one per pixel rendered. WX is compared against it
+rather than against `pixelX_` arithmetic, and a match runs `startWindow`.
 
 Since 2026-09-24 all four of the WIN_EN passages above **are** modelled: see
 "Clearing LCDC bit 5 part-way along a line stops the window" for the first two
 and "The window can start more than once on a scanline" for the last two.
 
-One thing about the model is deliberately **not** the hardware's yet, and it is
-a named later task, not an oversight:
-
-- The free increments are taken on the dot the SCX discard finishes, not at
-  the top of the line, because this model spends the discard as
-  emitted-and-dropped pixels where the hardware's free increments *are* the
-  discard. That is why `WX = 0` is not yet "shifted left by SCX % 8 pixels",
-  and why `windowSkip_` (see the entry below) still exists.
+Where the free increments fall, and the two dots the comparator lags WX by, are
+measured rather than documented: see "The window's X counter is compared once
+per dot, against a WX two dots old" below. `WX = 0` gets Pan Docs' "shifted
+left by SCX % 8 pixels" out of that, because a match before the line's first
+push leaves the fine-scroll discard still owed when the window's own first tile
+arrives.
 
 - **Checked:** 2026-09-24.
 
@@ -978,21 +976,23 @@ here is one thing those notes do **not** pin, and the measurement.
   background's row. That is the same shape as the mixing Mealybug documents for
   `TILE_SEL` and `SCY`, and it is what "read live, at the dot the fetcher needs
   it" means throughout this pipeline; no reference decoded so far measures it.
-- **The `windowSkip_` clip follows the window tile, not the stop.** A WX below
-  7 leaves 7 - WX window pixels owed to the clip at the fetcher's next push (see
-  the entry below). If the clear of bit 5 arrives before the fetcher reads the
-  tilemap, the tile pushed is a background one and there is no window tile for
-  the clip to belong to, so the clip is dropped rather than taking three pixels
-  out of the background and shifting the rest of the line left by them;
-  `fetchWindow_` is what remembers which map the fetch in flight read. Only the
-  unit suite pins this - no test in the suite reaches it, and the pixel counts
-  below are identical with the clip ungated - but the alternative is a shift
-  caused by a window that drew nothing, which no reading of the notes supports.
+- **A WX below 7 leaves a discard owed, and a stop does not cancel it.** A WX
+  below 7 adds `kWindowCounterHeadStart` - WX pixels to `discard_` when the
+  window starts (see "A WX below 7 pushes the window's leftmost pixels off the
+  screen" below). Until 2026-09-24 those pixels were a separate clip that the
+  fetcher's push dropped, and the clip was cancelled if a cleared bit 5 turned
+  the tile it was owed to into a background one; now they are ordinary
+  discarded pixels and nothing cancels them, so a clear that lands in the six
+  dots between the activation and its push takes them out of the background
+  tile instead. Nothing in either suite reaches that window - the write would
+  have to land inside one particular M-cycle - and no reference measures it, so
+  it is recorded rather than guarded. The reading that would argue for a guard
+  is Mealybug's "when the background resumes drawing it is on a tile boundary".
 - **Effect:** `m3_lcdc_win_en_change_multiple` 8316 differing pixels -> 5760,
-  `m3_lcdc_win_en_change_multiple_wx` 5942 -> 1228. No other test in the suite
-  moved by a pixel, and neither of these two passes yet: both also need the
-  re-activation and the per-activation window row advance. `ppu timing` stays
-  12 / 12, `m3_bgp_change`, `dmg-acid2` and `m2_win_en_toggle` stay exact.
+  `m3_lcdc_win_en_change_multiple_wx` 5942 -> 1228 when this landed; both moved
+  again with the window X counter work of 2026-09-24, to 468 and 69, and
+  neither passes yet. `ppu timing` stays 12 / 12, `m3_bgp_change`, `dmg-acid2`
+  and `m2_win_en_toggle` stay exact.
 - **Checked:** 2026-09-24.
 
 ## The window can start more than once on a scanline, and its row advances at each start (2026-09-24)
@@ -1137,11 +1137,141 @@ needed.
   `screen` group's differing-pixel total went 33670 -> 32804.
 - **Checked:** 2026-09-24.
 
-## `m3_wx_6_change`: diagnosed, and it is the free increments' timing, not WX = 6 (2026-09-24)
+## The window's X counter is compared once per dot, against a WX two dots old (2026-09-24)
 
-This replaces the "it has not been diagnosed" note further down. The ROM is
-still failing; what is new is that its reference has been reproduced exactly on
-paper, so the behaviour it needs is now named.
+Not a divergence: the measurement Pan Docs does not make. Pan Docs says the
+counter "increments 7 times before the first pixel is actually rendered" and
+says nothing about *when* those increments fall, or how fast WX reaches the
+comparator. Three Mealybug Tearoom DMG references between them pin both, and a
+fourth constrains it; all four are photographs of real hardware, so under the
+rule at the top of this file they decide it.
+
+FourShades' dot numbering is used throughout: mode 3 begins on line dot 80,
+`startLine` runs on dot 87 (`kRenderLag`), the first (thrown-away) fetch takes
+dots 88-93, the second 94-99, and the first pixel is emitted on dot 100. A
+register write completing on the M-cycle that ends on dot *d* is visible to the
+PPU from dot *d* + 1.
+
+### The rule
+
+1. **The free increments are one per dot.** The counter holds value *v* on line
+   dot 93 + *v*, so it holds 0 on the sixth dot of rendering and
+   `kWindowCounterHeadStart` (7) on dot 100 - the dot of the line's first push,
+   which is what lines a WX of 7 up with screen x = 0. The
+   `kWindowCounterLeadDots` (5) dots before that are not compared at all.
+2. **The comparator sees WX `kWindowCounterWxLag` (2) dots late.** So the
+   comparison made on dot 93 + *v* is against WX as it stood on dot 91 + *v*.
+3. **A match acts on the dot it is made**, pre-empting the pixel the pipeline
+   was about to move, which costs the ordinary `kWindowRestartDots` (6) dots.
+   For a match during the free increments that pixel is the first push, so the
+   window's own first tile is pushed on dot 99 + *v*.
+4. **The `kWindowCounterHeadStart` - WX free increments left over after a match
+   are discarded pixels**, one dot each, in the same `discard_` counter the SCX
+   fine scroll uses. That is what makes 1 and 3 add up: a match that comes *n*
+   dots early has exactly *n* pixels to throw away, so the line's first pixel
+   lands on dot 106 for **every** WX from 0 to 7 - six dots later than a plain
+   line's, the same six a mid-line activation costs.
+5. **The window's restart is one fetch, not two.** The thrown-away first fetch
+   belongs to the line; a window that restarts part-way through it does not owe
+   it again. Without this, point 3 would not hold for a match on dots 93-95.
+
+### The evidence, reference by reference
+
+- **`m3_window_timing`** writes WX = LY at dot 88 of each line and cuts a band
+  out of the line by setting BGP = 0 at dot 96 and back at dot 108, so the
+  number of dark pixels at the left of each line is the count of pixels emitted
+  on dots 98-108. Its reference reads **3, 3 ... 3** for WX = 0 to 10, then
+  **4, 5, 6, 7, 8** for WX = 11 to 15, then **9** from WX = 16 on. The flat run
+  of 3 is point 4: the first pixel is on dot 106 for every WX at or below 7. The
+  WX = 8 and WX = 9 rows pin the restart at exactly six dots - five or seven
+  give 4 or 2 there - which is point 3. The saturation at 9 pins the first pixel
+  of an undisturbed line to dot 100.
+- **`m3_wx_6_change`** writes WX = 6 during mode 2, WX = LY at dot 96 and
+  WX = 80 at dot 192, with WY = 4. Its reference has no window on lines 4 and 5,
+  the window from line 6 with its left edge at LY - 7, and no window from line
+  102 - read off its own decoded tilemaps, one line at a time. Lines 4, 5 and 6
+  pin point 2 exactly: the comparison that could have matched 5 must still see
+  the old WX and the one that could have matched 6 must already see the new one,
+  which with one comparison per dot leaves no freedom. Line 101 pins it from the
+  other end: the counter reaches 101 on dot 194 and the third write is visible
+  from dot 193, so a one-dot lag would lose that line's window and a three-dot
+  lag would give line 102 one.
+- **`m3_wx_4_change_sprites`** puts an object at screen x = 0, which is fetched
+  before the fetcher's first step and stalls eight dots there. Its reference
+  still shows the window starting where the mode-2 WX says, so the free
+  increments are **dots, not pixels**: they carry on through a stall. Holding
+  them back with the fetcher lets the mode-3 write overtake them and moves the
+  window a tile and a half right.
+- **`m3_window_timing_wx_0`** is the same band trick with WX = 0 and SCX swept
+  from 0 to 7 line by line. Its reference gives **11, 9, 8, 7, 6, 5, 4, 3** for
+  SCX % 8 = 0 to 7. The rule gives 11, 10, 9, 8, 7, 6, 5, 4: **exact at
+  SCX % 8 = 0 and one pixel out for the other seven values.** See the residual
+  below.
+
+### The residual, stated plainly
+
+`m3_window_timing_wx_0` needs the line's first pixel one dot later than this
+rule puts it whenever SCX % 8 is not zero: dot 106 at SCX % 8 = 0 and
+dot 107 + SCX % 8 otherwise, against the rule's 106 + SCX % 8. One extra dot,
+appearing only when a fine-scroll discard is still owed at the activation. It is
+**not** a different restart cost and **not** a different comparison dot - both
+of those are pinned to the dot by the other three references, and moving either
+breaks them - and no mechanism in the model produces it:
+
+- the activation for WX = 0 falls on dot 93 whatever SCX is, so the restart
+  cannot depend on SCX;
+- the fetcher has two dots of slack per tile, so crossing into the window's
+  second tile - which is what SCX % 8 >= 1 makes the discard do - costs nothing;
+- a discard of SCX % 8 + 1 pixels, or a seven-dot restart, fits these lines and
+  breaks `m3_window_timing`'s flat run of 3 at SCX = 0.
+
+So it is left failing, at **126 pixels** - one per line on seven of every eight
+lines - rather than closed with a rule that has no mechanism and no second
+reference behind it. Anyone picking it up should start by asking whether a
+window activation that lands before the line's first push can leave the
+fine-scroll discard unadvanced for one dot; that is the shape the numbers have.
+
+### Files
+
+`PixelPipeline::kWindowCounterLeadDots`, `kWindowCounterWxLag`,
+`advanceWindowCounter`, `wxPipe_`, `windowCounterLead_` and `startWindow`'s
+`discard_` arithmetic. `windowSkip_` is gone; see the entry below.
+
+- **Checked:** 2026-09-24.
+
+## The fine-scroll discard reads SCX at the line's first tile fetch (2026-09-24)
+
+Not a divergence: another measurement Pan Docs does not make. The SCX % 8
+fine-scroll discard has to read SCX at *some* dot, and FourShades read it when
+`startLine` ran (line dot 87). One M-cycle later - at the dot the line's first
+tile fetch reads SCX for its map column, dot 89 - is what two Mealybug Tearoom
+references show, and it is the same read: one SCX sample serves both the column
+and the fine scroll.
+
+- **`m3_scx_low_3_bits`** sweeps the dot it rewrites SCX on. Over its first 71
+  lines the write lands on dot 92, after both candidates, and either answer
+  agrees with the reference; from line 72 it lands on dot 88, between them, and
+  the reference follows the **new** value. Reading SCX when `startLine` runs
+  puts four to six pixels of each of those lines in the wrong place: **324
+  differing pixels to 0**, and the ROM passes.
+- **`m3_window_timing_wx_0`** agrees from the other side. It rewrites SCX on
+  dot 88 of every line, stepping it by one, so the two candidates differ on
+  every line; the line where SCX goes from 7 to 0 is seven pixels out under the
+  old read and exact under this one. **584 to 126** over the whole task, of
+  which this read accounts for 371 to 126.
+
+Nothing else in either suite writes SCX inside that M-cycle, so nothing else
+moved. `m3_scx_high_5_bits` (80 pixels) and `m3_scy_change` (1256) are a
+different question - which dot of which fetch stage reads what - and are
+untouched.
+
+- **Checked:** 2026-09-24.
+
+## `m3_wx_6_change`: solved, and it was the free increments' timing, not WX = 6 (2026-09-24)
+
+This replaces the "it has not been diagnosed" note further down. **The ROM now
+passes**: it was diagnosed on paper first and then fixed, and both halves are
+kept here because the diagnosis is what the fix was verified against.
 
 - **What the ROM does.** Identical to `m3_wx_4_change` and `m3_wx_5_change`
   except for one constant: its mode-2 handler writes WX = 6 (line dot 52,
@@ -1166,31 +1296,25 @@ paper, so the behaviour it needs is now named.
   and must not compare 6 until after it. On line 6, where the second write
   leaves WX at 6, the comparison then matches and the window starts; on lines 4
   and 5 WX has been moved behind the counter first, so it never does.
-- **What FourShades does instead.** `takeWindowHeadStart` takes all seven free
-  increments, and all eight comparisons, **within one dot** - the first dot of
-  the pipeline, line dot 88. Every value from 0 to 7 is therefore compared
-  before dot 96, so WX = 6 activates the window on lines 4 and 5 too, and the
-  frame is wrong from line 4 down. That placement is already recorded as
-  deliberately not the hardware's in "The window's scanline X counter, and the
-  evidence for it, quoted"; this ROM is the measurement of what it costs.
-- **The constraint it puts on the fix**, for whoever spreads the increments: the
-  counter must have compared 5 at or before the dot the write lands (just after
-  line dot 96) and must not compare 6 until after it. With one comparison per
-  dot that puts value *v* on line dot 91 + *v*, against a first pixel emitted on
-  dot 100. `m3_window_timing` and `m3_window_timing_wx_0`, which measure the
-  window start-up cost for every WX from 0 to 10, are the other half of the
-  evidence and must be satisfied by the same spread.
-- **A second interaction to expect when it is fixed.** Once the increments are
-  spread, `m3_wx_5_change`'s line 6 becomes a WX moved from 5 to 6 while the
+- **What FourShades used to do.** All seven free increments, and all eight
+  comparisons, **within one dot** - the first dot of the pipeline, line dot 88.
+  Every value from 0 to 7 was therefore compared before dot 96, so WX = 6
+  activated the window on lines 4 and 5 too and the frame was wrong from line 4
+  down: 13,810 differing pixels.
+- **How it was fixed.** The increments were spread one per dot and the
+  comparator given its two-dot lag on WX - see "The window's X counter is
+  compared once per dot, against a WX two dots old" above, which this ROM is
+  half the evidence for. Line 5 and line 6 fix the lag from one side and line
+  101 from the other; nothing about this ROM was special-cased.
+- **The interaction it predicted, and what came of it.** Spreading the
+  increments makes `m3_wx_5_change`'s line 6 a WX moved from 5 to 6 while the
   counter still sits inside its free increments and the window has just
-  activated, which is a colour-0 push before the line's first pixel. That
-  reference passes exactly today, so it is the test to watch.
-- **Effect of this task on it:** 13799 -> 13810. The extra 11 pixels are one
-  each on lines 14, 22, 30 ... 94 - the lines whose insertion point, LY - 7,
-  lands on a tile boundary of a window that should not be drawing at all - so
-  they are a downstream consequence of the activation above, not a second
-  fault. They are left rather than suppressed, because suppressing them would
-  mean special-casing a rule the other three references pin.
+  activated - a colour-0 push before the line's first pixel. Its reference shows
+  the plain WX = 5 picture there, which is Pan Docs' "after the window has
+  started rendering" taken at its word: the window is on, but nothing of it has
+  reached the FIFO yet, so nothing is pushed. `PixelPipeline::windowRendering_`
+  is that condition, and `m3_wx_5_change` still passes exactly.
+- **Effect:** 13,810 differing pixels -> **0, passing**.
 - **Checked:** 2026-09-24.
 
 ## A WX below 7 pushes the window's leftmost pixels off the screen (2026-09-21)
@@ -1202,91 +1326,78 @@ paper, so the behaviour it needs is now named.
 - **Pan Docs, [LCD Position and Scrolling](https://gbdev.io/pandocs/Scrolling.html):**
   WX "is the window's leftmost pixel's X position, plus 7", and WX values 0
   and 166 are called unreliable. It does not say what WX = 1-6 draws.
-- **FourShades:** `PixelPipeline::startWindow` sets `windowSkip_` to 7 - WX
-  when the window starts, and the fetcher's push drops that many pixels off the
-  front of the tile it has just fetched. Since 2026-09-24 that count is the
-  window's X counter's free increments left over after the match, rather than
-  arithmetic of its own; see the entry above.
-- **What the clipped pixels cost in dots is not evidenced: the placement was
-  chosen by group total.** The clipping itself is pinned by the two
-  references above and stays. Its dot cost is a different question, and the
-  test that would arbitrate it is `m3_window_timing`, which sets WX to LY on
-  lines 0-9 - and FourShades gets lines 0-8 of that test, precisely the lines
-  where WX is below 7, wrong. Both placements were built and measured:
-  dropping the clipped pixels at the output, which costs a dot each, leaves
-  `m3_window_timing` differing in 24 pixels and `m3_window_timing_wx_0` in
-  692; dropping them at the push, which costs none, leaves 28 and 584.
-  Neither reproduces the constant the reference shows (see the
-  `m3_window_timing` note further down). The free version shipped because
-  the group total is lower with it, which is a tuning decision, not a
-  measurement, and is recorded here as one.
-- **Effect:** `m3_wx_4_change` 10138 differing pixels -> 229,
-  `m3_wx_5_change` 9521 -> 638. `m3_wx_6_change` is not a shift at all (see
-  below) and went 13281 -> 13799.
-- **Checked:** 2026-09-21.
+- **FourShades:** the count is the window's X counter's free increments left
+  over after the match - `kWindowCounterHeadStart` - WX of them - and since
+  2026-09-24 they are *discarded pixels*, added to the same `discard_` counter
+  the SCX fine scroll uses and costing a dot each. `windowSkip_`, which dropped
+  them at the push for no dots, is **gone**.
+- **What they cost in dots is now evidenced.** This entry used to say the dot
+  cost was picked by group total, with a dot each leaving `m3_window_timing`
+  differing in 24 pixels and `m3_window_timing_wx_0` in 692, and free leaving 28
+  and 584 - neither reproducing the constant the reference shows. Both figures
+  were measured against free increments taken all in one dot, which was the
+  actual fault: spread one per dot, a dot each is the only answer that makes
+  `m3_window_timing`'s flat run come out, and it does so exactly. See "The
+  window's X counter is compared once per dot, against a WX two dots old"
+  above for the derivation and for what a dot each buys.
+- **Effect:** `m3_wx_4_change` 10138 differing pixels -> 229 (2026-09-21) -> 0,
+  `m3_wx_5_change` 9521 -> 638 -> 0, both passing since 2026-09-24;
+  `m3_window_timing` 28 -> 0; `m3_wx_6_change`, which is not a shift at all,
+  13281 -> 13799 -> 0.
+- **Checked:** 2026-09-24.
 
 ## Screenshot tests still failing once the pixel pipeline was finished (2026-09-21)
 
-Twenty-four of the thirty tests in the `screen` group still fail. Each is
-listed with the number of the 23,040 pixels that differ, what it measures and
-why it is not fixed. Six pass: `acid/dmg-acid2`,
-`mooneye/manual-only/sprite_priority`,
-`mealybug-tearoom-tests/ppu/m2_win_en_toggle`,
-`mealybug-tearoom-tests/ppu/m3_bgp_change` (this section's own task) and two
-that the power-on and OAM DMA work of 2026-09-24 took from failing to exact,
-`daid/stop_instr` and `ashiepaws/bully`. Those two no longer have rows in the
-table below; the notes after it say what each was and what settled it. Every
-count here was re-measured on 2026-09-24 from a full run, and the twenty-four
-below come to 40,108 differing pixels. (They came to 47,378 until the mid-line
-LCDC bit 5 work of 2026-09-24; the two rows it moved carry their old figures
-alongside the new ones.)
+**Re-measured from a full run on 2026-09-24, after the window X counter work.**
+Eighteen of the thirty tests in the `screen` group still fail, and they come to
+17,405 differing pixels out of 23,040 each. Each is listed with its count, what
+it measures and why it is not fixed. Twelve pass: `acid/dmg-acid2`,
+`mooneye/manual-only/sprite_priority`, `daid/stop_instr`, `ashiepaws/bully`,
+and `mealybug-tearoom-tests/ppu/`'s `m2_win_en_toggle`, `m3_bgp_change` (this
+section's own task), `m3_wx_4_change`, `m3_wx_4_change_sprites`,
+`m3_wx_5_change`, `m3_wx_6_change`, `m3_window_timing` and `m3_scx_low_3_bits`.
+Passing tests have no row below; the notes after the table say what each of them
+was and what settled it. For the history of the figures: the group stood at
+47,378 before the mid-line LCDC bit 5 work of 2026-09-24, 40,108 after it,
+33,670 before the colour-0 push work, 32,804 after it, and 17,405 now.
 
-**The window re-activates mid-line, and FourShades still does not** - the
-single largest unmodelled behaviour left, and the cause of five of the entries
-below. Stopping the window mid-line landed on 2026-09-24; starting it again has
-not.
-Mealybug's own
+**What the window still gets wrong is the two mid-line LCDC bit 5 tests.** The
+paragraph that stood here said the window never re-activates mid-line and that
+this was the largest unmodelled behaviour left; both halves of that were
+overtaken on 2026-09-24. Mealybug's own
 [PPU documentation](https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md)
-states it for LCDC bit 5: disabling the window during mode 3 takes effect at
-the end of the window tile being drawn, the background then resumes on a tile
+states the rule for LCDC bit 5: disabling the window during mode 3 takes effect
+at the end of the window tile being drawn, the background then resumes on a tile
 boundary with SCX's low bits ignored, and re-enabling it has no effect unless
 WX has been moved to a pixel not yet drawn - in which case the window starts
-again *on the next window row*, on the same scanline. `m3_wx_4_change`'s own
-comment shows the same thing happens for a WX write alone, with a "window
-reactivation zero pixel" appearing when the re-activation dot coincides with
-the window's tile-map read. Since 2026-09-24 FourShades does the *stopping*
-part - see "Clearing LCDC bit 5 part-way along a line stops the window" above -
-but still activates the window at most once per line, so the re-activation and
-the window row advance that comes with it are what is left. This is the same
-behaviour the older "window line counter" note below records for
-`m3_lcdc_win_en_change_multiple`.
+again *on the next window row*, on the same scanline. All four of those
+sentences are implemented: see "Clearing LCDC bit 5 part-way along a line stops
+the window" and "The window can start more than once on a scanline" above. What
+is left is where inside a fetch a bit 5 write lands, which is the same open
+question as the mid-line LCDC, SCX and SCY rows below, and it is what
+`m3_lcdc_win_en_change_multiple` (468) and `m3_lcdc_win_en_change_multiple_wx`
+(69) still measure - down from 8,316 and 5,942.
 
 | test | pixels | why it still fails |
 | --- | --- | --- |
-| `m3_wx_4_change_sprites` | 10 | window re-activation: one zero pixel per affected line |
-| `m3_window_timing` | 28 | the WX < 7 window start costs the wrong number of dots |
 | `ashiepaws/strikethrough` | 53 | not diagnosed |
+| `m3_lcdc_win_en_change_multiple_wx` | 69 | mid-line LCDC bit 5; 5942, then 77, then this |
 | `m3_scx_high_5_bits` | 80 | one background tile per affected line takes the wrong SCX |
 | `m3_lcdc_obj_en_change` | 100 | mid-line LCDC bit 1 changes |
 | `m3_obp0_change` | 108 | object pixels in the leftmost 18 columns |
-| `m3_wx_4_change` | 229 | window re-activation |
+| `m3_window_timing_wx_0` | 126 | one dot, only when SCX % 8 is not 0 (see the residual above) |
 | `m3_lcdc_obj_size_change_scx` | 270 | mid-line LCDC bit 2 changes |
 | `m3_lcdc_bg_map_change` | 316 | mid-line LCDC bit 3 changes |
-| `m3_scx_low_3_bits` | 324 | mid-line SCX changes inside the fetch |
 | `m3_lcdc_obj_size_change` | 410 | mid-line LCDC bit 2 changes; 60 worse under the seven-dot shift, cause unknown (see below) |
+| `m3_lcdc_win_en_change_multiple` | 468 | mid-line LCDC bit 5; 8316, then 5760, then this |
 | `m3_lcdc_obj_en_change_variant` | 532 | mid-line LCDC bit 1 changes |
-| `m3_window_timing_wx_0` | 584 | the WX < 7 window start costs the wrong number of dots |
-| `m3_wx_5_change` | 638 | window re-activation |
 | `m3_lcdc_tile_sel_change` | 688 | mid-line LCDC bit 4 changes |
 | `m3_lcdc_bg_en_change` | 855 | mid-line LCDC bit 0 changes |
-| `m3_lcdc_win_en_change_multiple_wx` | 1228 | window re-activation (LCDC bit 5); 5942 before the mid-line disable landed |
 | `m3_scy_change` | 1256 | mid-line SCY changes inside the fetch |
-| `m3_lcdc_win_map_change` | 1646 | mid-line LCDC bit 6 changes |
-| `m3_lcdc_tile_sel_win_change` | 1904 | mid-line LCDC bit 4 changes, with a window |
+| `m3_lcdc_tile_sel_win_change` | 1336 | mid-line LCDC bit 4 changes, with a window; 1904 before the counter work |
+| `m3_lcdc_win_map_change` | 1448 | mid-line LCDC bit 6 changes; 1646 before the counter work |
 | `m3_bgp_change_sprites` | 2104 | as `m3_bgp_change`, plus objects |
-| `m3_lcdc_win_en_change_multiple` | 5760 | window re-activation (LCDC bit 5); 8316 before the mid-line disable landed |
 | `daid/ppu_scanline_bgp` | 7186 | disagrees with the Mealybug references by 12 dots |
-| `m3_wx_6_change` | 13799 | WX = 6 is not a one-pixel shift of WX = 7 |
 
 The mid-line LCDC, SCX and SCY entries above are all the same shape: the
 register is read live, at the dot the fetcher needs it, but which of a fetch's
@@ -1299,33 +1410,27 @@ wrong. They are left failing rather than tuned by trial.
 
 Notes on the ones that are more than "a behaviour not written yet":
 
-- **`m3_window_timing` (28) and `m3_window_timing_wx_0` (584).** These set WX
-  to LY on lines 0-9 and change BGP during the window's six-dot start-up
-  fetch, so the number of pale pixels at the left of each line measures the
-  dot the window starts on. The reference gives the same three pixels for
-  every WX from 0 to 10 and then grows by one per line from WX = 11: the
-  window start costs six dots wherever it happens, and a WX below 7 neither
-  delays nor advances it. FourShades gets lines 9 upwards right and lines 0-8
-  wrong, by between one and six pixels: when the window triggers on the first
-  dot of the pipeline the fetcher has not yet done anything, so the restart
-  costs nothing instead of six dots, and the clipped pixels leave the FIFO
-  short enough to stall the refill. Two placements of the clipping were
-  measured - dropping the pixels at the output, which costs a dot each (24 and
-  692 differing pixels), and dropping them at the push, which costs none (28
-  and 584) - and neither reproduces a constant six. The evidence points at the
-  window comparison running against a pixel counter that has not started
-  counting at the top of mode 3, which FourShades does not model.
-- **`m3_wx_6_change` (13799).** Not the same shape as WX = 4 and WX = 5. Its
-  reference draws the window two rows behind and two pixels right of where
+- **`m3_window_timing` (28 -> 0) and `m3_window_timing_wx_0` (584 -> 126).**
+  These set WX to LY, or SCX to LY, and cut a band out of the line with BGP, so
+  the number of dark pixels at the left of each line measures the dot the
+  line's first pixel is drawn on. Both were wrong because the counter's free
+  increments were all taken in one dot; both are covered by "The window's X
+  counter is compared once per dot, against a WX two dots old" above, which
+  also states what is left of `m3_window_timing_wx_0` and why it was not
+  closed.
+- **`m3_wx_6_change` (13799 -> 0).** Not the same shape as WX = 4 and WX = 5.
+  Its reference draws the window two rows behind and two pixels right of where
   WX = 5's does, and shows the background on lines the window covers in the
   WX = 5 image. Since the three ROMs differ only in that one constant, WX = 6
-  is doing something else on hardware. **Diagnosed on 2026-09-24:** it is the
-  dots the window X counter's free increments are spread over, and the
-  reference has been reproduced exactly on paper - see the entry
-  "`m3_wx_6_change`: diagnosed, and it is the free increments' timing, not
-  WX = 6" above. The WX clipping above made it 518 pixels worse, which is not
-  evidence against the clipping - the WX = 4 and WX = 5 references pin that -
-  only a sign that whatever WX = 6 does is not a clip.
+  was doing something else on hardware. **Diagnosed and then fixed on
+  2026-09-24:** it was the dots the window X counter's free increments are
+  spread over - see "`m3_wx_6_change`: solved, and it was the free increments'
+  timing, not WX = 6" above.
+- **`m3_scx_low_3_bits` (324 -> 0).** Solved on 2026-09-24 by moving the
+  fine-scroll discard's SCX read one M-cycle later, to the dot the line's first
+  tile fetch reads SCX for its map column; see "The fine-scroll discard reads
+  SCX at the line's first tile fetch" above. It is no longer a "mid-line SCX
+  change inside the fetch" at all.
 - **`m3_scx_high_5_bits` (80).** Only the third background tile of a line
   (x = 16-23) is ever wrong, and only on the 28 lines where SCX = LY crosses a
   tile boundary: the SCX write lands within a dot or two of that tile's map

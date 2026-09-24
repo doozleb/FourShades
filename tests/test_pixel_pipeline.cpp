@@ -616,22 +616,22 @@ TEST_CASE("characterisation: the window's picture and mode-3 length for a spread
         {0, 1, 180,
          "23321001233210012332100123321001233210012332100123321001233210012332100123321001"
          "23321001233210012332100123321001233210012332100123321001233210012332100123321001"},
-        {0, 2, 176,
+        {0, 2, 180,
          "12332100123321001233210012332100123321001233210012332100123321001233210012332100"
          "12332100123321001233210012332100123321001233210012332100123321001233210012332100"},
-        {0, 3, 176,
+        {0, 3, 180,
          "01233210012332100123321001233210012332100123321001233210012332100123321001233210"
          "01233210012332100123321001233210012332100123321001233210012332100123321001233210"},
-        {0, 4, 176,
+        {0, 4, 180,
          "00123321001233210012332100123321001233210012332100123321001233210012332100123321"
          "00123321001233210012332100123321001233210012332100123321001233210012332100123321"},
-        {0, 5, 176,
+        {0, 5, 180,
          "10012332100123321001233210012332100123321001233210012332100123321001233210012332"
          "10012332100123321001233210012332100123321001233210012332100123321001233210012332"},
-        {0, 6, 172,
+        {0, 6, 180,
          "21001233210012332100123321001233210012332100123321001233210012332100123321001233"
          "21001233210012332100123321001233210012332100123321001233210012332100123321001233"},
-        {0, 7, 172,
+        {0, 7, 180,
          "32100123321001233210012332100123321001233210012332100123321001233210012332100123"
          "32100123321001233210012332100123321001233210012332100123321001233210012332100123"},
         {0, 8, 180,
@@ -658,45 +658,45 @@ TEST_CASE("characterisation: the window's picture and mode-3 length for a spread
         {0, 255, 172,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
-        {1, 0, 188,
-         "33210012332100123321001233210012332100123321001233210012332100123321001233210012"
-         "33210012332100123321001233210012332100123321001233210012332100123321001233210012"},
-        {1, 6, 180,
-         "21001233210012332100123321001233210012332100123321001233210012332100123321001233"
-         "21001233210012332100123321001233210012332100123321001233210012332100123321001233"},
-        {1, 7, 180,
+        {1, 0, 180,
          "32100123321001233210012332100123321001233210012332100123321001233210012332100123"
          "32100123321001233210012332100123321001233210012332100123321001233210012332100123"},
+        {1, 6, 180,
+         "10012332100123321001233210012332100123321001233210012332100123321001233210012332"
+         "10012332100123321001233210012332100123321001233210012332100123321001233210012332"},
+        {1, 7, 180,
+         "21001233210012332100123321001233210012332100123321001233210012332100123321001233"
+         "21001233210012332100123321001233210012332100123321001233210012332100123321001233"},
         {1, 8, 180,
          "13210012332100123321001233210012332100123321001233210012332100123321001233210012"
          "33210012332100123321001233210012332100123321001233210012332100123321001233210012"},
         {1, 166, 180,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
          "11111111111111111111111111111111111111111111111111111111111111111111111111111113"},
-        {5, 0, 192,
-         "33210012332100123321001233210012332100123321001233210012332100123321001233210012"
-         "33210012332100123321001233210012332100123321001233210012332100123321001233210012"},
+        {5, 0, 184,
+         "01233210012332100123321001233210012332100123321001233210012332100123321001233210"
+         "01233210012332100123321001233210012332100123321001233210012332100123321001233210"},
         {5, 6, 184,
-         "21001233210012332100123321001233210012332100123321001233210012332100123321001233"
-         "21001233210012332100123321001233210012332100123321001233210012332100123321001233"},
+         "23321001233210012332100123321001233210012332100123321001233210012332100123321001"
+         "23321001233210012332100123321001233210012332100123321001233210012332100123321001"},
         {5, 7, 184,
-         "32100123321001233210012332100123321001233210012332100123321001233210012332100123"
-         "32100123321001233210012332100123321001233210012332100123321001233210012332100123"},
+         "12332100123321001233210012332100123321001233210012332100123321001233210012332100"
+         "12332100123321001233210012332100123321001233210012332100123321001233210012332100"},
         {5, 8, 184,
          "13210012332100123321001233210012332100123321001233210012332100123321001233210012"
          "33210012332100123321001233210012332100123321001233210012332100123321001233210012"},
         {5, 166, 184,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
          "11111111111111111111111111111111111111111111111111111111111111111111111111111113"},
-        {7, 0, 192,
-         "33210012332100123321001233210012332100123321001233210012332100123321001233210012"
-         "33210012332100123321001233210012332100123321001233210012332100123321001233210012"},
+        {7, 0, 188,
+         "23321001233210012332100123321001233210012332100123321001233210012332100123321001"
+         "23321001233210012332100123321001233210012332100123321001233210012332100123321001"},
         {7, 6, 188,
-         "21001233210012332100123321001233210012332100123321001233210012332100123321001233"
-         "21001233210012332100123321001233210012332100123321001233210012332100123321001233"},
-        {7, 7, 188,
          "32100123321001233210012332100123321001233210012332100123321001233210012332100123"
          "32100123321001233210012332100123321001233210012332100123321001233210012332100123"},
+        {7, 7, 188,
+         "33210012332100123321001233210012332100123321001233210012332100123321001233210012"
+         "33210012332100123321001233210012332100123321001233210012332100123321001233210012"},
         {7, 8, 188,
          "13210012332100123321001233210012332100123321001233210012332100123321001233210012"
          "33210012332100123321001233210012332100123321001233210012332100123321001233210012"},
@@ -840,16 +840,16 @@ TEST_CASE("characterisation: four consecutive lines of window, and the row each 
         {0, 3, 180,
          "11010010110100101101001011010010110100101101001011010010110100101101001011010010"
          "11010010110100101101001011010010110100101101001011010010110100101101001011010010"},
-        {4, 0, 176,
+        {4, 0, 180,
          "00123321001233210012332100123321001233210012332100123321001233210012332100123321"
          "00123321001233210012332100123321001233210012332100123321001233210012332100123321"},
-        {4, 1, 176,
+        {4, 1, 180,
          "00101101001011010010110100101101001011010010110100101101001011010010110100101101"
          "00101101001011010010110100101101001011010010110100101101001011010010110100101101"},
-        {4, 2, 176,
+        {4, 2, 180,
          "00123321001233210012332100123321001233210012332100123321001233210012332100123321"
          "00123321001233210012332100123321001233210012332100123321001233210012332100123321"},
-        {4, 3, 176,
+        {4, 3, 180,
          "00101101001011010010110100101101001011010010110100101101001011010010110100101101"
          "00101101001011010010110100101101001011010010110100101101001011010010110100101101"},
         {39, 0, 180,
@@ -1287,4 +1287,165 @@ TEST_CASE("an activation does not push a colour-0 pixel of its own on the dots t
     const CharLine got = characteriseWrites(ppu, {});
     CHECK(got.pixels.substr(0, 8) == kEvenWindowRow);
     CHECK(got.pixels.substr(152, 8) == kEvenWindowRow);
+}
+
+// ---------------------------------------------------------------------------
+// The counter's free increments, one per dot
+//
+// Pan Docs gives the counter seven free increments before the first pixel but
+// not when they fall, and taking them all in one dot is what "A WX below 7
+// pushes the window's leftmost pixels off the screen" in
+// docs/known-divergences.md was working around. Two Mealybug Tearoom
+// references measure where they fall, both of them by cutting a band out of a
+// line with BGP and reading the width of the band off the photograph:
+//
+//   - m3_window_timing writes WX = LY every line. Its DMG reference puts the
+//     line's first pixel six dots later than a plain line's for every WX from
+//     0 to 10 alike, and one dot less late for each of WX = 11 to 15: the same
+//     six-dot restart wherever the match lands, measured from the pixel the
+//     match pre-empts.
+//   - m3_wx_6_change writes WX = 6 during mode 2 and WX = LY four dots before
+//     the first pixel. Its reference shows no window at all on lines 4 and 5,
+//     the window from line 6 with its left edge at LY - 7, and no window from
+//     line 102 - which pins the comparison against WX two dots behind the
+//     counter.
+//
+// See docs/known-divergences.md, "The window's X counter is compared once per
+// dot, against a WX two dots old", for the full derivation.
+namespace {
+// The picture a window whose first `skip` pixels are off the left edge draws
+// from screen x = 0: its row, tiled, rotated left by that many pixels.
+std::string clippedWindowLine(const char* windowRow, int skip) {
+    std::string out;
+    while (out.size() < 160 + 16) { out += windowRow; }
+    return out.substr(static_cast<std::size_t>(skip), 160);
+}
+} // namespace
+
+TEST_CASE("the free increments are spread one per dot, so every WX below 8 costs the same six dots") {
+    // Spread one per dot, the counter reaches WX = 0 nine dots before it
+    // reaches WX = 7 - and the window's first tile therefore arrives nine dots
+    // earlier too, with nine more of its pixels to throw off the left edge.
+    // The two cancel: m3_window_timing's reference puts the first pixel of all
+    // eight lines in the same place, six dots after a plain line's.
+    for (u8 wx = 0; wx <= 7; ++wx) {
+        Ppu ppu;
+        setUpWindowRuler(ppu, 0xF1, 0x00, wx, 0x00);
+        const CharLine got = characterise(ppu);
+        // 172 + 6 = 178 raw dots, sampled in whole M-cycles as 180 - exactly
+        // what a mid-line activation costs ("starting the window lengthens
+        // mode 3 by six dots" above).
+        CHECK_MESSAGE(got.dots == 180, "WX ", wx);
+        CHECK_MESSAGE(got.pixels == clippedWindowLine(kEvenWindowRow, 7 - wx), "WX ", wx);
+    }
+}
+
+TEST_CASE("WX = 0 is matched before the fine scroll, so the window is shifted left by SCX % 8") {
+    // Pan Docs, "Window behavior": "If WX is equal to 0, the Window is
+    // switched to before the initial 'fine scroll' adjustment, causing it to be
+    // shifted left by SCX % 8 pixels." Spread one per dot, the counter reaches
+    // 0 long before the line's first push, so the SCX discard is still owed
+    // when the window's own tile arrives and is spent on it - which is that
+    // sentence, and which taking the free increments after the discard had
+    // drained could not produce.
+    for (u8 scx = 0; scx <= 7; ++scx) {
+        Ppu ppu;
+        setUpWindowRuler(ppu, 0xF1, scx, 0x00, 0x00);
+        const CharLine got = characterise(ppu);
+        CHECK_MESSAGE(got.pixels == clippedWindowLine(kEvenWindowRow, 7 + scx), "SCX ", scx);
+    }
+}
+
+TEST_CASE("the counter is compared against a WX two dots old") {
+    // m3_wx_6_change's shape: WX = 6 before mode 3, rewritten four dots before
+    // the line's first pixel. Two dots behind the counter, the comparison that
+    // could have matched 6 reads the new value and the one that could have
+    // matched the new value has already gone past it, so WX = 5 leaves the line
+    // plain background - while WX = 7, still ahead of the counter, is matched
+    // by the last free increment and starts the window on screen x = 0.
+    //
+    // WY = 1 and a line run off first, because line 0 draws four dots early
+    // (see "line 0 starts drawing four dots earlier" above) and these cases
+    // name a dot of mode 3: on WY = 1 line 0 draws no window at all, so line 1
+    // is an ordinary line drawing the window's row 0.
+    {
+        Ppu ppu;
+        setUpWindowRuler(ppu, 0xF1, 0x00, 0x06, 0x01);
+        runLine(ppu);
+        const CharLine got = characteriseWrites(ppu, {{96, 0xFF4B, 0x05}});
+        CHECK(got.pixels == std::string(160, '1')); // no window at all
+        CHECK(got.dots == 172);
+    }
+    {
+        Ppu ppu;
+        setUpWindowRuler(ppu, 0xF1, 0x00, 0x06, 0x01);
+        runLine(ppu);
+        const CharLine got = characteriseWrites(ppu, {{96, 0xFF4B, 0x07}});
+        CHECK(got.pixels == clippedWindowLine(kEvenWindowRow, 0));
+        CHECK(got.dots == 180);
+    }
+}
+
+TEST_CASE("a WX reached again before the window has pushed a tile pushes no colour-0 pixel") {
+    // Pan Docs' pixel-FIFO sentence is about a WX changed "after the window has
+    // started rendering". WX = 5 starts the window during the free increments
+    // and WX = 6 is then reached one dot later, while the restarted fetcher is
+    // still six dots from its first push and the FIFO is empty - so the empty
+    // FIFO alone is not the condition. m3_wx_5_change runs exactly this on its
+    // line 6 and its reference shows the plain WX = 5 picture: the window had
+    // not started rendering, and nothing is pushed.
+    //
+    // WY = 1 and a line run off first, so that the write lands on the dot it is
+    // meant to: line 0 draws four dots early.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x05, 0x01);
+    runLine(ppu);
+    const CharLine got = characteriseWrites(ppu, {{96, 0xFF4B, 0x06}});
+    CHECK(got.pixels == clippedWindowLine(kEvenWindowRow, 2));
+    CHECK(got.dots == 180);
+}
+
+TEST_CASE("the fine-scroll discard reads SCX at the line's first tile fetch, not when mode 3 begins") {
+    // The two are an M-cycle apart, and m3_window_timing_wx_0 lands an SCX
+    // write between them on every line. Writing SCX at line dot 88 - after
+    // rendering has started but before that fetch reads the map - has to take
+    // effect on this line's discard: at SCX = 4 the window, matched by the
+    // counter's first free increment, is shifted left by 4 + 7 pixels.
+    //
+    // WY = 1 and a line run off first: line 0 draws four dots early.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x00, 0x01);
+    runLine(ppu);
+    const CharLine got = characteriseWrites(ppu, {{88, 0xFF43, 0x04}});
+    CHECK(got.pixels == clippedWindowLine(kEvenWindowRow, 7 + 4));
+}
+
+TEST_CASE("an object fetch that stalls the line's warm-up does not hold the free increments back") {
+    // The increments are dots, not pixels. An object at screen x = 0 is fetched
+    // before the fetcher's first step and stalls eight dots there, so a counter
+    // that only moved on the dots the fetcher ran would reach WX = 4 eight dots
+    // late - by which time the WX written during mode 3 has overtaken it and the
+    // window starts a whole tile-and-a-bit further right. Mealybug Tearoom's
+    // m3_wx_4_change_sprites is the reference that measures this; LCDC bit 1
+    // here is what puts the object in the way.
+    //
+    // WY = 1 and a line run off first, so the mode-3 write lands on the dot it
+    // is meant to: line 0 draws four dots early.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x04, 0x01);
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so OAM and VRAM land
+    for (u16 row = 0; row < 16; ++row) {
+        ppu.vramWrite(static_cast<u16>(0x8020 + row), 0x00); // tile 2: all colour 0
+    }
+    ppu.oamWrite(0xFE00, 0x10); // Y = 16: on every line drawn here
+    ppu.oamWrite(0xFE01, 0x08); // X = 8: screen x = 0
+    ppu.oamWrite(0xFE02, 0x02); // tile 2, fully transparent: it costs its fetch
+    ppu.oamWrite(0xFE03, 0x00); //   and draws nothing, so only the stall shows
+    enableLcd(ppu, 0xF3);       // as 0xF1, plus objects enabled
+    runLine(ppu);
+    const CharLine got = characteriseWrites(ppu, {{96, 0xFF4B, 0x28}}); // WX = 40
+    // The window still starts where WX = 4 says: three of its pixels off the
+    // left edge, screen x = 0 showing its fourth. A held-back counter would
+    // leave background as far as x = 33.
+    CHECK(got.pixels == clippedWindowLine(kEvenWindowRow, 3));
 }
