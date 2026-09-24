@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -58,6 +59,13 @@ const Uint64 kFrameNs = app::framePeriodNs(app::kDmgFrameHz);
 constexpr float kPromptTextScale = 2.0f;
 
 const std::string kPrompt = "Drop a Game Boy ROM here";
+
+// What counts as a burst in the log below: more than two frames' worth of
+// samples out of a single pass round the loop. Two rather than one because
+// the number of samples a frame is due is not an integer, so an ordinary
+// frame lands on 803 or 804 and a threshold of one frame would fire on
+// arithmetic rather than on anything real.
+constexpr std::size_t kBurstSamples = static_cast<std::size_t>(2.0 * app::kSamplesPerFrame);
 
 std::optional<std::vector<u8>> readFile(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
@@ -348,8 +356,21 @@ int main(int argc, char** argv) {
     // oscillates inside the band from one that walks steadily towards a
     // mark, and only a series of readings over a long run can. Every five
     // seconds, and only when asked for.
+    //
+    // Five seconds is right for watching for a walk, which takes tens of
+    // seconds to show, and far too coarse for watching a burst, which the
+    // ceiling clears inside a frame. FOURSHADES_AUDIO_LOG_EVERY overrides
+    // the interval in frames, so the same instrument serves both: 300 to
+    // see a drift, 6 to see a step and its recovery ten times a second.
     const bool audioLog = SDL_getenv("FOURSHADES_AUDIO_LOG") != nullptr;
-    constexpr std::uint64_t kAudioLogEveryFrames = 300;
+    const std::uint64_t kAudioLogEveryFrames = [] {
+        const char* every = SDL_getenv("FOURSHADES_AUDIO_LOG_EVERY");
+        if (every == nullptr) {
+            return std::uint64_t{300};
+        }
+        const long long frames = std::atoll(every);
+        return frames > 0 ? static_cast<std::uint64_t>(frames) : std::uint64_t{300};
+    }();
     std::uint64_t audioLogFrames = 0;
     // Every moment the queue stops belonging to the machine that filled it:
     // a reset, a dropped ROM, and coming back from a pause.
@@ -493,6 +514,22 @@ int main(int argc, char** argv) {
                 emulatedFrame = true;
             }
 
+            // A pass should emulate one frame and produce one frame's
+            // samples. One that produces several frames' worth has emulated
+            // several frames of machine time in a single pass, and that --
+            // not drift -- is what puts a step in the queue. The step is
+            // invisible in the queue depth once it has been absorbed, and
+            // indistinguishable from a device that fell behind while it is
+            // there, so the log names it where it happens instead of leaving
+            // it to be inferred afterwards.
+            if (audioLog && resampler.pending() > kBurstSamples) {
+                std::printf("audio: one pass emulated %zu samples (%.0f ms of machine time)\n",
+                            resampler.pending(),
+                            1000.0 * static_cast<double>(resampler.pending()) /
+                                static_cast<double>(app::kAudioSampleRate));
+                std::fflush(stdout);
+            }
+
             // One frame's samples, once a frame, with at most one sample of
             // drift correction -- see app/Audio.h for the marks and the
             // reasoning. The queue is read once and the same number is both
@@ -508,7 +545,26 @@ int main(int argc, char** argv) {
             // a device to drain it into.
             const std::size_t queuedSamples = audio.queued();
             audio.observeQueued(queuedSamples);
-            audio.push(resampler.samples(), app::driftCorrection(emulatedFrame, queuedSamples));
+
+            // The ceiling first, and only then the drift policy -- two
+            // different jobs in the order that makes them independent. The
+            // ceiling asks "is this still drift at all"; below it the answer
+            // is yes and it does nothing, so the drift policy gets every
+            // frame it was designed for. Above it the backlog is cut and the
+            // queue is back at the target, so the drift policy is then
+            // handed a queue inside the band and has nothing to correct.
+            // Neither ever sees a frame the other has already acted on.
+            const std::size_t trimmed = audio.trimBacklog(queuedSamples);
+            if (trimmed > 0 && audioLog) {
+                std::printf("audio: backlog trimmed, %zu samples (%.0f ms) discarded from %zu\n",
+                            trimmed,
+                            1000.0 * static_cast<double>(trimmed) /
+                                static_cast<double>(app::kAudioSampleRate),
+                            queuedSamples);
+                std::fflush(stdout);
+            }
+            const std::size_t correctedFrom = trimmed > 0 ? audio.queued() : queuedSamples;
+            audio.push(resampler.samples(), app::driftCorrection(emulatedFrame, correctedFrom));
             resampler.clear();
 
             if (audioLog && ++audioLogFrames % kAudioLogEveryFrames == 0) {

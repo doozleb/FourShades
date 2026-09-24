@@ -137,6 +137,23 @@ std::size_t Audio::reprime() {
     return shortfall;
 }
 
+std::size_t Audio::trimBacklog(std::size_t queuedSamples) {
+    if (stream_ == nullptr) {
+        return 0;
+    }
+    // excessQueuedSamples is the only statement of where the ceiling is and
+    // how much crossing it discards, so this cannot disagree with what the
+    // tests check.
+    const std::size_t excess = excessQueuedSamples(queuedSamples);
+    if (excess == 0) {
+        return 0;
+    }
+    reprime();
+    ++trims_;
+    trimmedSamples_ += excess;
+    return excess;
+}
+
 void Audio::observeQueued(std::size_t queuedSamples) {
     if (observations_ == 0 || queuedSamples < minQueued_) {
         minQueued_ = queuedSamples;
