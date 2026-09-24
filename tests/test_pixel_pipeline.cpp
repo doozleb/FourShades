@@ -316,6 +316,85 @@ TEST_CASE("SCY's high bits pick the tile-map row a line is fetched from (map scr
 }
 
 namespace {
+// A ruler for the dot each background fetch reads a bitplane on. Tile 0's row 1
+// is colour 0 and its row 2 is colour 1, the whole map is tile 0, and a line is
+// drawn with SCY = 0 (so every fetch reads row 1) until SCY = 1 is written into
+// the middle of it (so every fetch from then on reads row 2). Tile by tile, the
+// picture then says which bitplane read happened before the write and which
+// after, and SCY is read at the same three steps the reference hardware tests
+// change it on (Mealybug's notes: the tile-index step and both bitplane steps).
+//
+// Only the low bitplane differs between the two rows, because only the low
+// bitplane's read dot is separable: the writes a test can place land at the end
+// of an M-cycle, four dots apart, and the low read is the one step whose dot
+// crosses one of those boundaries when the fetcher is five steps over eight dots
+// instead of four over six.
+void setUpScyRowRuler(Ppu& ppu) {
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so writes land
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8000 + row), 0x00);
+        ppu.vramWrite(static_cast<u16>(0x8001 + row), 0x00);
+    }
+    ppu.vramWrite(0x8004, 0xFF); // row 2's low bitplane: colour 1 across the tile
+    for (u16 i = 0; i < 0x400; ++i) {
+        ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00);
+    }
+    static_cast<void>(ppu.write(0xFF47, 0xE4));
+    static_cast<void>(ppu.write(0xFF42, 0x00)); // SCY = 0: line 1 reads row 1
+    enableLcd(ppu, 0x91);
+}
+
+// Runs line `line` with `value` written to `reg` at `dot`, and hands back the
+// row that was drawn. The write lands at the end of the M-cycle that ends on
+// `dot`, so the first dot that can see it is `dot` + 1.
+const u8* lineWithWriteAt(Ppu& ppu, int line, int dot, u16 reg, u8 value) {
+    runTo(ppu, line, dot);
+    static_cast<void>(ppu.write(reg, value));
+    while (ppu.lineNumber() == line) { ppu.tick(); }
+    return &ppu.frame()[static_cast<std::size_t>(line) * Ppu::kWidth];
+}
+} // namespace
+
+TEST_CASE("a background fetch reads its low bitplane four dots before the tile's first pixel") {
+    // Pan Docs, "Pixel FIFO": the fetcher has five steps - Get tile, Get tile
+    // data low, Get tile data high, Sleep, Push - the first four of two dots
+    // each, and Get Tile Data High "also pushes a row of background/window
+    // pixels to the FIFO". That extra push is the one that carries an
+    // undisturbed line: the FIFO empties exactly as the step completes, so the
+    // row goes in on the dot the high bitplane is read and its first pixel is
+    // drawn on that same dot. The low bitplane is therefore read two dots
+    // earlier, and the tile index two before that.
+    //
+    // The tile drawn at x = 8-15 has its first pixel on line dot 108, so its
+    // low bitplane is read on dot 106. A four-step, six-dot fetcher reads it on
+    // dot 104 instead - two dots earlier, and on the other side of the M-cycle
+    // that ends on dot 104. Line 1, not line 0: line 0 draws four dots early.
+    Ppu ppu;
+    setUpScyRowRuler(ppu);
+    const u8* row = lineWithWriteAt(ppu, 1, 104, 0xFF42, 0x01); // SCY = 1 from dot 105
+    CHECK(row[0] == 0);  // read on dot 98, before the write
+    CHECK(row[7] == 0);
+    CHECK(row[8] == 1);  // read on dot 106, after it
+    CHECK(row[15] == 1);
+    CHECK(row[16] == 1); // read on dot 114
+}
+
+TEST_CASE("consecutive background fetches read their low bitplanes eight dots apart") {
+    // The same ruler one M-cycle later. The tile at x = 16-23 reads its low
+    // bitplane on dot 114, eight dots after the tile at x = 8-15 read its own:
+    // one complete fetch is eight dots, not six. A six-dot fetcher reads it on
+    // dot 112, before this write.
+    Ppu ppu;
+    setUpScyRowRuler(ppu);
+    const u8* row = lineWithWriteAt(ppu, 1, 112, 0xFF42, 0x01); // SCY = 1 from dot 113
+    CHECK(row[8] == 0);  // read on dot 106, before the write
+    CHECK(row[15] == 0);
+    CHECK(row[16] == 1); // read on dot 114, after it
+    CHECK(row[23] == 1);
+    CHECK(row[24] == 1); // read on dot 122
+}
+
+namespace {
 // Background tile 0 = colour 1 everywhere; window tile 1 = colour 3 everywhere;
 // background map at 0x9800 (all tile 0), window map at 0x9C00 (all tile 1).
 void setUpWindow(Ppu& ppu) {
