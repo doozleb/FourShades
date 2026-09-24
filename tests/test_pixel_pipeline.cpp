@@ -1354,6 +1354,101 @@ TEST_CASE("a window stopped before it pushes a tile does not clip the background
     }
 }
 
+// The ruler above with a window tile whose rows differ, so that a fetch which
+// read its low bitplane while the window was on and its high one after bit 5
+// went low - taking one from the window's row and one from the background's -
+// draws a colour neither a whole window tile nor a background tile can. The
+// window's row counter is at 1 on line 1, having advanced once on line 0, and
+// SCY = 2 puts the background's row at 3; tile 1 is colour 3 on every row but
+// row 3, where it has a low bitplane only and draws colour 1.
+namespace {
+void setUpWindowRowRuler(Ppu& ppu, u8 wx) {
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so writes land
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8000 + row), 0x7F); // tile 0: 2,1,1,1,1,1,1,1
+        ppu.vramWrite(static_cast<u16>(0x8001 + row), 0x80);
+        ppu.vramWrite(static_cast<u16>(0x8010 + row), 0xFF); // tile 1: colour 3 ...
+        ppu.vramWrite(static_cast<u16>(0x8011 + row), 0xFF);
+    }
+    ppu.vramWrite(0x8017, 0x00); // ... except on row 3, where it is colour 1
+    for (u16 i = 0; i < 0x400; ++i) {
+        ppu.vramWrite(static_cast<u16>(0x9800 + i), 0x00);
+        ppu.vramWrite(static_cast<u16>(0x9C00 + i), 0x01);
+    }
+    static_cast<void>(ppu.write(0xFF47, 0xE4)); // BGP: shade == colour
+    static_cast<void>(ppu.write(0xFF43, 0x00)); // SCX = 0
+    static_cast<void>(ppu.write(0xFF42, 0x02)); // SCY = 2: line 1 reads row 3
+    static_cast<void>(ppu.write(0xFF4A, 0x00)); // WY = 0: every line is below it
+    static_cast<void>(ppu.write(0xFF4B, wx));
+    enableLcd(ppu, 0xF1); // LCD on, BG on, window on, window map 0x9C00
+}
+} // namespace
+
+// WX = 6 is matched by the counter on line dot 99 (93 + WX), the activation
+// spends that dot resetting the fetcher, and the window's fetches follow: the
+// first has its stages on dots 100-101, 102-103 and 104-105 and pushes as the
+// last of them completes, on dot 105. From there each fetch is eight dots, so
+// the window's fetches push on dots 105, 113, 121 ... and, with the one pixel a
+// WX of 6 owes the discard, they draw screen x = 0-6, 7-14, 15-22 and 23-30.
+// A write lands at the end of an M-cycle, so the dots it can first be seen on
+// are 101, 105, 109, 113 ...: those are what the cases below aim at.
+
+TEST_CASE("a cleared LCDC bit 5 does not split the fetch it lands in") {
+    // Mealybug: "The disabling will take effect at the end of the current
+    // window tile being drawn." The write lands on dot 116, so it is visible
+    // from 117 - after the third window fetch has read its tile index on dot 116
+    // and before it reads either bitplane, on dots 118 and 120. Reading bit 5 at
+    // each stage instead takes the tile index from the window's map and both
+    // bitplanes from the background's row, which draws colour 1 across
+    // x = 15-22; the tile has to come out whole, colour 3, with the background
+    // resuming at x = 23.
+    //
+    // This is the shape `m3_lcdc_win_en_change_multiple` photographs: its writes
+    // land inside a window fetch, between two of its stages.
+    Ppu ppu;
+    setUpWindowRowRuler(ppu, /*wx=*/0x06);
+    const u8* row = lineWithWriteAt(ppu, 1, 116, 0xFF40, 0xD1); // bit 5 clear from 117
+    CHECK(row[14] == 3); // the second window tile, read before the write
+    CHECK(row[15] == 3); // the third: begun before the write and finished after it
+    CHECK(row[22] == 3);
+    CHECK(row[23] == 2); // background again, on a tile boundary
+    CHECK(row[24] == 1);
+}
+
+TEST_CASE("the fetcher samples LCDC bit 5 on a fetch's last dot") {
+    // The write lands on dot 112, so it is visible from 113 - the dot the second
+    // window fetch completes on. That fetch keeps its own window tile; the
+    // sample on that dot is what makes the third fetch a background one, so the
+    // window hands the line back at x = 15 rather than at 23.
+    Ppu ppu;
+    setUpWindowRowRuler(ppu, /*wx=*/0x06);
+    const u8* row = lineWithWriteAt(ppu, 1, 112, 0xFF40, 0xD1); // bit 5 clear from 113
+    CHECK(row[7] == 3); // the second window tile, whole
+    CHECK(row[14] == 3);
+    CHECK(row[15] == 2); // background from here, starting a tile of its own
+    CHECK(row[16] == 1);
+    CHECK(row[23] == 2);
+}
+
+TEST_CASE("a window fetch that has only read its tile index still draws a window tile") {
+    // The other end of the same rule, and the case `…_multiple_wx` photographs:
+    // a WX of 7 is matched on dot 100 and the window's first fetch reads its
+    // tile index on dot 101, the very dot this write is first visible on. The
+    // fetch is already under way, so it finishes as a window fetch and its eight
+    // pixels are the window's - exactly one window tile, because the sample on
+    // that fetch's last dot, 106, already sees bit 5 clear and sends the next
+    // fetch to the background map. A fetcher that read bit 5 at its tile-index
+    // stage instead would draw no window pixel at all here.
+    Ppu ppu;
+    setUpWindowRowRuler(ppu, /*wx=*/0x07);
+    const u8* row = lineWithWriteAt(ppu, 1, 100, 0xFF40, 0xD1); // bit 5 clear from 101
+    CHECK(row[0] == 3); // the window's first and only tile, drawn whole
+    CHECK(row[7] == 3);
+    CHECK(row[8] == 2); // background again, on a tile boundary
+    CHECK(row[9] == 1);
+    CHECK(row[16] == 2);
+}
+
 // ---------------------------------------------------------------------------
 // Re-activation, and the window row counter
 //

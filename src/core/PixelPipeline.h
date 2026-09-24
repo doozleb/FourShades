@@ -248,13 +248,15 @@ private:
     //   3 bits of SCX have no effect."
     //
     // The pixels already in the queue are the window tile being drawn and are
-    // emitted unchanged, so the disabling first shows in the tile after them -
-    // the one the fetcher is working on when bit 5 goes low, which becomes a
-    // background fetch wherever among its steps the write lands. The queue is
-    // not cleared and the fetcher is not restarted, so the switch costs no
-    // dots and no fresh SCX fine-scroll discard is taken: that, plus the
-    // fetcher keeping its column counter (see fetcherX_), is the second
-    // sentence.
+    // emitted unchanged, and the fetch in flight is a window fetch until it
+    // ends, whichever of its steps the write lands between - so this is called
+    // from stepFetcher, on the dot a fetch completes, and what it decides is
+    // whether the *next* tile the fetcher goes for is a window tile. That is
+    // the first sentence, and both halves of it are measured: see the note on
+    // the function. The queue is not cleared and the fetcher is not restarted,
+    // so the switch costs no dots and no fresh SCX fine-scroll discard is
+    // taken: that, plus the fetcher keeping its column counter (see
+    // fetcherX_), is the second sentence.
     void stopWindowIfDisabled(const Ppu& ppu);
     // Moves the counter on by one of its free increments, or spends one of the
     // kWindowCounterLeadDots that come first. Called once per dot of mode 3,
@@ -333,11 +335,11 @@ private:
     bool discardFetch_ = true; // the line's first completed fetch is thrown away
     // Whether the fetch in progress read its tile index from the window's
     // tilemap, latched on the dot that read it - the tile-index stage's first
-    // dot, see sampleTileIndex. A clear of LCDC bit 5 that
-    // lands after that dot leaves a window tile index being addressed with
-    // the background's row - the same shape as the bitplane mixing Mealybug's
-    // notes describe for TILE_SEL and SCY - and it also decides whether a push
-    // counts as the window having started rendering (see windowRendering_).
+    // dot, see sampleTileIndex. It cannot disagree with window_ part-way
+    // through a fetch, because bit 5 is only read on the dot a fetch ends (see
+    // stopWindowIfDisabled) and an activation restarts the fetcher; what it is
+    // for is deciding whether a push counts as the window having started
+    // rendering (see windowRendering_), which is asked after the fetch.
     bool fetchWindow_ = false;
     u8 tileIndex_ = 0;
     u8 tileLow_ = 0;
@@ -361,8 +363,9 @@ private:
     // fine-scroll half of it is read.
     int discard_ = 0;
     // The fetcher is drawing the window right now. Set when the X counter
-    // matches WX and cleared again by stopWindowIfDisabled when LCDC bit 5
-    // goes low part-way along the line. It also carries the whole of the
+    // matches WX and cleared again by stopWindowIfDisabled - on the dot a fetch
+    // ends, not the dot LCDC bit 5 goes low - when bit 5 has gone low part-way
+    // along the line. It also carries the whole of the
     // once-at-a-time rule, with no activation latch beside it: the counter
     // only counts up and the comparison is an equality, so an unchanged WX
     // can never be matched twice and a WX moved *behind* the counter can never
