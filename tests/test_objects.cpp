@@ -2,7 +2,9 @@
 
 #include "core/Ppu.h"
 
+#include <array>
 #include <cstdint>
+#include <vector>
 
 using namespace fourshades;
 
@@ -306,4 +308,100 @@ TEST_CASE("clearing LCDC bit 1 hides objects") {
     static_cast<void>(ppu.write(0xFF40, 0x91)); // objects off
     runLineObjects(ppu);
     CHECK(ppu.frame()[16] == 1);
+}
+
+// ---------------------------------------------------------------------------
+// An object fetch is a sequence of dots, and LCDC can change under it
+//
+// Pan Docs, "Pixel FIFO", walks the object fetch dot by dot: the fetcher is
+// advanced, then advanced twice more, then "the lower address for the row of
+// pixels of the target object tile is now retrieved ... Once the address is
+// retrieved this is the last chance for object fetch cancel to occur", and
+// "Object fetching may be canceled if LCDC.1 is disabled while the PPU is
+// fetching an object from OAM". So the OAM and VRAM the fetch reads are read
+// near its end, not when it is triggered, and LCDC can change in between.
+namespace {
+// Runs one line with register writes landing at chosen line dots, and hands
+// back the row that was drawn. Each write lands at the end of the M-cycle that
+// ends on its dot, so the first dot that can see it is that dot + 1.
+const u8* lineWithWrites(Ppu& ppu, int line, std::vector<std::array<int, 3>> writes) {
+    for (const auto& write : writes) {
+        while (ppu.lineNumber() != line || ppu.lineDot() != write[0]) { ppu.tick(); }
+        static_cast<void>(ppu.write(static_cast<u16>(write[1]), static_cast<u8>(write[2])));
+    }
+    while (ppu.lineNumber() == line) { ppu.tick(); }
+    return &ppu.frame()[static_cast<std::size_t>(line) * Ppu::kWidth];
+}
+} // namespace
+
+TEST_CASE("clearing LCDC bit 1 part-way through an object fetch cancels it") {
+    // The object at screen x = 16 is fetched once pixel 16 is due, on line dot
+    // 116, and its fetch runs for eleven dots; it reads its tile on dot 125 and
+    // pixel 16 is drawn on dot 127. Bit 1 cleared on dot 116 - visible from 117
+    // - and set again on dot 120 is low across the middle of the fetch and high
+    // again by the time the pixel is drawn, so the emission-time test cannot
+    // hide the object: only a fetch that was cancelled while it ran leaves the
+    // background showing.
+    Ppu ppu;
+    setUpObjects(ppu);
+    putObject(ppu, 0, 16, 8 + 16, 1, 0x00); // screen x = 16, colours 3,3,3,3,0,0,0,0
+    const u8* row = lineWithWrites(ppu, 1, {{116, 0xFF40, 0x91}, {120, 0xFF40, 0x93}});
+    CHECK(row[16] == 1); // background, not the object's colour 3
+    CHECK(row[17] == 1);
+}
+
+namespace {
+// Tile 2 is colour 2 and tile 3 colour 1, so which of them an object drew says
+// whether its fetch read LCDC bit 2 as 8x16 (index's low bit dropped: tile 2)
+// or as 8x8 (tile 3). OBP0 straight through so the colour is the shade.
+void setUpHeightRuler(Ppu& ppu) {
+    setUpObjects(ppu);
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8020 + row), 0x00); // tile 2: colour 2
+        ppu.vramWrite(static_cast<u16>(0x8021 + row), 0xFF);
+        ppu.vramWrite(static_cast<u16>(0x8030 + row), 0xFF); // tile 3: colour 1
+        ppu.vramWrite(static_cast<u16>(0x8031 + row), 0x00);
+    }
+    static_cast<void>(ppu.write(0xFF48, 0xE4)); // OBP0 straight through
+}
+} // namespace
+
+TEST_CASE("an object fetch reads LCDC bit 2 two dots before the pixel it pre-empts") {
+    // The height goes into the fetch's VRAM address, so it is read on the dot
+    // the address is built - which Pan Docs puts two dots before the pre-empted
+    // pixel (see PixelPipeline::kObjectDataDots). The object at screen x = 16
+    // is fetched once pixel 16 is due, on line dot 116, and its eleven dots put
+    // that pixel on dot 127 and the address on dot 125. Bit 2 set on dot 124 is
+    // visible from dot 125, so this fetch is the 8x16 one; an address built even
+    // one dot earlier is still the 8x8 one.
+    Ppu ppu;
+    setUpHeightRuler(ppu);
+    putObject(ppu, 0, 16, 8 + 16, 3, 0x00); // screen x = 16, tile 3
+    const u8* row = lineWithWrites(ppu, 1, {{124, 0xFF40, 0x97}}); // 8x16 from dot 125
+    CHECK(row[16] == 2); // tile 2's colour 2, not tile 3's colour 1
+    CHECK(row[23] == 2);
+}
+
+TEST_CASE("an object fetch reads LCDC bit 2 no later than that") {
+    // The other side of the same dot, which needs the M-cycle grid broken: a
+    // write lands at the end of an M-cycle and mode 3 starts on a multiple of
+    // four, so one object's address dot can only ever be separated from the dot
+    // after it by an odd stall somewhere ahead of it. A second object supplies
+    // one. The transparent object at screen x = 0 costs eleven dots, so pixel 0
+    // is drawn on dot 111 and pixel 1 is due on 112; the object at screen x = 1
+    // is fetched there, pays the flat six dots alone (its tile was already
+    // counted), and so builds its address on dot 116 and draws on dot 118.
+    //
+    // Bit 2 set on dot 116 is visible from dot 117: this fetch is the 8x8 one,
+    // and an address built a dot later would make it the 8x16 one.
+    Ppu ppu;
+    setUpHeightRuler(ppu);
+    for (u16 row = 0; row < 16; ++row) {
+        ppu.vramWrite(static_cast<u16>(0x8040 + row), 0x00); // tile 4: transparent
+    }
+    putObject(ppu, 0, 16, 8, 4, 0x00);     // screen x = 0, draws nothing
+    putObject(ppu, 1, 16, 8 + 1, 3, 0x00); // screen x = 1, tile 3
+    const u8* row = lineWithWrites(ppu, 1, {{116, 0xFF40, 0x97}});
+    CHECK(row[1] == 1); // tile 3's colour 1: still an 8x8 object
+    CHECK(row[8] == 1);
 }

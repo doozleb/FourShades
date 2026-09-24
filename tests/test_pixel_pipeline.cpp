@@ -1841,3 +1841,96 @@ TEST_CASE("two window activations on one line lengthen mode 3 by exactly twelve 
     }
     CHECK(solveRawDots(sampled) == 184); // 172 + 6 + 6
 }
+
+// ---------------------------------------------------------------------------
+// What an object fetch costs, and who pays it
+//
+// An object fetch stalls the line. Two hardware sources measure that stall from
+// two different sides, and they do not agree unless the fetcher and the pixels
+// pay different amounts:
+//
+//   - Mealybug Tearoom's m3_bgp_change_sprites photographs the pixel stream
+//     directly - it rewrites BGP at known dots and the seams say which pixel
+//     was being drawn on each of them - and over eighteen different OAM X
+//     values it puts the line's pixels exactly Pan Docs' full OBJ penalty
+//     behind an object-free line;
+//   - Mooneye's hardware-verified intr_2_mode0_timing_sprites measures mode 3's
+//     length and puts it three dots short of that sum, once per line.
+//
+// Both hold if the line's first object fetch costs the background fetcher three
+// dots less than it costs the pixels: the fetcher runs on through three of the
+// stall's dots, the FIFO carries the three pixels it gains, and mode 3 ends
+// with the fetcher rather than with the last pixel. See
+// docs/known-divergences.md, "An object fetch costs the pixels three dots more
+// than it costs the fetcher and mode 3".
+
+TEST_CASE("an object fetch waits for the pixel it pre-empts rather than starting the line") {
+    // Pan Docs, "Pixel FIFO", on the object fetch: "the fetcher is advanced one
+    // step until it's at step 5 or until the background FIFO is not empty". An
+    // object at screen x = 0 therefore waits for the line's first push - the
+    // dot pixel 0 would have been drawn on - instead of stalling the line
+    // before the fetcher has taken a step.
+    //
+    // The line's warm-up is then undisturbed: the first tile reads its low
+    // bitplane on line dot 97 and the row goes in on dot 100, where the
+    // object's eleven-dot fetch pre-empts it, so pixel 0 is drawn on dot 111.
+    // A SCY written on dot 100 is visible from dot 101, which is after that
+    // read: the first tile keeps row 1, colour 0. Fetching the object on the
+    // line's first rendering dot instead pushes the whole warm-up eight dots
+    // later, the first tile reads its low bitplane on dot 105, and the tile
+    // draws row 2's colour 1. Line 1, not line 0: line 0 draws four dots early.
+    Ppu ppu;
+    setUpScyRowRuler(ppu);
+    addStallingObject(ppu, 8); // OAM X = 8: screen x = 0
+    const u8* row = lineWithWriteAt(ppu, 1, 100, 0xFF42, 0x01);
+    CHECK(row[0] == 0);
+    CHECK(row[7] == 0);
+    CHECK(row[8] == 1); // the tile after it reads its low bitplane on dot 115
+}
+
+TEST_CASE("the pixels reaching the LCD pay an object fetch's full Pan Docs penalty") {
+    // m3_bgp_change_sprites' measurement, as one dot. The object at OAM X = 8
+    // costs Pan Docs' flat six dots plus a tile term of 7 - 0 - 2 = 5: eleven
+    // dots, all of them ahead of pixel 0, which is therefore drawn on line dot
+    // 111 and takes the BGP in force then. A BGP written on dot 108 is visible
+    // from dot 109, so pixel 0 sees it. Charging the pixels three dots less -
+    // the rebate the mode-3 length needs - draws pixel 0 on dot 108 instead,
+    // before the write.
+    Ppu ppu;
+    setUpTile(ppu, 0xFF, 0x00); // every background pixel colour 1
+    addStallingObject(ppu, 8);
+    const u8* row = lineWithWriteAt(ppu, 1, 108, 0xFF47, 0x00); // BGP: colour 1 -> shade 0
+    CHECK(row[0] == 0);
+    CHECK(row[7] == 0);
+}
+
+TEST_CASE("an object fetch leaves the fetcher three dots ahead of the pixels") {
+    // The other half of the same reconciliation, and the half that says the
+    // three dots are the fetcher's rather than nobody's. The object at OAM X = 8
+    // costs the pixels eleven dots but the fetcher only eight, so every fetch
+    // from here reads its registers three dots earlier than the eight-dot
+    // rhythm alone would put them. The tile at x = 8-15 has its first pixel on
+    // dot 119, so its index would be read on dot 114 and is read on dot 111.
+    //
+    // SCY = 8 moves the whole line to the next tile-map row, where the tile is
+    // colour 3 instead of colour 0, so only the tile-index stage can see it -
+    // and that stage is the one a three-dot lead moves across the M-cycle
+    // boundary at 112, which the two bitplane stages both stay on one side of.
+    // Written on dot 112, visible from 113: the lead reads the index before it
+    // and keeps map row 0, while a fetcher that lost all eleven dots reads on
+    // dot 114 and draws map row 1's colour 3 here already.
+    Ppu ppu;
+    setUpScyPlaneRuler(ppu, /*highPlane=*/false);
+    for (u16 row = 0; row < 16; row += 2) {
+        ppu.vramWrite(static_cast<u16>(0x8010 + row), 0xFF); // tile 1: colour 3
+        ppu.vramWrite(static_cast<u16>(0x8011 + row), 0xFF);
+    }
+    for (u16 i = 0; i < 32; ++i) {
+        ppu.vramWrite(static_cast<u16>(0x9820 + i), 0x01); // map row 1: tile 1
+    }
+    addStallingObject(ppu, 8);
+    const u8* row = lineWithWriteAt(ppu, 1, 112, 0xFF42, 0x08);
+    CHECK(row[8] == 0);
+    CHECK(row[15] == 0);
+    CHECK(row[16] == 3); // the tile after it reads its index on dot 119
+}

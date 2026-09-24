@@ -29,6 +29,9 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     windowRendering_ = false;
     objects_ = {};
     objectDots_ = 0;
+    objectFetching_ = false;
+    objectLeadDots_ = 0;
+    fifoLead_ = 0;
     drawn_ = 0;
     lastPenaltyTile_ = 0;
     lastPenaltyTileValid_ = false;
@@ -45,13 +48,21 @@ u16 PixelPipeline::tileRowAddress(const Ppu& ppu) const {
 }
 
 void PixelPipeline::tryPushRow() {
-    if (queueSize_ != 0) {
-        return; // one push port, and it takes a row only when the FIFO is empty
+    if (queueSize_ > fifoLead_) {
+        // One push port, and it takes a row only when there is room for one.
+        // Pan Docs says "pixels are only pushed to the background FIFO if it's
+        // empty", which is this with fifoLead_ = 0 - every line without an
+        // object. Once the fetcher has taken its lead at the line's first
+        // object fetch (see kObjectFetcherLead) the pixels it is ahead by are
+        // still in the FIFO when the next row is ready, and the sixteen-pixel
+        // hardware FIFO has room for both.
+        return;
     }
+    const int capacity = static_cast<int>(queue_.size());
     for (int bit = 7; bit >= 0; --bit) {
         const u8 low = static_cast<u8>((tileLow_ >> bit) & 1);
         const u8 high = static_cast<u8>((tileHigh_ >> bit) & 1);
-        queue_[static_cast<std::size_t>((queueHead_ + queueSize_) % 8)] =
+        queue_[static_cast<std::size_t>((queueHead_ + queueSize_) % capacity)] =
             static_cast<u8>((high << 1) | low);
         ++queueSize_;
     }
@@ -213,9 +224,33 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
 }
 
 void PixelPipeline::startObject(const Ppu& ppu, std::size_t index) {
+    const bool firstOnLine = !objectPenaltyStarted_;
+    objectDots_ = objectPenalty(ppu, index, lastPenaltyTile_, lastPenaltyTileValid_,
+                                objectPenaltyStarted_);
+    objectIndex_ = index;
+    objectFetching_ = true;
+    if (firstOnLine) {
+        // The line's first object fetch is where the fetcher takes its lead and
+        // the FIFO starts carrying it. See kObjectFetcherLead.
+        objectLeadDots_ = kObjectFetcherLead;
+        fifoLead_ = kObjectFetcherLead;
+    }
+}
+
+void PixelPipeline::cancelObjectIfDisabled(const Ppu& ppu) {
+    if (objectFetching_ && (ppu.lcdc() & 0x02) == 0) {
+        objectFetching_ = false; // the dots stay owed; see the header
+    }
+}
+
+void PixelPipeline::fetchObjectRow(const Ppu& ppu) {
     // PixelPipeline.h only forward-declares Ppu, so the object is reached
     // through the index rather than named in the header.
-    const Ppu::Object& object = ppu.lineObjects()[index];
+    const Ppu::Object& object = ppu.lineObjects()[objectIndex_];
+    // LCDC bit 2 is read here, on the dot the address is built, not when the
+    // fetch was triggered: a write that lands in between changes the object's
+    // height under its own fetch, which is what one of the Mealybug Tearoom
+    // references photographs.
     const int height = ppu.objectHeight();
     int row = ppu.lineNumber() - (static_cast<int>(object.y) - 16);
     if ((object.flags & 0x40) != 0) { // Y flip
@@ -257,8 +292,7 @@ void PixelPipeline::startObject(const Ppu& ppu, std::size_t index) {
         }
     }
 
-    objectDots_ = objectPenalty(ppu, index, lastPenaltyTile_, lastPenaltyTileValid_,
-                                objectPenaltyStarted_);
+    objectFetching_ = false;
 }
 
 int PixelPipeline::objectPenalty(const Ppu& ppu, std::size_t index, int& lastTile,
@@ -277,11 +311,14 @@ int PixelPipeline::objectPenalty(const Ppu& ppu, std::size_t index, int& lastTil
     // at OAM X = 0-7 exactly what their own X mod 8 says, and charges an
     // object at OAM X = 0 and one at OAM X = 8 two separate tile terms.
     //
-    // Hardware then charges three dots less per line than that sum, once, for
-    // the first object fetched on the line. Both findings come from the
-    // hardware-verified object timing ROM; see docs/known-divergences.md,
-    // "OBJ penalty: the first object fetched on a line gets a three-dot
-    // rebate against Pan Docs' algorithm".
+    // This is what the pixels pay, in full: a Mealybug Tearoom reference
+    // photographs the pixel stream on a line with one object at eighteen
+    // different OAM X coordinates and finds it exactly this far behind an
+    // object-free line. The three dots the hardware-verified object timing ROM
+    // finds mode 3 short of the same sum are not taken off here - they are dots
+    // the fetcher keeps while the pixels wait; see kObjectFetcherLead and
+    // docs/known-divergences.md, "An object fetch costs the pixels three dots
+    // more than it costs the fetcher and mode 3".
     const int backgroundX = static_cast<int>(ppu.scx()) + static_cast<int>(object.x) - 8;
     int dots = 6;
     // NOTE: this tile index is in background coordinates (SCX + the object's
@@ -312,8 +349,10 @@ int PixelPipeline::objectPenalty(const Ppu& ppu, std::size_t index, int& lastTil
         }
     }
     if (!penaltyStarted) {
+        // Only which object is the line's first is recorded here; what being
+        // first is worth is kObjectFetcherLead, and it is worth it to the
+        // fetcher and to mode 3, not to this sum.
         penaltyStarted = true;
-        dots -= 3;
     }
     return dots;
 }
@@ -398,7 +437,9 @@ int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
         }
     }
     if ((ppu.lcdc() & 0x02) == 0) {
-        return dots; // objects disabled: none of them will be fetched
+        // Objects disabled: none of them will be fetched. One already fetched
+        // still leaves the fetcher, and so mode 3's end, ahead of the pixels.
+        return dots - (objectPenaltyStarted_ ? kObjectFetcherLead : 0);
     }
 
     // Objects are fetched in the order the pixel counter reaches them, with
@@ -445,7 +486,13 @@ int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
             dots += penalty;
         }
     }
-    return dots;
+    // Mode 3 ends with the fetcher, and a line that fetches an object leaves the
+    // fetcher kObjectFetcherLead dots ahead of the pixels - whether it has
+    // happened yet or is still to come. The last pixels of such a line reach the
+    // LCD that many dots further into HBlank than kRenderLag alone says, which
+    // is what keeps the hardware-verified object timing ROM and the picture the
+    // Mealybug reference photographs both right. See kObjectFetcherLead.
+    return dots - (started ? kObjectFetcherLead : 0);
 }
 
 bool PixelPipeline::windowEnabled(const Ppu& ppu) const {
@@ -535,11 +582,21 @@ void PixelPipeline::pushWindowShiftPixel() {
         // this to shift. See windowRendering_.
         return;
     }
-    if (queueSize_ != 0) {
-        return; // the FIFO's push port takes a push only when it is empty
+    if (queueSize_ % 8 != 0) {
+        // The FIFO's push port takes a push only when the pixel it is about to
+        // hand over starts a row - measured as "only onto an empty FIFO", which
+        // is what this is on every line whose fetcher has not taken the lead an
+        // object fetch grants it (see fifoLead_): the FIFO is bare exactly then.
+        // Once it is carrying the lead, the same dot is the one where nothing of
+        // the previous row is left, and the queue holds whole rows only there.
+        return;
     }
+    // In front of the row, so the row's own pixels all move one right: Pan Docs'
+    // pixel is an extra one, not a substitution.
+    const int capacity = static_cast<int>(queue_.size());
+    queueHead_ = (queueHead_ + capacity - 1) % capacity;
     queue_[static_cast<std::size_t>(queueHead_)] = 0;
-    queueSize_ = 1;
+    ++queueSize_;
 }
 
 void PixelPipeline::advanceWindowCounter() {
@@ -623,9 +680,28 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
 
     if (objectDots_ > 0) {
         --objectDots_;   // the fetch stalls the pixel stream
+        if (objectLeadDots_ > 0) {
+            // The dots of the line's first fetch the background fetcher keeps.
+            // See kObjectFetcherLead.
+            --objectLeadDots_;
+            stepFetcher(ppu);
+        }
+        cancelObjectIfDisabled(ppu);
+        if (objectFetching_ && objectDots_ < kObjectDataDots) {
+            fetchObjectRow(ppu);
+        }
         return false;
     }
-    if ((ppu.lcdc() & 0x02) != 0) {
+    // Pan Docs, "Pixel FIFO", on what an object fetch begins with: "the fetcher
+    // is advanced one step until it's at step 5 or until the background FIFO is
+    // not empty". The fetch waits for a pixel to pre-empt, in other words, so an
+    // object at screen x = 0 is fetched on the dot the line's first row reaches
+    // the FIFO rather than on the line's first rendering dot, and the warm-up
+    // that feeds that row is left alone. fetchStallDots() == 0 is the fetcher's
+    // own statement that the row arrives on this dot; see
+    // docs/known-divergences.md, "An object fetch waits for the pixel it
+    // pre-empts".
+    if ((ppu.lcdc() & 0x02) != 0 && (queueSize_ > 0 || fetchStallDots() == 0)) {
         const auto& list = ppu.lineObjects();
         for (std::size_t i = 0; i < list.size(); ++i) {
             if ((drawn_ & (1u << i)) != 0) {
@@ -647,7 +723,7 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
     stepFetcher(ppu);
     if (queueSize_ > 0) {
         const u8 background = queue_[static_cast<std::size_t>(queueHead_)];
-        queueHead_ = (queueHead_ + 1) % 8;
+        queueHead_ = (queueHead_ + 1) % static_cast<int>(queue_.size());
         --queueSize_;
         if (discard_ > 0) {
             // These are background pixels scrolled off the left edge by SCX;
