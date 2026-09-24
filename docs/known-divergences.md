@@ -176,9 +176,10 @@ mode.
   entry did not say: `ashiepaws/bully` went from 346 differing pixels to 290,
   taking the `screen` group's total from 73,628 to 73,572. Measured
   2026-09-22 by building the commit before this change and running the ROM
-  runner from it: `bully` 346, `strikethrough` 53. It is the only count in
-  the screenshot table below that differs between that run and one made
-  today, and it is a failing test either way, so no verdict moved with it. Mooneye's
+  runner from it: `bully` 346, `strikethrough` 53. It was a failing test
+  either way at that date, so no verdict moved with it; `bully` passes as of
+  2026-09-24 and has no row in the screenshot table below any more, and
+  `strikethrough` is still 53 (see its own entry above). Mooneye's
   `boot_hwio-dmgABCmgb` still failed at that date, and a traced run on
   2026-09-22 put its first mismatch at $FF10 (NR10), the first sound
   register: the ROM wanted $80 and FourShades read $FF, because there was no
@@ -474,6 +475,137 @@ keeping them apart is what lets both bodies of evidence be satisfied at once.
   test by test against the previous one shows **exactly one** changed verdict
   and not one other pixel anywhere in the suite. SingleStepTests unchanged at
   499 of 500 (the deliberate STOP-length divergence at the top of this file).
+- **Checked:** 2026-09-24.
+
+## `ashiepaws/strikethrough`: an OAM DMA that outruns the object scan (2026-09-24)
+
+Diagnosed and **left failing**, at the 53 differing pixels it has had since the
+pixel pipeline was finished. It is not a mid-scanline register question at all:
+it is a race between an OAM DMA and the PPU's mode-2 object scan, and closing it
+needs two things - one that Pan Docs states and FourShades does not implement,
+and one that nothing in this repository determines.
+
+### What the ROM does
+
+Disassembled from the vendored ROM (header title `STRIKE`).
+
+- $0150 waits for LY >= $90, blanks LCDC, sets BGP = OBP0 = OBP1 = $FC, copies an
+  eight-byte OAM-DMA stub to $FF80, fills the tile map with tile $FF, clears
+  tiles 1-$20, loads tile 0 from $094A and a font (tiles $21-$7A) from $026A, and
+  prints "Everything is OK!" at $9902 - tile map row 8, so screen rows 64-71.
+- **Tile 0 is `FF FF 00 00 ...`:** colour 3 across the whole of its row 0 and
+  nothing else. One object drawn with it is an eight-pixel bar exactly one
+  scanline high - the strike-through the ROM is named for.
+- $01DB builds forty objects at $C000: **Y = $54 for every one of them**, which
+  is screen row 68; tile 0; attributes 0; and X = $17 + 8i taken mod 256 - so
+  X = 23, 31, ... 255 and then 7, 15, ... 79. X = $4F (79) occurs twice, at
+  i = 7 and at i = 39. It DMAs that into OAM, sets LCDC = $93, STAT = $40,
+  LYC = $43 (67), IE = $02 and enables interrupts.
+- The main loop at $0209 copies a **second** table (ROM $08AA) into $C000 - every
+  object at Y = 1 except the first at Y = 99, all with tile 1, which the ROM has
+  blanked, and X = 1 - and halts. The LYC = 67 STAT handler at $0230 polls STAT
+  until line 67 reaches mode 0, spends 28 `nop`s there, starts an OAM DMA from
+  $C000 and returns. The loop then waits for mode 1 and DMAs the first table
+  back.
+- So OAM carries the forty bar objects for the whole visible frame, and an OAM
+  DMA that replaces them with off-screen ones **starts in line 67's HBlank and is
+  still copying all the way through line 68**. Line 68 is the only line any of
+  the forty can appear on.
+
+### What the reference shows, and what FourShades draws
+
+The background of row 68 was reconstructed from the ROM's own font, string and
+tile map and compared with the reference pixel by pixel: it accounts for every
+reference pixel on that row **except x = 71-78**, a solid eight-pixel run of
+shade 3 that is not on a tile boundary and so cannot be background. An
+eight-pixel bar at screen x 71 is an object at OAM X = 79.
+
+- **The DMG reference draws exactly one** of the forty objects, the one at
+  OAM X = 79 (index 7, or index 39, which carries the same X).
+- **FourShades draws ten**, at x = 63-142: objects 6-15, the first ten whose Y
+  still read $54 when the scan ran.
+
+### Why, measured
+
+A temporary trace of every DMA byte against the PPU's line and dot (added,
+measured, reverted) gives the timeline exactly: the DMA's **first byte lands at
+line 67 dot 452**, and bytes 1-20 land at line 68 dots 0-76, one every four dots.
+At line 68 dot 80 OAM holds objects 0-4 replaced, object 5 **half** replaced (new
+Y, old X) and objects 6-39 untouched.
+
+`Ppu::scanOam` runs once, at line dot 80 - the end of mode 2 - and evaluates all
+forty entries in that one instant. Hardware reads one object every two dots
+across mode 2's eighty. That is a real structural divergence, and it is what puts
+the frontier at object 6.
+
+**It is not the divergence that matters here, and correcting it alone makes the
+picture worse.** A per-object scan (one object every two dots, wired up as a
+throwaway experiment and reverted) selects objects 1-10 instead - x = 23-102,
+**49** differing pixels - and changes nothing else: the `screen` group stays at
+14 of 30 with every other test's pixel count identical to the pixel.
+
+The reason neither answer can be right is structural. The DMA advances one object
+every sixteen dots and a scan advances one every two, so the scan always outruns
+the DMA: **once an object passes the Y test every later object passes too**,
+whatever the phase. Thirty-four objects still carry Y = $54 when line 68 is
+scanned, and any monotone rule takes the first ten of them. A reference with
+exactly one object in it therefore requires a mechanism that suppresses objects
+the scan *did* select.
+
+### The mechanism Pan Docs states and FourShades does not implement
+
+[OAM DMA Transfer: OAM DMA bus conflicts](https://gbdev.io/pandocs/OAM_DMA_Transfer.html#oam-dma-bus-conflicts):
+"If OAM DMA is active during rendering (mode 3), the PPU reads whatever 16-bit
+word the DMA unit is writing to OAM when the object is fetched."
+
+FourShades' object fetch takes the tile index and the attributes from the entry
+`scanOam` buffered and never looks at OAM again, so an in-flight DMA cannot reach
+it. That sentence is not implemented at all. (The entry above,
+"What a read that conflicts with an OAM DMA puts on the bus", quotes the same
+sentence as corroboration for the *CPU* side and does not implement the PPU side
+either.)
+
+What implementing it alone would buy, **computed and not measured**: each of the
+ten objects would take its tile from the DMA's source stream, which is $01
+everywhere but one byte, and the ROM has blanked tile 1 - so no object would
+draw, row 68 would be the plain background, and the count would fall from 53 to
+**7**, the reference's surviving bar minus the one text pixel it covers at
+x = 75. It does not make the ROM pass.
+
+The one byte of that source table which is not $01 is **offset 46 - object 11's
+tile byte - and it is $00**, which is tile 0, the bar. That is almost certainly
+the ROM's marker, and the question it asks is which object's fetch collides with
+it. FourShades transfers byte 46 at line 68 dot 180, and its object fetches read
+their rows on dots 161, 169, 177, 185 ...; that byte's M-cycle (dots 180-183)
+falls between two of them, so under this model no object would pick the byte up
+at all. Putting the survivor at OAM X = 79 needs the fetch that reads OAM to land
+inside that M-cycle, eleven to fourteen dots later than where this pipeline puts
+it. **Nothing here derives that dot**, and no other ROM in the suite measures it.
+
+### The decision, and what would settle it
+
+Left failing at 53 pixels. Shipping the documented half on its own would replace
+ten wrong objects with none, still fail, and add a PPU-to-DMA coupling that
+nothing else in either suite exercises - the same trap as "Group E, measured to
+the dot and not solved" below, where sixteen exact constraints have a unique fit
+that would fit six blocks and break ten.
+
+What would settle it, in the order it is worth trying:
+
+1. **The dot an object fetch reads its OAM word on**, measured by something other
+   than this ROM. The object fetch's other dots were pinned on 2026-09-24 (see
+   "An object fetch waits for the pixel it pre-empts, and reads its row two dots
+   before it"); its OAM read has never been placed, because nothing but an
+   in-flight DMA can observe it.
+2. **What the mode-2 scan sees while an OAM DMA is copying.** Pan Docs' sentence
+   is about mode 3 only, and a scan that reads real OAM is what makes the
+   selection monotone. If a scan read during a DMA also returned the DMA's word,
+   no object would be selected on line 68 at all and the survivor would have to
+   come from the fetch.
+3. **The reference's provenance.** It is one image, fetched from
+   `gbdev/GBEmulatorShootout` with the ROM; nothing in this repository states
+   whether it is a photograph.
+
 - **Checked:** 2026-09-24.
 
 ## Object priority when sprites overlap: approximates Pan Docs' smaller-X-then-OAM-index rule (2026-09-14)
@@ -994,6 +1126,136 @@ alone explains it.
   measured that satisfies both sets.
 - **Checked:** 2026-09-24, the whole of the mode-3 length arithmetic re-derived
   from the pipeline and left unchanged; see the coverage bullet above.
+
+## `daid/ppu_scanline_bgp`'s twelve dots are three M-cycles of interrupt latency, not the render lag (2026-09-24)
+
+The entry above rests on `m3_bgp_change`, and the one ROM that contradicts it is
+`daid/ppu_scanline_bgp`, by a uniform twelve dots over the whole image. The
+decision - follow the Mealybug photographs - has not changed. What has changed is
+that the twelve dots have been traced, and they are **not in the pixel pipeline
+at all**: they are three M-cycles in a once-a-frame chain that `m3_bgp_change`
+does not exercise, and every other link of which is pinned by a hardware-verified
+Mooneye ROM that FourShades passes. The previous version of this said the
+disagreement was "a question about the ROM's synchronisation, not about the
+pipeline" and that it "has not been diagnosed"; that guess was right, and this is
+the measurement.
+
+### What the ROM does
+
+Disassembled from the vendored ROM.
+
+- $0150 waits for LY = $91, writes $01 to $9000, $9002 ... $900C and $FF to
+  $900E (tile 0, under LCDC bit 4 = 0's $8800 signed addressing), then
+  LCDC = $81, STAT = $40 (**LYC interrupt only**), IE = $03, LYC = 0, `c` = $47
+  (so `ldh [c],a` writes BGP), `ei`, `halt`.
+- The VBlank vector reaches $0180: `pop hl` - which throws the return address
+  away - `ei`, `halt`.
+- The STAT vector reaches $0184: `pop hl`, `ei`, `nop`, `ld hl,$01E7`, then **ten**
+  repetitions of `ld a,[hl+]` ; `ldh [c],a`, then 70 `nop`s, then `jp $018A` -
+  back to the ten writes, without reloading `hl`. That is
+  10 x 4 + 70 + 4 = **114 M-cycles = 456 dots, exactly one scanline**, so the ten
+  BGP writes fall on the same dots of every line and walk a 1,440-byte table from
+  $01E7 at ten bytes per line. The table holds only $E4, $AA, $55 and $00, laid
+  out as nested rectangles, so a line has at most a few seams in it.
+- **The loop is never re-synchronised per line.** It is interrupted once a frame
+  by the VBlank interrupt at LY = 144, whose handler halts, and re-entered at
+  LY = 0 by the LYC = 0 STAT interrupt. The horizontal position of the whole
+  144-line image is therefore set by one event chain, once a frame.
+
+### What FourShades does, measured
+
+From a temporary trace of every BGP write against the PPU's line and dot (added,
+measured, reverted):
+
+- On **all 144** visible lines the ten writes occupy the M-cycles beginning at
+  line dots 80, 96, 112, ... 224 - four M-cycles apart - so each becomes visible
+  to the PPU on dots 84, 100, 116, 132, 148, 164, 180, 196, 212 and 228. The
+  first-write dot is 80 on every one of the 144 lines, and the phase changes only
+  across VBlank, which is the re-synchronisation above.
+- Pixel *p* leaves the PPU on dot 100 + *p*, so those writes land on pixels -16,
+  0, 16, 32, 48, 64, 80, 96, 112 and 128. On line 100 the produced frame's seams
+  start at x = 1, 18, 50, 82, 114 and 130; the one-dot palette short accounts for
+  the +1 and +2.
+- `ppu_scanline_bgp_2.dmg.png`, the closest of the three references, puts them at
+  x = 13, 29, 61, 93, 125 and 141. The other two give 14, 30, 62, 94, 126 and
+  13, 30, 62, 94, 126. On line 8, where only two of the ten writes change the
+  value, FourShades puts the seams at x = 17 and 114 and all three references put
+  them at 29 and 125-126.
+- So the disagreement is **a uniform twelve dots - three M-cycles - with the
+  reference later**, and the *spacing* agrees exactly: sixteen dots per write,
+  thirty-two between the two seams the nested boxes produce. Nothing about the
+  rate disagrees. Only the phase does, and it is set once a frame.
+
+(The older text here said FourShades lands the writes "on line dots 100, 108,
+116, 124 and so on". That was wrong by a factor of two - each write is
+`ld a,[hl+]` plus `ldh [c],a`, four M-cycles, so they are sixteen dots apart, not
+eight - and it is corrected above. The twelve dots and the first seam at pixel 1
+were right.)
+
+### Where the three M-cycles are
+
+Working back from the first write's M-cycle, which begins on line 0 dot 80,
+through `ldh [c],a`'s first M-cycle, `ld a,[hl+]` (2), `ld hl,nn` (3), `nop` (1),
+`ei` (1), `pop hl` (3) and the five-M-cycle dispatch, puts the interrupt's
+dispatch at **line 0 dots 16-35**. The references need it at **dots 28-47**.
+
+So the twelve dots sit in the chain *LY becomes 0 -> the LYC = LY STAT interrupt
+is requested -> the CPU leaves `halt` -> the five-M-cycle dispatch -> the
+handler's prologue*. Not one link of that is the pixel pipeline.
+
+**`m3_bgp_change` exercises none of it.** It re-arms from the **mode-2** STAT
+interrupt on every line, with the CPU running NOPs rather than halted, and never
+uses the LYC source. The two ROMs share exactly two things: the dispatch's length
+and the dot a pixel leaves the PPU. So the twelve dots are not, and cannot be,
+evidence about the seven-dot render lag - which is what the old wording implied by
+noting that they had been five dots before the lag was added. (They had: pixel 0
+moved from dot 93 to dot 100, which moves a fixed write dot seven pixels down the
+line, so a five-dot offset became twelve. That is arithmetic about this ROM's
+phase, not a second measurement of the lag.)
+
+**And every other link is pinned by a hardware-verified Mooneye acceptance ROM
+that FourShades passes:**
+
+| link | ROM | status |
+| --- | --- | --- |
+| the LYC = LY STAT interrupt's dot | `ppu/stat_lyc_onoff` | passing |
+| leaving `halt` with IME set | `halt_ime1_timing`, `halt_ime1_timing2-GS`, and `di_timing-GS`, which the "Timing model" section at the end of this file cites for the same rule | passing |
+| the dispatch itself | `intr_timing`, `ppu/intr_1_2_timing-GS`, `ppu/intr_2_0_timing` | passing |
+| the dot a pixel leaves the PPU | Mealybug `m3_bgp_change` (DMG photograph) | exact |
+
+`ppu timing` is 12 of 12 and `cpu & interrupts` is 31 of 31. There is no
+three-M-cycle hole left in the model for this ROM's twelve dots to occupy: they
+contradict a hardware photograph **and** at least five hardware-verified ROMs at
+once.
+
+### The decision, and what would settle it
+
+**Unchanged: left failing, at 7,186 differing pixels** against the closest of its
+three references (7,741 and 7,640 against the other two). Under the rule at the
+top of this file, Mealybug's photographs and Mooneye's hardware-verified ROMs
+outrank an image whose provenance is not stated - and here they outrank it
+together and unanimously, which is a stronger position than the previous version
+of this entry claimed.
+
+That the three references differ from each other by a pixel is the harness's
+encoding of alternative accepted outputs (`tools/roms/RomRun.cpp` passes on a
+match to any of them and reports the smallest difference), not a discovery about
+them; none of the three carries provenance, and they agree with each other about
+the twelve dots, so the figure is not an artefact of which one was picked.
+
+What would overturn it:
+
+- a DMG photograph of this ROM **with stated provenance** that agrees with its own
+  references, which would make the two bodies of evidence equally hardware-backed
+  and force the three M-cycles to be found rather than attributed to the ROM;
+- a demonstration that one of the five Mooneye ROMs above passes through
+  compensating errors - for instance that the LYC interrupt's dot and the `halt`
+  exit are each wrong by an M-cycle and a half in opposite directions;
+- or a ROM other than this one that measures the *halt -> LYC interrupt ->
+  handler* chain against the LCD rather than against the serial port. Nothing in
+  the 165 does.
+
+- **Checked:** 2026-09-24.
 
 ## The background fetcher is five steps over eight dots, and the dot that leaves over (2026-09-24)
 
@@ -1663,8 +1925,10 @@ here is one thing those notes do **not** pin, and the measurement.
   is Mealybug's "when the background resumes drawing it is on a tile boundary".
 - **Effect:** `m3_lcdc_win_en_change_multiple` 8316 differing pixels -> 5760,
   `m3_lcdc_win_en_change_multiple_wx` 5942 -> 1228 when this landed; both moved
-  again with the window X counter work of 2026-09-24, to 468 and 69, and
-  neither passes yet. `ppu timing` stays 12 / 12, `m3_bgp_change`, `dmg-acid2`
+  again with the window X counter work of 2026-09-24, to 468 and 69, and then
+  the `_wx` one twice more with the five-step fetcher and its stage dots, to
+  116 and then **85**. Neither passes; **468 and 85** are where they stand at
+  the end of the piece. `ppu timing` stays 12 / 12, `m3_bgp_change`, `dmg-acid2`
   and `m2_win_en_toggle` stay exact.
 - **Checked:** 2026-09-24.
 
@@ -2050,13 +2314,15 @@ was and what settled it. For the history of the figures: the group stood at
 increments' timing, 18,656 after the five-step fetcher - a rise, explained in
 "The background fetcher is five steps over eight dots" above - 15,907 once each
 of that fetcher's three stages was pinned to its first dot ("Each fetch stage
-samples its registers on its first dot"), and **11,547** now, once an object
-fetch stopped charging the pixels three dots less than Pan Docs' sum and stopped
-happening before the line's warm-up ("An object fetch costs the pixels three dots
-more than it costs the fetcher and mode 3", and "An object fetch waits for the
-pixel it pre-empts"), and **11,399** once an object fetch stopped waiting for the
+samples its registers on its first dot"), 11,547 once an object fetch stopped
+charging the pixels three dots less than Pan Docs' sum and stopped happening
+before the line's warm-up ("An object fetch costs the pixels three dots more than
+it costs the fetcher and mode 3", and "An object fetch waits for the pixel it
+pre-empts"), and **11,399 now**, once an object fetch stopped waiting for the
 window's row on the dot the window activates. The object move is the only one of
-the five that changed a verdict, and it changed two.
+the five that changed a verdict, and it changed two. Every figure in the table
+below was re-checked against a fresh full run on 2026-09-24, at the end of the
+piece, and all sixteen agree to the pixel.
 
 **What the window still gets wrong is the two mid-line LCDC bit 5 tests.** The
 paragraph that stood here said the window never re-activates mid-line and that
@@ -2078,7 +2344,7 @@ question as the mid-line LCDC, SCX and SCY rows below, and it is what
 | test | pixels | why it still fails |
 | --- | --- | --- |
 | `m3_scx_high_5_bits` | 12 | one background tile per affected line takes the wrong SCX; 80, then 86, then 45 once the fetch stages were pinned |
-| `ashiepaws/strikethrough` | 53 | not diagnosed |
+| `ashiepaws/strikethrough` | 53 | an OAM DMA still copying through line 68's object scan; diagnosed and left failing, see its own entry above |
 | `m3_lcdc_obj_en_change` | 56 | mid-line LCDC bit 1 changes; 100 before the object fetch's dots |
 | `m3_lcdc_win_en_change_multiple_wx` | 85 | mid-line LCDC bit 5; 5942, then 77, then 69, then 116 under the five-step fetcher |
 | `m3_lcdc_bg_map_change` | 124 | mid-line LCDC bit 3 changes; 316, 428, then 182 |
@@ -2092,7 +2358,7 @@ question as the mid-line LCDC, SCX and SCY rows below, and it is what
 | `m3_lcdc_win_en_change_multiple` | 468 | mid-line LCDC bit 5; 8316, then 5760, then this |
 | `m3_lcdc_win_map_change` | 724 | mid-line LCDC bit 6 changes; 1646 before the counter work, 1448 before the five-step fetcher, 792, then 852. Not sampling either: same entry |
 | `m3_lcdc_tile_sel_win_change` | 868 | mid-line LCDC bit 4 changes, with a window; 1904 before the counter work, 1336, then 1016. Not sampling: see "Group E, measured to the dot and not solved" above |
-| `daid/ppu_scanline_bgp` | 7186 | disagrees with the Mealybug references by 12 dots |
+| `daid/ppu_scanline_bgp` | 7186 | disagrees by 12 dots, which are three M-cycles in its once-a-frame `halt` -> LYC-interrupt sync and not in the pipeline; see its own entry above |
 
 The mid-line LCDC, SCX and SCY entries above are all the same shape: the
 register is read live, at the dot the fetcher needs it. Which dot that is **is**
@@ -2144,8 +2410,13 @@ Notes on the ones that are more than "a behaviour not written yet":
   is why neither on its own settled it. The 73,628 figures above were taken
   before either power-on change moved `ashiepaws/bully` by 56 pixels - down,
   then back up - and before the window counter work; the group's total today is
-  15,907. What decided the first revert was the 5,000-pixel rise, which neither
-  power-on change touches either way.
+  **11,399**. What decided the first revert was the 5,000-pixel rise, which
+  neither power-on change touches either way.
+  - **45 to 12** came later the same day, with the object fetch's dots: this ROM
+    parks an object on every line, so it moved with the four other background
+    ROMs. See "An object fetch costs the pixels three dots more than it costs the
+    fetcher and mode 3" above. The 12 that are left have not been traced to
+    anything.
 - **`m3_lcdc_obj_size_change` (310) and `m3_lcdc_obj_size_change_scx`
   (190).** These two probe the same thing - LCDC bit 2, the object height
   bit, written during mode 3 - and the seven-dot rendering lag moved them in
@@ -2179,46 +2450,20 @@ Notes on the ones that are more than "a behaviour not written yet":
     the fetch in one ROM and not the other. That is a description of the
     two ROMs' difference, not a demonstration of the cause; no experiment
     here isolates it, and the 60 pixels are recorded as unexplained.
-- **`daid/ppu_scanline_bgp` (7187).** This one disagrees with the Mealybug
-  references rather than with a behaviour. It writes BGP repeatedly during
-  mode 3; on line 100 FourShades lands those writes on line dots 100, 108,
-  116, 124 and so on and draws their seams from pixel 1, while the reference
-  puts the first seam at pixel 13 - a uniform 12-dot (three M-cycle) offset
-  over the whole image, in the opposite direction to the seven-dot lag that
-  was added with it (it was a five-dot offset before).
-  - **Which reference.** `tools/roms/tests.json` lists three images for this
-    ROM, which is this harness's encoding of *alternative accepted outputs*:
-    `tools/roms/RomRun.cpp` passes on a match to any one of them and reports
-    the smallest difference. That the three differ is how the test list is
-    built, not a discovery about them. The reported 7187 and the 12 dots are
-    measured against `ppu_scanline_bgp_2.dmg.png`, the closest of the three;
-    the other two come out at 7741 (`_0`) and 7640 (`_1`) against the same
-    frame, and on line 100 they put the first band edge at pixel 14 and
-    pixel 13 where `_2` puts it at 13, so the 12 dots are not an artefact of
-    which one was picked. (`_1` is also the only one of the three whose image
-    contains a fourth shade, which is where the one-pixel palette seam above
-    shows up; the other two have three. That is a difference between the
-    images, and no more than that - nothing here establishes where any of
-    them came from.)
-  - **Why FourShades follows Mealybug anyway.** Mealybug's references are
-    photographed from real DMG hardware, its `m3_*` images agree with each
-    other about where a mid-line write lands, and `m3_bgp_change` now matches
-    its own to the pixel across 144 lines and six writes per line. The
-    hardware-verified rule at the top of this file puts that above an image
-    whose provenance is not stated. What remains is a difference in where
-    this ROM thinks a line starts - a question about the ROM's
-    synchronisation, not about the pipeline - and it has not been diagnosed.
-  - **What would overturn this.** Any of: a DMG photograph of
-    `ppu_scanline_bgp` with a stated provenance that agrees with its own
-    references, which would make the two bodies of evidence equally
-    hardware-backed and force the 12 dots to be explained rather than
-    attributed to the ROM; a Mealybug `m3_*` reference shown to disagree
-    with `m3_bgp_change` about where a write lands, which would break the
-    unanimity the seven dots rest on; or a decoding of this ROM's own
-    synchronisation showing it starts its line 12 dots from where FourShades
-    puts it, which would move the seven dots rather than this entry. Until
-    one of those exists the seven dots stand as `m3_bgp_change` measures
-    them.
+- **`daid/ppu_scanline_bgp` (7186).** This one disagrees with the Mealybug
+  references rather than with a behaviour, by a uniform 12 dots (three
+  M-cycles) over the whole image. **Diagnosed on 2026-09-24 and still left
+  failing:** the three M-cycles are in the chain that synchronises the ROM's
+  BGP loop once a frame - LY becomes 0, the LYC = LY STAT interrupt is
+  requested, the CPU leaves `halt`, the dispatch runs - and not in the pixel
+  pipeline, which `m3_bgp_change` pins from a completely different direction
+  (the mode-2 STAT interrupt, on a running CPU, every line). Every other link
+  in that chain is held by a hardware-verified Mooneye ROM this emulator
+  passes. The full disassembly, the measured write dots, the seam positions of
+  all three references and what would overturn the decision are in
+  "`daid/ppu_scanline_bgp`'s twelve dots are three M-cycles of interrupt
+  latency, not the render lag" above, which replaces the paragraphs that stood
+  here.
 - **`daid/stop_instr` (was 22739, now 0).** Diagnosed and fixed on 2026-09-24:
   it was not a pixel-pipeline failure at all. The PPU kept drawing while the
   CPU sat in STOP mode, so the screen held the pre-STOP frame instead of going
@@ -2228,8 +2473,14 @@ Notes on the ones that are more than "a behaviour not written yet":
   rather than at STOP. See "STOP stops the PPU and blanks the LCD" near the top
   of this file.
 - **`ashiepaws/strikethrough` (53) and `ashiepaws/bully` (was 421, now 0).**
-  `strikethrough`'s verdict is still not diagnosed; it was failing before the
-  pixel pipeline was finished and still is, at 53 pixels throughout. `bully`
+  `strikethrough` was diagnosed on 2026-09-24 and is still left failing, at the
+  same 53 pixels it has had throughout: it is a race between an OAM DMA that is
+  still copying through line 68's object scan and the scan itself, its reference
+  draws exactly one of the ROM's forty objects where this emulator draws ten,
+  and closing it needs both a Pan Docs sentence that is not implemented and a
+  dot that nothing in this repository measures. See
+  "`ashiepaws/strikethrough`: an OAM DMA that outruns the object scan" above.
+  `bully`
   was the same kind of entry until 2026-09-24, when three pieces of work in a
   row walked it down its chain of subtests to a pass. Its counts went 346, 290,
   346, 421, 0:
@@ -2911,8 +3162,12 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   called from `Ppu::stepDot` on the dot a drawn line begins, sets
   `windowReached_` whenever `LY == WY`, whether or not the window is enabled
   at that instant. Bit 5 is checked separately, in `PixelPipeline::stepDot`,
-  only once the X counter reaches WX − 7, and the window is drawn there only
-  if bit 5 is set at that moment.
+  only once the X counter reaches WX, and the window is drawn there only
+  if bit 5 is set at that moment. (Until 2026-09-24 the comparison was against
+  WX − 7, which is the same trigger pixel written the other way round; the
+  counter now takes Pan Docs' seven free increments before pixel 0, so it is
+  compared against WX itself. See "The window's X counter is compared once per
+  dot, against a WX two dots old" above.)
   Pan Docs' own model keeps these two checks
   apart the same way: "At the beginning of each scanline, if the value of
   `WY` is equal to `LY`, the *Y condition* becomes true (and remains so for
@@ -2929,10 +3184,13 @@ choices FourShades makes, and the hardware-verified test ROMs that pin them.
   scanline" — advancing the row counter this way needs no fresh `WY ==
   LY` match, which only supports an ungated latch: if the coincidence had
   to be re-established, a second advance mid-scanline couldn't happen
-  without LY changing. FourShades doesn't model that mid-scanline
-  multiple-advance behaviour yet; Mealybug's `m3_lcdc_win_en_change_multiple`
-  and `m3_lcdc_win_en_change_multiple_wx` tests probe it and are left for a
-  later task.
+  without LY changing. FourShades models that mid-scanline multiple-advance behaviour as of
+  2026-09-24 - the row advances once per activation, and a line that matches WX
+  twice advances it twice; see "The window can start more than once on a
+  scanline, and its row advances at each start" above. Mealybug's
+  `m3_lcdc_win_en_change_multiple` and `m3_lcdc_win_en_change_multiple_wx`
+  probe it and still fail, at 468 and 85 differing pixels, on where inside a
+  fetch an LCDC bit 5 write lands rather than on the advance rule.
   (Pan Docs does note that on GBC, clearing bit 5 resets the Y condition
   too — but says so only for GBC, which FourShades doesn't model yet, so it
   doesn't bear on this DMG-era decision.) The alternative — gating the latch

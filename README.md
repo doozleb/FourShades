@@ -263,14 +263,15 @@ Six pieces, each gated on the test ROMs rather than on looking right:
 | 3b | **A window** — SDL3, so the frame can be seen and the buttons pressed | done |
 | 4 | **Cartridge chips** — MBC2, MBC3 with its clock, MBC5 | done: 126 / 165 |
 | 5 | **Sound** — the four channels, scored against blargg's twelve ROMs | done: 138 / 165 |
-| 5b | **Audible output** — SDL3 audio, so the sound can be heard | in progress |
+| 5b | **Audible output** — SDL3 audio, so the sound can be heard | done |
 | 6 | **In the browser** — the same core compiled to WebAssembly, playable on the site | |
 
-Every cartridge chip is in and the sound unit scores 12 / 12, so what is left
-on the roadmap is making that sound audible and then the browser build. Of the
-27 test ROMs still failing, 26 are `screen` tests and the twenty-seventh —
-`boot_hwio` — is a PPU power-on phase error, so the remaining ROM work is all
-in the picture.
+Every cartridge chip is in, the sound unit scores 12 / 12 and it is audible, so
+what is left on the roadmap is the browser build. All 16 test ROMs still failing
+are `screen` tests — every other group is whole — so the remaining ROM work is
+all in the picture, and
+[docs/known-divergences.md](docs/known-divergences.md) says what each of the 16
+needs and which two are decided rather than open.
 
 ## Licence
 
