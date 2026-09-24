@@ -18,6 +18,8 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     pixelX_ = 0;
     discard_ = ppu.scx() & 0x07;
     window_ = false;
+    windowX_ = 0;
+    windowXHeadStart_ = false;
     windowSkip_ = 0;
     objects_ = {};
     objectDots_ = 0;
@@ -91,8 +93,8 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
             ++queueSize_;
         }
         if (windowSkip_ > 0) {
-            // The window pixels that fall off the left edge (see the WX < 7
-            // note in stepDot) are dropped here, as the tile is pushed,
+            // The window pixels that fall off the left edge (see the WX
+            // note in startWindow) are dropped here, as the tile is pushed,
             // rather than emitted and thrown away: they take no dots.
             const int drop = windowSkip_ < queueSize_ ? windowSkip_ : queueSize_;
             queueHead_ = (queueHead_ + drop) % 8;
@@ -257,17 +259,21 @@ int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
         // the dot before a Push, where this adds nothing.
         dots += fetchStallDots();
     }
-    if (!window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached()) {
-        // The window has not started on this line yet, but stepDot will
-        // clear the queue and restart the fetcher as soon as pixelX_ is at
-        // or past its trigger point (WX - 7, the same expression stepDot
-        // tests) - on the dot the pixel counter reaches it, or on the very
-        // next dot if the counter is already past it (LCDC bit 5 set
-        // mid-line, or a WX left of the first pixel). Either way the
-        // activation is still to come and still on this line, and the dots
-        // counted above already include one dot for the pixel it pre-empts,
-        // so its full fetch cost is added on top of them, not folded in.
-        if (static_cast<int>(ppu.wx()) - 7 < 160) {
+    if (windowConditions(ppu)) {
+        // The window has not started on this line yet, but stepDot will clear
+        // the queue and restart the fetcher as soon as the X counter is at or
+        // past WX - on the dot the counter reaches it, or on the very next dot
+        // if it is already past (LCDC bit 5 set mid-line, or a WX left of the
+        // first pixel). Either way the activation is still to come and still
+        // on this line, and the dots counted above already include one dot for
+        // the pixel it pre-empts, so its full fetch cost is added on top of
+        // them, not folded in.
+        //
+        // The counter reads kWindowCounterHeadStart before pixel 0 and one
+        // more per pixel rendered, so kWindowCounterHeadStart + 159 is the
+        // largest value it takes while a pixel is still to be emitted: a WX
+        // above that is never matched on this line.
+        if (static_cast<int>(ppu.wx()) <= kWindowCounterHeadStart + 159) {
             dots += kWindowRestartDots;
         }
     }
@@ -322,37 +328,102 @@ int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
     return dots;
 }
 
+bool PixelPipeline::windowConditions(const Ppu& ppu) const {
+    // Pan Docs, "Window behavior": a counter match starts the window only "if
+    // the Y condition is true and the Window enable bit is set in LCDC". Both
+    // are read here, on the dot the match is tested, not once per line.
+    // window_ is the third term and is not a hardware condition: this model
+    // still activates the window at most once per line, which is the
+    // restriction the task after this one lifts.
+    return !window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached();
+}
+
+void PixelPipeline::startWindow(Ppu& ppu) {
+    // Pan Docs: "background rendering is reset, beginning anew from the active
+    // row of the Window's tilemap" - the background queue is cleared and the
+    // fetcher restarts, which costs the documented kWindowRestartDots dots.
+    window_ = true;
+    queueSize_ = 0;
+    queueHead_ = 0;
+    step_ = Step::Tile;
+    stepDots_ = 0;
+    fetcherX_ = 0;
+    // A WX of kWindowCounterHeadStart is matched by the last of the counter's
+    // free increments, so the window's first pixel lands on screen x = 0. A
+    // smaller WX is matched earlier among them, and the free increments left
+    // over after the match are pixels the window draws and the LCD never
+    // shows: kWindowCounterHeadStart - WX of them, off the left edge. The
+    // fetcher still starts at the window's own column 0. Two Mealybug Tearoom
+    // references, photographed from DMG hardware, show the three and two
+    // pixel versions of it. Dropping them at the push, so that they cost no
+    // dots, is a tuning decision, not a measurement: the test that would
+    // arbitrate the dot cost still fails on the very lines that measure it,
+    // and neither this placement nor charging a dot each reproduces what its
+    // reference shows. See docs/known-divergences.md, "A WX below 7 pushes
+    // the window's leftmost pixels off the screen", for the ROMs and the
+    // figures.
+    windowSkip_ = static_cast<int>(ppu.wx()) < kWindowCounterHeadStart
+                      ? kWindowCounterHeadStart - static_cast<int>(ppu.wx())
+                      : 0;
+    // Cache the row the window is drawing on this line before advancing the
+    // PPU's counter for the next one: every fetch reads windowLineUsed_,
+    // never ppu.windowLine() directly, so the just-bumped value doesn't leak
+    // into this line's tiles.
+    windowLineUsed_ = ppu.windowLine();
+    // Pan Docs: "The coordinate of the active Window row is then
+    // incremented." Only lines that drew the window advance it.
+    ppu.advanceWindowLine();
+}
+
+void PixelPipeline::takeWindowHeadStart(Ppu& ppu) {
+    // The counter's free increments, with the equality test against WX applied
+    // at each of them, which is how a WX below kWindowCounterHeadStart starts
+    // the window before the line's first pixel is rendered. They are taken on
+    // the dot the SCX discard finishes rather than at the top of the line:
+    // this model spends the discard as emitted-and-dropped pixels over the
+    // line's first dots, where the hardware's free increments are the
+    // discard, and taking them here is what keeps the trigger on the dot the
+    // arithmetic this replaced put it on. Straightening that out is the task
+    // that retires windowSkip_ and gives WX = 0 its SCX % 8 shift.
+    windowXHeadStart_ = true;
+    while (true) {
+        // The comparison is made at every value the counter takes, 0 to
+        // kWindowCounterHeadStart inclusive - the last of them is the value a
+        // WX of kWindowCounterHeadStart matches, which starts the window with
+        // its first pixel on screen x = 0.
+        if (windowConditions(ppu) && windowX_ == static_cast<int>(ppu.wx())) {
+            startWindow(ppu);
+        }
+        if (windowX_ == kWindowCounterHeadStart) {
+            break;
+        }
+        ++windowX_;
+    }
+}
+
 bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
-    if (!window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached() &&
-        discard_ == 0 && pixelX_ >= static_cast<int>(ppu.wx()) - 7) {
-        // Pan Docs: the background queue is cleared and the fetcher restarts,
-        // which costs the documented six dots.
-        window_ = true;
-        queueSize_ = 0;
-        queueHead_ = 0;
-        step_ = Step::Tile;
-        stepDots_ = 0;
-        fetcherX_ = 0;
-        // WX = 7 lines the window's first pixel up with screen x = 0, so a
-        // smaller WX pushes 7 - WX of them off the left edge: the fetcher
-        // still starts at the window's own column 0 and those pixels never
-        // reach the LCD. Two Mealybug Tearoom references, photographed from
-        // DMG hardware, show the three and two pixel versions of it.
-        // Dropping them here, as the tile is pushed, makes them cost no
-        // dots. That half is a tuning decision, not a measurement: the test
-        // that would arbitrate the dot cost still fails on the very lines
-        // that measure it, and neither this placement nor charging a dot
-        // each reproduces what its reference shows. See
-        // docs/known-divergences.md, "A WX below 7 pushes the window's
-        // leftmost pixels off the screen", for the ROMs and the figures.
-        windowSkip_ = ppu.wx() < 7 ? 7 - static_cast<int>(ppu.wx()) : 0;
-        // Cache the row the window is drawing on this line before advancing
-        // the PPU's counter for the next one: every fetch below reads
-        // windowLineUsed_, never ppu.windowLine() directly, so the
-        // just-bumped value doesn't leak into this line's tiles.
-        windowLineUsed_ = ppu.windowLine();
-        // The window's line counter only advances on lines that drew it.
-        ppu.advanceWindowLine();
+    // The nesting matters: while the free increments are still owed and the
+    // SCX discard has not drained, the counter reads 0 and must not be
+    // compared against WX at all. Folding the two conditions into one `&&`
+    // would let the catch-up branch below see that 0 and start the window on
+    // the line's first dot for WX = 0.
+    if (!windowXHeadStart_) {
+        if (discard_ == 0) {
+            takeWindowHeadStart(ppu);
+        }
+    } else if (windowConditions(ppu) && windowX_ >= static_cast<int>(ppu.wx())) {
+        // Equality is what the hardware compares, and takeWindowHeadStart
+        // above does compare equality. This branch is deliberately looser: it
+        // fires as well when the counter is already past WX, which is what the
+        // pixelX_ >= WX - 7 arithmetic this task replaced did. It is the only
+        // way the window can start on a line where LCDC bit 5 was set, or WX
+        // lowered, after the counter had gone by - and since the window here
+        // activates at most once per line, dropping it would change pictures
+        // this task must leave alone. The task that makes the window
+        // re-triggerable replaces it with a plain equality test plus Pan Docs'
+        // re-activation rule ("This process can happen more than once per
+        // scanline").
+        startWindow(ppu);
     }
 
     if (objectDots_ > 0) {
@@ -407,6 +478,10 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
             }
             line[static_cast<std::size_t>(pixelX_)] = shade;
             ++pixelX_;
+            // Pan Docs: the X counter is "incremented for each pixel
+            // rendered". The SCX discard above is not a rendered pixel, so it
+            // does not increment it.
+            ++windowX_;
         }
     }
     return pixelX_ >= 160;

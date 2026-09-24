@@ -811,6 +811,137 @@ alone explains it.
   seven-dot lag and the palette seam were in; with this it is exact.
 - **Checked:** 2026-09-21.
 
+## The window's scanline X counter, and the evidence for it, quoted (2026-09-24)
+
+Not a divergence: an evidence record. The window work in `PixelPipeline`
+depends on two documents, one of which is **not vendored with the ROMs** —
+`tools/roms/data/mealybug-tearoom-tests/` holds only `ppu/`, no text — so it
+has to be fetched from the web, and a web page can change or go away. Both are
+quoted here in full so that the tasks that follow read them from the
+repository instead of re-fetching them, and so the evidence survives if the
+page moves.
+
+### Source 1: Mealybug Tearoom's own PPU notes
+
+- **File:** `the-comprehensive-game-boy-ppu-documentation.md` in
+  [`mattcurrie/mealybug-tearoom-tests`](https://github.com/mattcurrie/mealybug-tearoom-tests).
+- **Raw URL fetched:**
+  `https://raw.githubusercontent.com/mattcurrie/mealybug-tearoom-tests/master/the-comprehensive-game-boy-ppu-documentation.md`
+- **Last upstream change:** commit `875cf1e27444a4d50bcb932f74b6901e583085a3`,
+  2019-04-03. **SHA-256 of the file as fetched on 2026-09-24:**
+  `358e6eb2af268fbceb2c50088728c5deb05617d30d4d326e861ae1897c19fde9`
+  (3676 bytes). Quote it from here; if a later task needs to re-fetch it, that
+  digest says whether it has changed.
+- **Standing:** these are the author's notes on what his own test ROMs
+  measured on hardware, and the ROMs' references are photographs of real DMG
+  output. Under the rule at the top of this file they outrank a Pan Docs
+  simplification.
+- **What it does *not* say:** the notes describe no X counter. The counter
+  itself comes from Pan Docs (source 2). What the notes give is the mid-line
+  WIN_EN behaviour that the counter makes expressible.
+
+`LCDC $FF40`, `WIN_EN (bit 5)`, quoted whole:
+
+> If WIN_EN is set then the window will be displayed when the WX and WY
+> conditions are satisifed.
+>
+> Obscure behavior:
+>
+> - WIN_EN can be disabled during mode 3.  The disabling will take effect at
+>   the end of the current window tile being drawn. When the current window
+>   tile has finished being drawn, the PPU will start drawing background tiles
+>   again.
+> - When the background resumes drawing it is on a tile boundary. The low 3
+>   bits of SCX have no effect.
+> - Setting WIN_EN again during mode 3 on the same scanline will have no effect
+>   unless WX has been updated to set the window to activate on a pixel that
+>   hasn't been drawn yet.
+> - If WX has been updated correctly and WIN_EN is set again then the PPU stops
+>   drawing the background, and will activate the window again, but it will
+>   start drawing the **next row** of the window, on the same scanline.
+
+The same file's two other passages, quoted here for the fetch-sampling tasks
+that come after the window ones — the stage names `B`, `0` and `1` are the
+tile-index fetch and the two bitplane fetches:
+
+> `TILE_SEL` is read during the `0` and `1` stages of background tile data
+> fetching. Changing its value during background tile data fetch allows for
+> mixing tile bitplane data from two different tile patterns.
+
+> The `SCY` register can be written to at any time. Writes will take effect
+> immediately on the DMG. On CGB and AGB devices, writes appear to take effect
+> 2 T-cycles later.
+>
+> On the DMG and CGB revisions up to and including the "CPU GBC C" revision,
+> the `SCY` register is read during the background tile fetch `B`, `0` and `1`
+> stages. Changing the value during background tile data fetch allows for
+> mixing tile bitplane data from different rows of the tile.
+>
+> On the AGB and CGB revisions "CPU GBC D" and greater, the `SCY` register is
+> only read during the `B` stage, so no tile bitplane data mixing can occur.
+
+### Source 2: Pan Docs, [Window behavior](https://gbdev.io/pandocs/Window.html)
+
+This is where the counter is written down. Quoted on 2026-09-24:
+
+> the PPU maintains a counter, initialized to 0 at the beginning of each
+> scanline. The counter is incremented for each pixel rendered; however, it
+> also increments 7 times before the first pixel is actually rendered (this
+> covers pixels discarded during the initial "fine scroll" adjustment). When
+> this counter is equal to `WX`, if the *Y condition* is true and the Window
+> enable bit is set in `LCDC`, background rendering is reset, beginning anew
+> from the active row of the Window's tilemap. **The coordinate of the active
+> Window row is then incremented.**
+
+> **This process can happen more than once per scanline**, making the Window's
+> "tilemap Y coordinate" increase more than once in the scanline. … However,
+> this requires "disabling" the Window by briefly clearing its enable bit from
+> `LCDC` first.
+
+> If `WX` is equal to 0, the Window is switched to before the initial "fine
+> scroll" adjustment, causing it to be shifted left by SCX % 8 pixels.
+
+> On monochrome systems, `WX` = 166 (which would normally show a single Window
+> pixel, along the right edge of the screen) exhibits a bug: the Window spans
+> the entire screen, but offset vertically by one scanline.
+
+> On monochrome systems, if the Window is disabled via `LCDC`, but the other
+> conditions are met *and* it would have started rendering exactly on a BG tile
+> boundary, then where it would have started rendering, a single pixel with ID
+> 0 is inserted.
+
+The two sources agree with each other, which is the strongest position
+available here: implement what both say.
+
+### What FourShades does with it now
+
+`PixelPipeline` keeps the counter as `windowX_`: zero at `startLine`, then
+`kWindowCounterHeadStart` (7) free increments taken by `takeWindowHeadStart`,
+then one per pixel rendered. WX is compared against it rather than against
+`pixelX_` arithmetic, and a match runs `startWindow`.
+
+Three things about the model are deliberately **not** the hardware's yet, and
+each is a named later task, not an oversight:
+
+- The window still activates at most once per line (`window_` is a latch), so
+  the mid-line WIN_EN passages above and Pan Docs' "more than once per
+  scanline" are not modelled.
+- Because of that latch, the per-dot comparison in `stepDot` is
+  greater-or-equal, not the equality the hardware uses: it is the only way the
+  window can start at all on a line where LCDC bit 5 was set, or WX lowered,
+  after the counter had already gone past WX, and that case is load-bearing
+  (making it a strict equality moves `m3_lcdc_win_en_change_multiple_wx` from
+  5942 differing pixels to 3759 and `m3_window_timing` from 28 to 33 — it
+  changes pictures, in both directions). The free increments *are* compared for
+  equality.
+- The free increments are taken on the dot the SCX discard finishes, not at
+  the top of the line, because this model spends the discard as
+  emitted-and-dropped pixels where the hardware's free increments *are* the
+  discard. That is why `WX = 0` is not yet "shifted left by SCX % 8 pixels",
+  and why `windowSkip_` (see the entry below) still exists.
+
+- **Checked:** 2026-09-24.
+
 ## A WX below 7 pushes the window's leftmost pixels off the screen (2026-09-21)
 
 - **Tests:** Mealybug Tearoom `m3_wx_4_change` and `m3_wx_5_change` set WX to
@@ -820,9 +951,11 @@ alone explains it.
 - **Pan Docs, [LCD Position and Scrolling](https://gbdev.io/pandocs/Scrolling.html):**
   WX "is the window's leftmost pixel's X position, plus 7", and WX values 0
   and 166 are called unreliable. It does not say what WX = 1-6 draws.
-- **FourShades:** `PixelPipeline::stepDot` sets `windowSkip_` to 7 - WX when
-  the window starts, and the fetcher's push drops that many pixels off the
-  front of the tile it has just fetched.
+- **FourShades:** `PixelPipeline::startWindow` sets `windowSkip_` to 7 - WX
+  when the window starts, and the fetcher's push drops that many pixels off the
+  front of the tile it has just fetched. Since 2026-09-24 that count is the
+  window's X counter's free increments left over after the match, rather than
+  arithmetic of its own; see the entry above.
 - **What the clipped pixels cost in dots is not evidenced: the placement was
   chosen by group total.** The clipping itself is pinned by the two
   references above and stays. Its dot cost is a different question, and the
