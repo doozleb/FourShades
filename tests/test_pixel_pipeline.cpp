@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 using namespace fourshades;
 
@@ -734,35 +735,51 @@ TEST_CASE("characterisation: a line the window never reaches") {
 }
 
 TEST_CASE("characterisation: LCDC bit 5 set part-way through mode 3") {
-    // The window is enabled after the pixel counter has already passed WX, so
-    // the trigger fires late rather than at the WX it names. Dot 120 is about
-    // twenty pixels in and dot 200 about a hundred.
+    // The comparison against WX is an equality, so enabling the window matters
+    // only if the counter still has that match left to make. Dot 120 is about
+    // twenty pixels in (the counter reads about 27) and dot 200 about a hundred
+    // (about 107): a WX below that is never matched and the line stays plain
+    // background at its plain 172 dots, while a WX still ahead of the counter
+    // is matched where it says. WX = 39 is the pair that shows both sides of
+    // it, and WX = 120 the value neither write dot has passed.
+    //
+    // The rows that now draw nothing used to fire the trigger late, on the dot
+    // LCDC was written, because the per-dot comparison was a greater-or-equal.
+    // That was the stand-in for re-activation and is what this task replaced;
+    // see docs/known-divergences.md, "The window can start more than once on a
+    // scanline, and its row advances at each start".
     struct Row { u8 wx; int writeDot; int dots; const char* pixels; };
     static const Row rows[] = {
-        {0, 120, 184,
-         "11111111111111111111111113321001233210012332100123321001233210012332100123321001"
-         "23321001233210012332100123321001233210012332100123321001233210012332100123321001"},
-        {0, 200, 184,
+        {0, 120, 172,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
-         "11111111111111111111111113321001233210012332100123321001233210012332100123321001"},
-        {4, 120, 180,
-         "11111111111111111111111110012332100123321001233210012332100123321001233210012332"
-         "10012332100123321001233210012332100123321001233210012332100123321001233210012332"},
-        {4, 200, 180,
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
+        {0, 200, 172,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
-         "11111111111111111111111110012332100123321001233210012332100123321001233210012332"},
-        {7, 120, 180,
-         "11111111111111111111111113210012332100123321001233210012332100123321001233210012"
-         "33210012332100123321001233210012332100123321001233210012332100123321001233210012"},
-        {7, 200, 180,
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
+        {4, 120, 172,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
-         "11111111111111111111111113210012332100123321001233210012332100123321001233210012"},
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
+        {4, 200, 172,
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
+        {7, 120, 172,
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
+        {7, 200, 172,
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
         {39, 120, 180,
          "11111111111111111111111111111111321001233210012332100123321001233210012332100123"
          "32100123321001233210012332100123321001233210012332100123321001233210012332100123"},
-        {39, 200, 180,
+        {39, 200, 172,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
-         "11111111111111111111111113210012332100123321001233210012332100123321001233210012"},
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
+        {120, 120, 180,
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+         "11111111111111111111111111111111132100123321001233210012332100123321001233210012"},
+        {120, 200, 180,
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+         "11111111111111111111111111111111132100123321001233210012332100123321001233210012"},
     };
     for (const Row& row : rows) {
         Ppu ppu;
@@ -775,19 +792,24 @@ TEST_CASE("characterisation: LCDC bit 5 set part-way through mode 3") {
 
 TEST_CASE("characterisation: WX lowered part-way through mode 3") {
     // WX starts at 200, which never reaches the line, and is lowered at dot
-    // 200 to a value the counter is already past (0 and 8) or has yet to
-    // reach (100).
+    // 200, where the counter reads about 107. A new WX behind the counter is
+    // never matched - the comparison is an equality - so 0, 8 and even 100
+    // leave the line plain background; 150 is still ahead of it and is matched
+    // where it says, at screen x = 143.
     struct Row { u8 wx; int dots; const char* pixels; };
     static const Row rows[] = {
-        {0, 184,
+        {0, 172,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
-         "11111111111111111111111113321001233210012332100123321001233210012332100123321001"},
-        {8, 180,
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
+        {8, 172,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
-         "11111111111111111111111113210012332100123321001233210012332100123321001233210012"},
-        {100, 180,
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
+        {100, 172,
          "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
-         "11111111111111111111111113210012332100123321001233210012332100123321001233210012"},
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"},
+        {150, 180,
+         "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+         "11111111111111111111111111111111111111111111111111111111111111132100123321001233"},
     };
     for (const Row& row : rows) {
         Ppu ppu;
@@ -1008,4 +1030,140 @@ TEST_CASE("a window stopped before it pushes a tile does not clip the background
         }
         CHECK_MESSAGE(got.pixels.substr(first) == expected, "dot ", writeDot);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Re-activation, and the window row counter
+//
+// Pan Docs, "Window behavior", quoted in full in docs/known-divergences.md
+// ("The window's scanline X counter, and the evidence for it, quoted"):
+//
+//   "When this counter is equal to WX, if the Y condition is true and the
+//   Window enable bit is set in LCDC, background rendering is reset, beginning
+//   anew from the active row of the Window's tilemap. The coordinate of the
+//   active Window row is then incremented."
+//   "This process can happen more than once per scanline, making the Window's
+//   "tilemap Y coordinate" increase more than once in the scanline. ... However,
+//   this requires "disabling" the Window by briefly clearing its enable bit
+//   from LCDC first."
+//
+// and Mealybug Tearoom's PPU notes, from the same section of that file:
+//
+//   "Setting WIN_EN again during mode 3 on the same scanline will have no
+//   effect unless WX has been updated to set the window to activate on a pixel
+//   that hasn't been drawn yet."
+//   "If WX has been updated correctly and WIN_EN is set again then the PPU
+//   stops drawing the background, and will activate the window again, but it
+//   will start drawing the next row of the window, on the same scanline."
+//
+// The two sentences are one rule: the counter is compared for *equality*
+// against WX on every dot, and every match that finds the window not already
+// drawing activates it and advances the window's row. A bare re-enable does
+// nothing because the counter is monotonic and has already gone past an
+// unchanged WX; a re-enable with WX moved ahead of the counter is matched
+// again, and the row it draws is the next one.
+namespace {
+struct TimedWrite { int dot; u16 address; u8 value; };
+
+// Runs one whole line, landing each write on the first tick at or past its
+// line dot, and returns the line's picture and the dots mode 3 lasted. The
+// dots must be in increasing order and at least an M-cycle apart, as they
+// would be for a handler writing the registers one instruction at a time.
+CharLine characteriseWrites(Ppu& ppu, const std::vector<TimedWrite>& writes) {
+    while (ppu.mode() != 3) { ppu.tick(); }
+    const int line = ppu.lineNumber();
+    std::size_t next = 0;
+    int drawing = 0;
+    while (ppu.mode() == 3) {
+        while (next < writes.size() && ppu.lineDot() >= writes[next].dot) {
+            static_cast<void>(ppu.write(writes[next].address, writes[next].value));
+            ++next;
+        }
+        ppu.tick();
+        drawing += 4;
+    }
+    while (ppu.lineNumber() == line) { ppu.tick(); }
+    return CharLine{drawing, lineDigits(ppu, line)};
+}
+
+// setUpWindowRuler's window tile draws 3,2,1,0,0,1,2,3 across its even rows
+// and 1,0,1,0,0,1,0,1 across its odd ones, so the eight pixels a window band
+// opens with say which row of the window the band drew.
+constexpr const char* kEvenWindowRow = "32100123";
+constexpr const char* kOddWindowRow = "10100101";
+} // namespace
+
+TEST_CASE("the window activates twice on one line when WX is moved ahead of the counter, and the second band draws the next row") {
+    // WX = 39 starts the window at screen x = 32 with its row 0 (even). LCDC
+    // bit 5 is then cleared, WX moved to 120 - a pixel the counter has not
+    // reached - and bit 5 set again, which is exactly the sequence Mealybug's
+    // notes describe: the window activates a second time at screen x = 113 and
+    // draws its *next* row (row 1, odd).
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x27, 0x00);
+    const CharLine got = characteriseWrites(ppu, {{160, 0xFF40, 0xD1},
+                                                  {164, 0xFF4B, 0x78},
+                                                  {168, 0xFF40, 0xF1}});
+    CHECK(got.pixels.substr(0, 32) == std::string(32, '1'));
+    CHECK(got.pixels.substr(32, 8) == kEvenWindowRow);
+    CHECK(got.pixels.substr(113, 8) == kOddWindowRow);
+    // Between the two bands the background has the line back. The background
+    // tile is a flat colour 1 here and the window's row is not, so the run of
+    // 1s that ends where the second band begins is the gap; it has to be
+    // non-empty, and it has to start where one of the first band's tiles ended.
+    int resume = 113;
+    while (resume > 0 && got.pixels[static_cast<std::size_t>(resume) - 1] == '1') { --resume; }
+    CHECK(resume > 32);
+    CHECK(resume < 113);
+    CHECK((resume - 32) % 8 == 0);
+    // Two activations, two fetcher restarts: 172 + 6 + 6 = 184 dots, against
+    // the 180 a single activation is sampled as.
+    CHECK(got.dots == 184);
+}
+
+TEST_CASE("two activations on a line advance the window's row twice, so the next line starts two rows on") {
+    // The row counter advances per activation, not per line: after a line with
+    // two activations the next line's window must draw an *even* row again
+    // (row 2), not the odd row 1 a once-per-line advance would leave it on.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0x27, 0x00);
+    const CharLine first = characteriseWrites(ppu, {{160, 0xFF40, 0xD1},
+                                                    {164, 0xFF4B, 0x78},
+                                                    {168, 0xFF40, 0xF1}});
+    REQUIRE(first.pixels.substr(32, 8) == kEvenWindowRow); // row 0
+    REQUIRE(first.pixels.substr(113, 8) == kOddWindowRow); // row 1
+    // Put WX back where it was and draw an ordinary line.
+    static_cast<void>(ppu.write(0xFF4B, 0x27));
+    const CharLine second = characteriseWrites(ppu, {});
+    CHECK(second.pixels.substr(32, 8) == kEvenWindowRow); // row 2, not row 1
+    CHECK(second.dots == 180);
+}
+
+TEST_CASE("a line the window is enabled on but never reaches does not advance its row") {
+    // LCDC bit 5 is set and the Y condition holds, but WX = 200 is past every
+    // value the counter takes, so there is no activation and no row advance:
+    // the line after it draws window row 0, not row 1.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xF1, 0x00, 0xC8, 0x00);
+    const CharLine missed = characteriseWrites(ppu, {});
+    CHECK(missed.pixels == std::string(160, '1'));
+    CHECK(missed.dots == 172);
+    static_cast<void>(ppu.write(0xFF4B, 0x27));
+    const CharLine drawn = characteriseWrites(ppu, {});
+    CHECK(drawn.pixels.substr(32, 8) == kEvenWindowRow); // row 0
+}
+
+TEST_CASE("LCDC bit 5 set after the counter has gone past WX does not start the window") {
+    // The comparison is an equality, so a window enabled once the counter is
+    // already past WX is simply never matched on that line - and, having never
+    // activated, it does not advance its row either. Mealybug's notes put it
+    // as "no effect unless WX has been updated to set the window to activate
+    // on a pixel that hasn't been drawn yet"; here WX is not updated at all.
+    Ppu ppu;
+    setUpWindowRuler(ppu, 0xD1, 0x00, 0x27, 0x00); // window off to start with
+    const CharLine late = characteriseWrites(ppu, {{240, 0xFF40, 0xF1}});
+    CHECK(late.pixels == std::string(160, '1'));
+    CHECK(late.dots == 172);
+    const CharLine next = characteriseWrites(ppu, {});
+    CHECK(next.pixels.substr(32, 8) == kEvenWindowRow); // still row 0
 }

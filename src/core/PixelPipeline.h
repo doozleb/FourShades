@@ -81,8 +81,9 @@ private:
 
     void stepFetcher(const Ppu& ppu);
     // Every condition the window needs other than the X counter's match:
-    // Pan Docs' "Y condition" and LCDC bit 5, both read live, plus the
-    // one-activation-per-line latch this model still has.
+    // Pan Docs' "Y condition" and LCDC bit 5, both read live, and that the
+    // window is not already drawing. All three are hardware conditions; there
+    // is no once-per-line latch, because none is needed - see window_.
     bool windowConditions(const Ppu& ppu) const;
     // Resets background rendering to the window's tilemap, as a counter match
     // does on hardware.
@@ -161,26 +162,24 @@ private:
     int discard_ = 0;  // SCX % 8 pixels dropped at the start of the line
     // The fetcher is drawing the window right now. Set when the X counter
     // matches WX and cleared again by stopWindowIfDisabled when LCDC bit 5
-    // goes low part-way along the line.
+    // goes low part-way along the line. It also carries the whole of the
+    // once-at-a-time rule, with no activation latch beside it: the counter
+    // only counts up and the comparison is an equality, so an unchanged WX
+    // can never be matched twice and a WX moved *behind* the counter can never
+    // be matched at all. That is Mealybug's "setting WIN_EN again during mode 3
+    // on the same scanline will have no effect unless WX has been updated to
+    // set the window to activate on a pixel that hasn't been drawn yet" - it
+    // falls out of the equality rather than needing a flag. What this flag
+    // rules out is the one case the counter cannot: WX raised to a value still
+    // ahead of the counter while the window is already drawing. Pan Docs' pixel
+    // FIFO page says that case pushes a colour-0, lowest-priority pixel instead
+    // of restarting the window, so a match there is not an activation.
     bool window_ = false;
-    // The window has been activated on this line. Unlike window_ this is a
-    // latch, never cleared before the next line: this model still activates
-    // the window at most once per line (see windowConditions), and Mealybug's
-    // notes are why a stopped window must not simply restart when bit 5 comes
-    // back - "setting WIN_EN again during mode 3 on the same scanline will
-    // have no effect unless WX has been updated to set the window to activate
-    // on a pixel that hasn't been drawn yet". Re-activation, with the window
-    // row advance that goes with it, is the next task; until it lands, setting
-    // bit 5 again after a stop does nothing at all, which is what the notes
-    // say happens whenever WX has not moved.
-    bool windowActivated_ = false;
     // The window's scanline X counter (kWindowCounterHeadStart). It is what
-    // WX is compared against: 0 at the top of the line, then the free
-    // increments, then one per pixel rendered. Nothing else in the pipeline
-    // reads it, so while the window is a one-activation-per-line latch it
-    // simply tracks pixelX_ + kWindowCounterHeadStart; the value of having it
-    // is that the comparison is the hardware's comparison rather than
-    // arithmetic on pixelX_, which is what a re-triggerable window needs.
+    // WX is compared against, for equality, on every dot: 0 at the top of the
+    // line, then the free increments, then one per pixel rendered. Every match
+    // that finds the window not already drawing activates it and advances the
+    // window's row, so one line can start the window any number of times.
     int windowX_ = 0;
     bool windowXHeadStart_ = false; // the free increments have been taken
     int windowSkip_ = 0;         // window pixels off the left edge, for WX < 7

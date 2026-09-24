@@ -920,28 +920,13 @@ available here: implement what both say.
 then one per pixel rendered. WX is compared against it rather than against
 `pixelX_` arithmetic, and a match runs `startWindow`.
 
-Since 2026-09-24 the first of the WIN_EN passages above **is** modelled: see
-"Clearing LCDC bit 5 part-way along a line stops the window" below.
+Since 2026-09-24 all four of the WIN_EN passages above **are** modelled: see
+"Clearing LCDC bit 5 part-way along a line stops the window" for the first two
+and "The window can start more than once on a scanline" for the last two.
 
-Three things about the model are deliberately **not** the hardware's yet, and
-each is a named later task, not an oversight:
+One thing about the model is deliberately **not** the hardware's yet, and it is
+a named later task, not an oversight:
 
-- The window still *activates* at most once per line (`windowActivated_` is a
-  latch), so Pan Docs' "more than once per scanline" and the notes' "if WX has
-  been updated correctly and WIN_EN is set again ... it will start drawing the
-  next row of the window" are not modelled. A window stopped by a cleared
-  bit 5 therefore stays stopped for the rest of the line, which is what the
-  notes say a bare re-enable does; what is missing is the re-enable *with* WX
-  moved.
-- Because of that latch, the per-dot comparison in `stepDot` is
-  greater-or-equal, not the equality the hardware uses: it is the only way the
-  window can start at all on a line where LCDC bit 5 was set, or WX lowered,
-  after the counter had already gone past WX, and that case is load-bearing
-  (measured on 2026-09-24, before the mid-line disable below landed: making it
-  a strict equality moved `m3_lcdc_win_en_change_multiple_wx` from 5942
-  differing pixels to 3759 and `m3_window_timing` from 28 to 33 — it changes
-  pictures, in both directions). The free increments *are* compared for
-  equality.
 - The free increments are taken on the dot the SCX discard finishes, not at
   the top of the line, because this model spends the discard as
   emitted-and-dropped pixels where the hardware's free increments *are* the
@@ -966,14 +951,14 @@ here is one thing those notes do **not** pin, and the measurement.
   updated to set the window to activate on a pixel that hasn't been drawn
   yet." These are the author's notes on his own hardware photographs, so under
   the rule at the top of this file they stand.
-- **FourShades:** `PixelPipeline` now keeps two flags where it kept one.
-  `window_` means "the fetcher is drawing the window", and
-  `stopWindowIfDisabled` clears it on the dot LCDC bit 5 goes low;
-  `windowActivated_` is the once-per-line activation latch and is *not*
-  cleared, so a bare re-enable does nothing, which is the third sentence. The
-  queue is not cleared and the fetcher is not restarted, so the pixels of the
-  window tile already queued are drawn (the first sentence), the switch costs
-  no dots, and no fresh SCX fine-scroll discard is taken (the second).
+- **FourShades:** `window_` means "the fetcher is drawing the window", and
+  `stopWindowIfDisabled` clears it on the dot LCDC bit 5 goes low. A bare
+  re-enable then does nothing, which is the third sentence, because the X
+  counter's comparison against WX is an equality and the counter has already
+  gone past an unchanged WX - see the entry below; it needs no latch of its
+  own. The queue is not cleared and the fetcher is not restarted, so the pixels
+  of the window tile already queued are drawn (the first sentence), the switch
+  costs no dots, and no fresh SCX fine-scroll discard is taken (the second).
 - **What the notes do not say: which background tile column resumes.** The
   fetcher has one column counter, `fetcherX_`, which the window reset to 0 and
   then counted window tiles with. FourShades lets it keep counting, so the
@@ -1008,6 +993,73 @@ here is one thing those notes do **not** pin, and the measurement.
   moved by a pixel, and neither of these two passes yet: both also need the
   re-activation and the per-activation window row advance. `ppu timing` stays
   12 / 12, `m3_bgp_change`, `dmg-acid2` and `m2_win_en_toggle` stay exact.
+- **Checked:** 2026-09-24.
+
+## The window can start more than once on a scanline, and its row advances at each start (2026-09-24)
+
+Not a divergence: the behaviour is implemented, and both documents quoted above
+say the same thing about it. What is recorded here is the shape of the rule, the
+one comparison that had to change with it, and what it measured.
+
+- **Evidence:** Pan Docs' Window page - "When this counter is equal to `WX` ...
+  background rendering is reset, beginning anew from the active row of the
+  Window's tilemap. **The coordinate of the active Window row is then
+  incremented.**" and "**This process can happen more than once per
+  scanline**, making the Window's "tilemap Y coordinate" increase more than once
+  in the scanline. ... However, this requires "disabling" the Window by briefly
+  clearing its enable bit from `LCDC` first." - together with Mealybug's
+  "Setting WIN_EN again during mode 3 on the same scanline will have no effect
+  unless WX has been updated to set the window to activate on a pixel that
+  hasn't been drawn yet." and "If WX has been updated correctly and WIN_EN is
+  set again then the PPU stops drawing the background, and will activate the
+  window again, but it will start drawing the **next row** of the window, on the
+  same scanline." Both are quoted in full in the section above.
+- **FourShades:** `PixelPipeline::windowConditions` is now Pan Docs' two
+  conditions (LCDC bit 5 and the Y condition, both read live) plus "the window
+  is not already drawing", and the per-dot comparison in `stepDot` is
+  `windowX_ == WX`. `startWindow` reads the window's line counter and then
+  advances it, so it advances **per activation**: a line that never matches WX
+  leaves it alone, a line that matches twice advances it twice and the second
+  band draws the row after the first.
+- **The once-at-a-time rule needs no latch.** The activation latch this
+  replaced (`windowActivated_`) was there to stop a bare re-enable restarting a
+  stopped window. It is unnecessary once the comparison is an equality: the
+  counter only counts up, so an unchanged WX cannot be matched twice and a WX
+  moved *behind* the counter cannot be matched at all. That is Mealybug's third
+  sentence, and it falls out of the arithmetic rather than being asserted on top
+  of it. The `!window_` term rules out the one case the counter cannot: WX
+  raised to a value still ahead of the counter while the window is already
+  drawing. Pan Docs' pixel FIFO page says that case pushes a colour-0,
+  lowest-priority pixel instead of restarting the window, so a match there is
+  not an activation - and modelling that pixel is a later task.
+- **The `>=` and the re-activation are one change, not two.** The comparison
+  used to be greater-or-equal so that a window enabled, or a WX lowered, after
+  the counter had gone past WX would still start; with re-activation allowed
+  that looseness would re-fire on *every* dot the counter sits past WX, which is
+  exactly the bare re-enable the notes forbid. Measured separately on
+  2026-09-24, the strict equality alone moved
+  `m3_lcdc_win_en_change_multiple_wx` from 5942 to 3759 and `m3_window_timing`
+  from 28 to 33 - pictures in both directions. Together with re-activation the
+  same equality is a large net win (below).
+- **The consequence to be honest about:** a window enabled, or a WX changed, to
+  a value the counter has already passed now draws nothing at all on that line,
+  where it used to start late. Pan Docs and Mealybug both describe an equality,
+  so this is what they say; the only test in the suite that moved the wrong way
+  is `m3_window_timing`, +5 pixels, and its remaining error is the WX-below-7
+  start-up cost recorded in the entry below rather than the comparison.
+- **Effect:** `m3_lcdc_win_en_change_multiple` 5760 differing pixels -> 468,
+  `m3_lcdc_win_en_change_multiple_wx` 1228 -> 77, `m3_window_timing` 28 -> 33.
+  Nothing else in the suite moved by a pixel: `m3_wx_6_change` stays 13799,
+  `m3_wx_5_change` 638, `m3_wx_4_change` 229, `m3_wx_4_change_sprites` 10, and
+  `ppu timing` 12 / 12 with `m3_bgp_change`, `dmg-acid2` and, the canary for the
+  row counter, `m2_win_en_toggle` all still exact. The `screen` group's
+  differing-pixel total went 40108 -> 33670.
+- **What is left in the two that moved.** `m3_lcdc_win_en_change_multiple`'s
+  468 pixels are all in columns 49-56, a single tile wide: the tile the window
+  hands back to the background on, which is the dot a fetch in flight samples
+  LCDC bit 5, not the activation rule. `m3_lcdc_win_en_change_multiple_wx`'s 77
+  are all in columns 0-9 and 28-37 and are a window that starts one pixel late,
+  which is the WX-below-7 start-up cost in the entry below.
 - **Checked:** 2026-09-24.
 
 ## A WX below 7 pushes the window's leftmost pixels off the screen (2026-09-21)

@@ -18,7 +18,6 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     pixelX_ = 0;
     discard_ = ppu.scx() & 0x07;
     window_ = false;
-    windowActivated_ = false;
     fetchWindow_ = false;
     windowX_ = 0;
     windowXHeadStart_ = false;
@@ -102,8 +101,8 @@ void PixelPipeline::stepFetcher(const Ppu& ppu) {
             // reached the fetcher before it read the map (see
             // stopWindowIfDisabled) and the window tile the clip was owed to
             // never arrived. The background carries on from where it was, so
-            // it is not clipped, and nothing is left owing: the window cannot
-            // start again on this line.
+            // it is not clipped, and nothing is left owing: a later activation
+            // on this line sets the clip again from the WX it matched.
             windowSkip_ = 0;
         } else if (windowSkip_ > 0) {
             // The window pixels that fall off the left edge (see the WX
@@ -285,8 +284,15 @@ int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
         // The counter reads kWindowCounterHeadStart before pixel 0 and one
         // more per pixel rendered, so kWindowCounterHeadStart + 159 is the
         // largest value it takes while a pixel is still to be emitted: a WX
-        // above that is never matched on this line.
-        if (static_cast<int>(ppu.wx()) <= kWindowCounterHeadStart + 159) {
+        // above that is never matched on this line. Nor is one the counter has
+        // already gone past, because the comparison is an equality - so the
+        // activation is only still to come while WX is a value the counter has
+        // yet to *test*. The counter's own current value still counts as one of
+        // those: stepDot compares at the top of a dot and increments at the
+        // bottom of it, and this runs in between, so a counter that has just
+        // reached WX is matched on the next dot, not this one.
+        const int wx = static_cast<int>(ppu.wx());
+        if (wx >= windowX_ && wx <= kWindowCounterHeadStart + 159) {
             dots += kWindowRestartDots;
         }
     }
@@ -344,14 +350,12 @@ int PixelPipeline::dotsRemaining(const Ppu& ppu) const {
 bool PixelPipeline::windowConditions(const Ppu& ppu) const {
     // Pan Docs, "Window behavior": a counter match starts the window only "if
     // the Y condition is true and the Window enable bit is set in LCDC". Both
-    // are read here, on the dot the match is tested, not once per line.
-    // windowActivated_ is the third term and is not a hardware condition: this
-    // model still activates the window at most once per line, which is the
-    // restriction the task after this one lifts. It is the activation latch
-    // and not window_, so that a window stopped part-way along the line by a
-    // cleared LCDC bit 5 does not silently re-activate when bit 5 comes back:
-    // Mealybug's notes say a bare re-enable has no effect.
-    return !windowActivated_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached();
+    // are read here, on the dot the match is tested, not once per line. The
+    // third term is that the window is not already drawing, which is the one
+    // thing the equality comparison cannot express on its own; see window_ in
+    // the header for why nothing else is needed, and why a bare re-enable
+    // therefore does nothing without a WX that moved ahead of the counter.
+    return !window_ && (ppu.lcdc() & 0x20) != 0 && ppu.windowReached();
 }
 
 void PixelPipeline::startWindow(Ppu& ppu) {
@@ -359,7 +363,6 @@ void PixelPipeline::startWindow(Ppu& ppu) {
     // row of the Window's tilemap" - the background queue is cleared and the
     // fetcher restarts, which costs the documented kWindowRestartDots dots.
     window_ = true;
-    windowActivated_ = true;
     queueSize_ = 0;
     queueHead_ = 0;
     step_ = Step::Tile;
@@ -388,7 +391,12 @@ void PixelPipeline::startWindow(Ppu& ppu) {
     // into this line's tiles.
     windowLineUsed_ = ppu.windowLine();
     // Pan Docs: "The coordinate of the active Window row is then
-    // incremented." Only lines that drew the window advance it.
+    // incremented." It is the activation that advances it, not the line: a
+    // line that never matched WX leaves it where it was, and a line that
+    // matched twice advances it twice, so the second band draws the row after
+    // the first - Mealybug's "it will start drawing the next row of the
+    // window, on the same scanline". Reading windowLineUsed_ just above,
+    // before the advance, is what makes that come out right for both bands.
     ppu.advanceWindowLine();
 }
 
@@ -419,9 +427,10 @@ void PixelPipeline::takeWindowHeadStart(Ppu& ppu) {
 }
 
 void PixelPipeline::stopWindowIfDisabled(const Ppu& ppu) {
-    // See the header for the two sentences of Mealybug's notes this is. Only
-    // window_ is cleared: windowActivated_ stays set, so nothing re-activates
-    // the window later on this line.
+    // See the header for the two sentences of Mealybug's notes this is.
+    // Clearing window_ is what lets the window activate again later on the
+    // line - but only if WX moves ahead of the counter first, because the
+    // comparison in stepDot is an equality and the counter only counts up.
     if (window_ && (ppu.lcdc() & 0x20) == 0) {
         window_ = false;
     }
@@ -437,18 +446,15 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
         if (discard_ == 0) {
             takeWindowHeadStart(ppu);
         }
-    } else if (windowConditions(ppu) && windowX_ >= static_cast<int>(ppu.wx())) {
-        // Equality is what the hardware compares, and takeWindowHeadStart
-        // above does compare equality. This branch is deliberately looser: it
-        // fires as well when the counter is already past WX, which is what the
-        // pixelX_ >= WX - 7 arithmetic this task replaced did. It is the only
-        // way the window can start on a line where LCDC bit 5 was set, or WX
-        // lowered, after the counter had gone by - and since the window here
-        // activates at most once per line, dropping it would change pictures
-        // this task must leave alone. The task that makes the window
-        // re-triggerable replaces it with a plain equality test plus Pan Docs'
-        // re-activation rule ("This process can happen more than once per
-        // scanline").
+    } else if (windowConditions(ppu) && windowX_ == static_cast<int>(ppu.wx())) {
+        // Pan Docs: "When this counter is equal to WX ... background rendering
+        // is reset". An equality, tested on every dot, and every match that
+        // finds the window not already drawing is an activation - "this
+        // process can happen more than once per scanline". A counter that has
+        // gone past WX is therefore not a match: a window enabled late, or a
+        // WX lowered behind the counter, does not start on that line, and
+        // nothing on the line after a stop restarts the window until WX is
+        // moved ahead of the counter again.
         startWindow(ppu);
     }
     // After the activation test, so that a line whose LCDC bit 5 is clear
