@@ -2262,6 +2262,119 @@ TEST_CASE("an object fetch leaves the fetcher three dots ahead of the pixels") {
     CHECK(row[16] == 3); // the tile after it reads its index on dot 119
 }
 
+// ---------------------------------------------------------------------------
+// LCDC bit 1 and the dot an object fetch begins
+//
+// Pan Docs' OBJ penalty algorithm gives an object's stall two terms: the
+// pixels of The Pixel's background tile still to its right, minus two, which
+// is the background fetcher finishing the tile it is in; and a flat six dots
+// for fetching the object's own tile. So the object's own fetch does not begin
+// on the dot the pixel counter reaches the object - it begins once the wait is
+// over - and Pan Docs' condition for starting one, LCDC bit 1, is read on that
+// dot rather than on the trigger's.
+//
+// A bit 1 that is clear there abandons the fetch outright, and only the wait is
+// charged; a bit 1 that goes clear afterwards is Pan Docs' cancel, which keeps
+// every dot it was charged. Measured on two bands of a Mealybug Tearoom
+// reference whose wait is five dots and four - see
+// docs/known-divergences.md, "LCDC bit 1 is read on the dot an object fetch
+// begins, and a fetch that never begins charges only the wait".
+namespace {
+// The screen x of the first pixel a BGP write at line dot `dot` shades on its
+// own, given a line whose pixel stream is `stall` dots behind an object-free
+// one. The write takes effect from the next dot, and the pixel drawn there is
+// shaded with the old palette OR the new one (docs/known-divergences.md,
+// "Palette writes short the old and new values together for one dot") - which
+// for these cases, E4 shorted with 00, is the old shade. So the first pixel the
+// seam is visible on is two dots after the write. Pixel 0 is drawn on line dot
+// 100 plus the stall.
+int seamAt(int dot, int stall) { return dot + 2 - 100 - stall; }
+} // namespace
+
+TEST_CASE("LCDC bit 1 clear on the dot an object fetch begins charges only the wait") {
+    // The object at OAM X = 16 sits at screen x = 8, the first pixel of the
+    // second background tile, so its wait is 7 - 0 - 2 = 5 dots: triggered on
+    // line dot 108, the fetch would begin on dot 113. LCDC bit 1 written clear
+    // on dot 112 is visible exactly there, so the fetch never begins and the
+    // line's pixels are five dots behind an object-free line, not eleven.
+    Ppu ppu;
+    setUpTile(ppu, 0xFF, 0x00); // every background pixel colour 1
+    addStallingObject(ppu, 16);
+    runLine(ppu); // line 1, not line 0: line 0 draws four dots early
+    const CharLine got = characteriseWrites(ppu, {{112, 0xFF40, 0x91},  // objects off
+                                                  {200, 0xFF47, 0x00}}); // colour 1 -> shade 0
+    const int seam = seamAt(200, 5);
+    CHECK(seam == 97);
+    CHECK(got.pixels.substr(0, static_cast<std::size_t>(seam)) ==
+          std::string(static_cast<std::size_t>(seam), '1'));
+    CHECK(got.pixels[static_cast<std::size_t>(seam)] == '0');
+    // Mode 3 is 172 dots plus the five the wait cost, less the three dots the
+    // fetcher keeps of the line's first object fetch, sampled in whole M-cycles.
+    CHECK(got.dots == 176);
+}
+
+TEST_CASE("the dot bit 1 is read on moves with the wait, not with the trigger") {
+    // The object at OAM X = 17 is one pixel further right, so its wait is one
+    // dot shorter - four - and its fetch would begin on the same dot 113 from a
+    // trigger one dot later. Both bands of the reference land their write there,
+    // and the two waits are what tell "the dot the fetch begins" apart from any
+    // fixed offset from the trigger.
+    Ppu ppu;
+    setUpTile(ppu, 0xFF, 0x00);
+    addStallingObject(ppu, 17);
+    runLine(ppu);
+    const CharLine got = characteriseWrites(ppu, {{112, 0xFF40, 0x91}, {200, 0xFF47, 0x00}});
+    const int seam = seamAt(200, 4);
+    CHECK(seam == 98);
+    CHECK(got.pixels[static_cast<std::size_t>(seam)] == '0');
+    CHECK(got.pixels[static_cast<std::size_t>(seam) - 1] == '1');
+    CHECK(got.dots == 176); // 172 + 4 - 3, sampled in whole M-cycles
+}
+
+TEST_CASE("LCDC bit 1 clear after an object fetch has begun still costs every dot") {
+    // Pan Docs: "Object fetching may be canceled if LCDC.1 is disabled while the
+    // PPU is fetching an object from OAM ... Exiting object fetch lengthens mode
+    // 3 by 1 dot." A cancel keeps the dots; only the merge is skipped. Written
+    // on dot 116, four dots into the fetch that began on 113, the whole eleven
+    // dots are still charged. The same reference measures this from the other
+    // side: its bands whose object is off the left edge are cancelled on the dot
+    // their row would have been read, and their pixels keep the full penalty.
+    Ppu ppu;
+    setUpTile(ppu, 0xFF, 0x00);
+    addStallingObject(ppu, 16);
+    runLine(ppu);
+    const CharLine got = characteriseWrites(ppu, {{116, 0xFF40, 0x91}, {200, 0xFF47, 0x00}});
+    const int seam = seamAt(200, 11);
+    CHECK(seam == 91);
+    CHECK(got.pixels[static_cast<std::size_t>(seam)] == '0');
+    CHECK(got.pixels[static_cast<std::size_t>(seam) - 1] == '1');
+    CHECK(got.dots == 180); // 172 + 11 - 3, sampled in whole M-cycles
+}
+
+TEST_CASE("an object whose wait is zero is decided by the trigger's own bit 1 read") {
+    // A second object in a background tile that has already paid its term has no
+    // wait at all, so the dot its fetch begins *is* the dot it is triggered on -
+    // where the condition on starting a fetch is already read. The two rules are
+    // the same rule. Two objects at OAM X = 16 and 17 share tile 1: the first
+    // pays 5 + 6 and the second a flat 6, and clearing bit 1 on dot 112 - the
+    // dot the first one's fetch would have begun - abandons the first and stops
+    // the second from being triggered at all, leaving the five-dot wait alone.
+    Ppu ppu;
+    setUpTile(ppu, 0xFF, 0x00);
+    addStallingObject(ppu, 16);
+    static_cast<void>(ppu.write(0xFF40, 0x11)); // LCD off so OAM lands
+    ppu.oamWrite(0xFE04, 0x10);
+    ppu.oamWrite(0xFE05, 0x11); // a second transparent object at OAM X = 17
+    ppu.oamWrite(0xFE06, 0x02);
+    ppu.oamWrite(0xFE07, 0x00);
+    enableLcd(ppu, 0x93);
+    runLine(ppu);
+    const CharLine got = characteriseWrites(ppu, {{112, 0xFF40, 0x91}, {200, 0xFF47, 0x00}});
+    CHECK(got.pixels[static_cast<std::size_t>(seamAt(200, 5))] == '0');
+    CHECK(got.pixels[static_cast<std::size_t>(seamAt(200, 5)) - 1] == '1');
+    CHECK(got.dots == 176); // 172 + 5 - 3, both fetches gone
+}
+
 TEST_CASE("an object fetch triggered on the dot the window activates does not wait for the window's row") {
     // The two things that can happen on the dot the line's first row reaches the
     // FIFO: the X counter reaches WX and the window resets the fetcher, and an
