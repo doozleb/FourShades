@@ -382,7 +382,7 @@ TEST_CASE("an object fetch reads LCDC bit 2 two dots before the pixel it pre-emp
     CHECK(row[23] == 2);
 }
 
-TEST_CASE("an object fetch reads LCDC bit 2 no later than that") {
+TEST_CASE("an object fetch reads LCDC bit 2 no later than that, and again a dot later") {
     // The other side of the same dot, which needs the M-cycle grid broken: a
     // write lands at the end of an M-cycle and mode 3 starts on a multiple of
     // four, so one object's address dot can only ever be separated from the dot
@@ -390,10 +390,16 @@ TEST_CASE("an object fetch reads LCDC bit 2 no later than that") {
     // one. The transparent object at screen x = 0 costs eleven dots, so pixel 0
     // is drawn on dot 111 and pixel 1 is due on 112; the object at screen x = 1
     // is fetched there, pays the flat six dots alone (its tile was already
-    // counted), and so builds its address on dot 116 and draws on dot 118.
+    // counted), and so builds its low bitplane's address on dot 116, its high
+    // bitplane's on 117, and draws on dot 118.
     //
-    // Bit 2 set on dot 116 is visible from dot 117: this fetch is the 8x8 one,
-    // and an address built a dot later would make it the 8x16 one.
+    // Bit 2 set on dot 116 is visible from dot 117, so this is the write that
+    // falls *between* the two bitplanes: the low half is the 8x8 object's and
+    // the high half the 8x16 object's, and the row the object draws is mixed out
+    // of both - colour 3, where either height alone gives 1 or 2. A low bitplane
+    // built one dot later would make the whole row the 8x16 one, colour 2. See
+    // docs/known-divergences.md, "An object fetch reads its two bitplanes on two
+    // dots, and builds each address the way the hardware does".
     Ppu ppu;
     setUpHeightRuler(ppu);
     for (u16 row = 0; row < 16; ++row) {
@@ -402,6 +408,6 @@ TEST_CASE("an object fetch reads LCDC bit 2 no later than that") {
     putObject(ppu, 0, 16, 8, 4, 0x00);     // screen x = 0, draws nothing
     putObject(ppu, 1, 16, 8 + 1, 3, 0x00); // screen x = 1, tile 3
     const u8* row = lineWithWrites(ppu, 1, {{116, 0xFF40, 0x97}});
-    CHECK(row[1] == 1); // tile 3's colour 1: still an 8x8 object
-    CHECK(row[8] == 1);
+    CHECK(row[1] == 3); // tile 3's low half over tile 2's high half
+    CHECK(row[8] == 3);
 }

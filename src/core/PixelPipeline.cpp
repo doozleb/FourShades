@@ -31,6 +31,8 @@ void PixelPipeline::startLine(const Ppu& ppu) {
     objects_ = {};
     objectDots_ = 0;
     objectFetching_ = false;
+    objectLowRead_ = false;
+    objectLow_ = 0;
     objectLeadDots_ = 0;
     fifoLead_ = 0;
     drawn_ = 0;
@@ -231,6 +233,8 @@ void PixelPipeline::startObject(const Ppu& ppu, std::size_t index) {
                                 objectPenaltyStarted_);
     objectIndex_ = index;
     objectFetching_ = true;
+    objectLowRead_ = false;
+    objectLow_ = 0;
     if (firstOnLine) {
         // The line's first object fetch is where the fetcher takes its lead and
         // the FIFO starts carrying it. See kObjectFetcherLead.
@@ -251,28 +255,48 @@ void PixelPipeline::abandonObjectIfDisabled(const Ppu& ppu) {
 }
 
 void PixelPipeline::cancelObjectIfDisabled(const Ppu& ppu) {
+    if (objectLowRead_) {
+        // The lower address is retrieved, so Pan Docs' last chance is over; see
+        // fetchObjectLow.
+        return;
+    }
     if (objectFetching_ && (ppu.lcdc() & 0x02) == 0) {
         objectFetching_ = false; // the dots stay owed; see the header
     }
 }
 
-void PixelPipeline::fetchObjectRow(const Ppu& ppu) {
+u16 PixelPipeline::objectRowAddress(const Ppu& ppu) const {
     // PixelPipeline.h only forward-declares Ppu, so the object is reached
     // through the index rather than named in the header.
     const Ppu::Object& object = ppu.lineObjects()[objectIndex_];
-    // LCDC bit 2 is read here, on the dot the address is built, not when the
-    // fetch was triggered: a write that lands in between changes the object's
-    // height under its own fetch, which is what one of the Mealybug Tearoom
-    // references photographs.
+    // LCDC bit 2 is read here, on the dot this address is built, not when the
+    // fetch was triggered and not once for the whole fetch: a write that lands
+    // between the two bitplanes' dots changes the object's height under its own
+    // fetch, which is what one of the Mealybug Tearoom references photographs.
     const int height = ppu.objectHeight();
     int row = ppu.lineNumber() - (static_cast<int>(object.y) - 16);
     if ((object.flags & 0x40) != 0) { // Y flip
         row = height - 1 - row;
     }
-    const u8 tile = height == 16 ? static_cast<u8>(object.tile & 0xFE) : object.tile;
-    const u16 address = static_cast<u16>(0x8000 + tile * 16 + row * 2);
-    const u8 low = ppu.peekVram(address);
-    const u8 high = ppu.peekVram(static_cast<u16>(address + 1));
+    // The row's low three bits index within a tile and, for a sixteen-pixel
+    // object, its bit 3 replaces bit 0 of the tile number. See the header.
+    const u8 tile = height == 16
+                        ? static_cast<u8>((object.tile & 0xFE) | ((row >> 3) & 1))
+                        : object.tile;
+    return static_cast<u16>(0x8000 + tile * 16 + (row & 7) * 2);
+}
+
+void PixelPipeline::fetchObjectLow(const Ppu& ppu) {
+    objectLow_ = ppu.peekVram(objectRowAddress(ppu));
+    // Pan Docs: "Once the address is retrieved this is the last chance for object
+    // fetch cancel to occur." It has been retrieved; see cancelObjectIfDisabled.
+    objectLowRead_ = true;
+}
+
+void PixelPipeline::fetchObjectHigh(const Ppu& ppu) {
+    const Ppu::Object& object = ppu.lineObjects()[objectIndex_];
+    const u8 low = objectLow_;
+    const u8 high = ppu.peekVram(static_cast<u16>(objectRowAddress(ppu) + 1));
 
     const int screenX = static_cast<int>(object.x) - 8;
     for (int i = 0; i < 8; ++i) {
@@ -745,8 +769,11 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
             stepFetcher(ppu);
         }
         cancelObjectIfDisabled(ppu);
-        if (objectFetching_ && objectDots_ < kObjectDataDots) {
-            fetchObjectRow(ppu);
+        if (objectFetching_ && objectDots_ == kObjectDataDots - 1) {
+            fetchObjectLow(ppu);
+        }
+        if (objectFetching_ && objectDots_ == 0) {
+            fetchObjectHigh(ppu);
         }
         return false;
     }
