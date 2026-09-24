@@ -46,6 +46,16 @@ public:
     // activation still to come and, through fetchStallDots below, whatever
     // is left of one already running. See docs/known-divergences.md,
     // "Rendering runs seven dots behind the mode-3 window".
+    //
+    // What comes out of this, stated so it can be checked rather than read:
+    // mode 3 lasts its 172-dot minimum, plus SCX % 8 for the fine-scroll
+    // discard, plus kWindowRestartDots for every window activation on the
+    // line, plus the object penalties. Those three lengthening terms are
+    // independent and additive and nothing else is in them. The same entry
+    // records which of them hardware measures - the window's is the one
+    // nothing outside this repository does - and how the dot-exact figures are
+    // pinned, since STAT only moves on whole M-cycles and no picture reflects
+    // this at all.
     int dotsRemaining(const Ppu& ppu) const;
 
     // The dots a window activation forces the fetcher to spend before its
