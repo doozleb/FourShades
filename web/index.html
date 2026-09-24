@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>FourShades</title>
+<meta name="description" content="A Game Boy emulator written with AI agents, measured against the public test ROMs. Drop a ROM in and play it." />
+<meta name="theme-color" content="#0d0f12" />
+<style>
+  :root {
+    --bg: #0d0f12; --bg-raised: #15181d; --fg: #e6e8eb; --fg-dim: #8b929c;
+    --accent: #a78bfa; --border: #2c323d;
+    --font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    gap: 1rem; padding: clamp(1rem, 3vw, 2rem) 1rem 2rem;
+    background: var(--bg); color: var(--fg); font-family: var(--font); line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1 { font-size: 1.1rem; font-weight: 400; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-dim); margin: 0; }
+  h1 a { color: var(--accent); text-decoration: none; }
+
+  /* The screen. image-rendering: pixelated matters more than anything else
+     here -- a 160x144 picture scaled with smoothing is a blurry lie. */
+  #screen-wrap {
+    position: relative; border: 1px solid var(--border); background: #000;
+    line-height: 0; max-width: 100%;
+  }
+  canvas {
+    display: block; image-rendering: pixelated; image-rendering: crisp-edges;
+    width: min(640px, 92vw); height: auto; aspect-ratio: 160 / 144;
+  }
+  #drop {
+    position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+    background: rgba(13,15,18,0.92); color: var(--fg-dim); font-size: 0.9rem; padding: 1rem;
+  }
+  #drop.hidden { display: none; }
+  #drop strong { color: var(--fg); font-weight: 400; display: block; margin-bottom: 0.4rem; }
+  body.dragging #drop { background: rgba(167,139,250,0.14); color: var(--fg); }
+
+  #status { color: var(--fg-dim); font-size: 0.85rem; min-height: 1.4em; text-align: center; }
+  #status b { color: var(--fg); font-weight: 400; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
+  button, label.file {
+    border: 1px solid var(--border); background: var(--bg-raised); color: var(--fg);
+    font: inherit; font-size: 0.85rem; padding: 0.4rem 0.85rem; cursor: pointer;
+  }
+  button:hover, label.file:hover { border-color: var(--accent); color: var(--accent); }
+  input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+  .keys { color: var(--fg-dim); font-size: 0.8rem; text-align: center; max-width: 42rem; }
+  .keys kbd { color: var(--fg); border: 1px solid var(--border); padding: 0 0.3em; }
+
+  /* Touch pad: only on coarse pointers, so a desktop never sees it. */
+  #pad { display: none; }
+  @media (pointer: coarse) {
+    #pad {
+      display: grid; width: min(100%, 24rem); gap: 0.75rem;
+      grid-template-columns: 1fr 1fr; align-items: center; margin-top: 0.5rem;
+    }
+    .dpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.3rem; }
+    .dpad > * { aspect-ratio: 1; }
+    .dpad .sp { visibility: hidden; }
+    .ab { display: flex; gap: 0.75rem; justify-content: center; align-items: center; }
+    .ab button { border-radius: 50%; width: 3.5rem; height: 3.5rem; }
+    .startsel { grid-column: 1 / -1; display: flex; gap: 0.75rem; justify-content: center; }
+    #pad button { background: var(--bg-raised); font-size: 0.9rem; }
+    #pad button.held { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  }
+
+  footer { color: var(--fg-dim); font-size: 0.8rem; text-align: center; max-width: 42rem; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1><a href="/projects/fourshades/">FourShades</a></h1>
+
+<div id="screen-wrap">
+  <canvas id="screen" width="160" height="144"></canvas>
+  <div id="drop">
+    <div>
+      <strong>Drop a Game Boy ROM here</strong>
+      or choose a file below. Nothing is uploaded — it runs in this tab.
+    </div>
+  </div>
+</div>
+
+<div id="status">loading the emulator…</div>
+
+<div class="controls">
+  <label class="file">Choose a ROM<input type="file" id="file" accept=".gb,.gbc,.bin" /></label>
+  <button id="pause">Pause</button>
+  <button id="reset">Reset</button>
+  <button id="palette">Palette</button>
+  <button id="mute">Mute</button>
+</div>
+
+<div id="pad">
+  <div class="dpad">
+    <span class="sp"></span><button data-button="ArrowUp">▲</button><span class="sp"></span>
+    <button data-button="ArrowLeft">◀</button><span class="sp"></span><button data-button="ArrowRight">▶</button>
+    <span class="sp"></span><button data-button="ArrowDown">▼</button><span class="sp"></span>
+  </div>
+  <div class="ab">
+    <button data-button="KeyX">B</button>
+    <button data-button="KeyZ">A</button>
+  </div>
+  <div class="startsel">
+    <button data-button="Backspace">Select</button>
+    <button data-button="Enter">Start</button>
+  </div>
+</div>
+
+<p class="keys">
+  <kbd>←↑→↓</kbd> d-pad · <kbd>Z</kbd> A · <kbd>X</kbd> B · <kbd>Enter</kbd> Start ·
+  <kbd>Backspace</kbd> Select · <kbd>Space</kbd> pause · <kbd>R</kbd> reset ·
+  <kbd>P</kbd> palette · <kbd>M</kbd> mute
+</p>
+
+<footer>
+  Your ROM never leaves this tab — there is no upload and no server.
+  Battery saves are kept in this browser's storage.
+  <a href="/projects/fourshades/">How it was built and what it scores</a> ·
+  <a href="https://github.com/doozleb/FourShades">Source</a>
+</footer>
+
+<script src="fourshades.js"></script>
+<script>
+  var Module = {
+    onRuntimeInitialized: function () {
+      const canvas = document.getElementById('screen');
+      const status = document.getElementById('status');
+      const drop = document.getElementById('drop');
+      const fs = new FourShades(Module, canvas, status);
+      fs.start();
+      status.textContent = 'ready — drop a ROM in';
+
+      function loadFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function () {
+          fs.load(new Uint8Array(reader.result), file.name.replace(/\.[^.]+$/, ''));
+          drop.classList.add('hidden');
+        };
+        reader.readAsArrayBuffer(file);
+      }
+
+      document.getElementById('file').addEventListener('change', function (e) {
+        loadFile(e.target.files[0]);
+      });
+
+      // Drag and drop anywhere on the page, not just on the screen.
+      ['dragenter', 'dragover'].forEach(function (t) {
+        window.addEventListener(t, function (e) {
+          e.preventDefault(); document.body.classList.add('dragging');
+        });
+      });
+      ['dragleave', 'drop'].forEach(function (t) {
+        window.addEventListener(t, function (e) {
+          e.preventDefault(); document.body.classList.remove('dragging');
+        });
+      });
+      window.addEventListener('drop', function (e) {
+        if (e.dataTransfer && e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+      });
+
+      document.getElementById('pause').addEventListener('click', function () { fs.togglePause(); });
+      document.getElementById('reset').addEventListener('click', function () { fs.reset(); });
+      document.getElementById('palette').addEventListener('click', function () { fs.cyclePalette(); });
+      document.getElementById('mute').addEventListener('click', function (e) {
+        fs.muted = !fs.muted;
+        e.target.textContent = fs.muted ? 'Unmute' : 'Mute';
+        fs.startAudio();
+      });
+    },
+  };
+</script>
+<script src="fourshades-wasm.js"></script>
+</body>
+</html>
