@@ -239,6 +239,17 @@ void PixelPipeline::startObject(const Ppu& ppu, std::size_t index) {
     }
 }
 
+void PixelPipeline::abandonObjectIfDisabled(const Ppu& ppu) {
+    // The wait in front of the object's own fetch is over on the dot the stall
+    // has exactly kObjectFetchDots left, and bit 1 is read there: a fetch that
+    // does not begin charges nothing beyond the wait, so the stall ends here and
+    // this dot draws the pixel the fetch would have pre-empted. See the header.
+    if (objectFetching_ && objectDots_ == kObjectFetchDots && (ppu.lcdc() & 0x02) == 0) {
+        objectDots_ = 0;
+        objectFetching_ = false;
+    }
+}
+
 void PixelPipeline::cancelObjectIfDisabled(const Ppu& ppu) {
     if (objectFetching_ && (ppu.lcdc() & 0x02) == 0) {
         objectFetching_ = false; // the dots stay owed; see the header
@@ -322,7 +333,7 @@ int PixelPipeline::objectPenalty(const Ppu& ppu, std::size_t index, int& lastTil
     // docs/known-divergences.md, "An object fetch costs the pixels three dots
     // more than it costs the fetcher and mode 3".
     const int backgroundX = static_cast<int>(ppu.scx()) + static_cast<int>(object.x) - 8;
-    int dots = 6;
+    int dots = kObjectFetchDots;
     // NOTE: this tile index is in background coordinates (SCX + the object's
     // own X). Once the window is drawing, tile boundaries actually follow
     // WX - 7 instead, so on a line with both a window and an object this term
@@ -344,7 +355,7 @@ int PixelPipeline::objectPenalty(const Ppu& ppu, std::size_t index, int& lastTil
             // general rule below gives 11 anyway, and no hardware measurement
             // available here reaches an OAM X = 0 object at a non-zero SCX,
             // so Pan Docs stands.
-            dots = 11;
+            dots = 11; // a wait of 11 - kObjectFetchDots, then the fetch
         } else {
             const int toTheRight = 7 - (backgroundX & 7);
             dots += toTheRight > 2 ? toTheRight - 2 : 0;
@@ -720,6 +731,11 @@ bool PixelPipeline::stepDot(Ppu& ppu, std::array<u8, 160>& line) {
     // LCDC bit 5 is not read here at all: the fetcher reads it, once per fetch,
     // on the dot that fetch completes. See stopWindowIfDisabled.
 
+    // The dot the object's own fetch begins on is the dot LCDC bit 1 is read on,
+    // and a fetch that does not begin leaves the stall with only its wait spent -
+    // so this runs before the dot is charged, and the dot may turn out to be an
+    // ordinary drawing one. See abandonObjectIfDisabled.
+    abandonObjectIfDisabled(ppu);
     if (objectDots_ > 0) {
         --objectDots_;   // the fetch stalls the pixel stream
         if (objectLeadDots_ > 0) {

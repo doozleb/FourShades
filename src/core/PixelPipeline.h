@@ -146,6 +146,19 @@ public:
     // more than it costs the fetcher and mode 3".
     static constexpr int kObjectFetcherLead = 3;
 
+    // The dots an object's own fetch costs, as against the wait in front of it.
+    // Pan Docs' OBJ penalty algorithm gives an object's stall two independent
+    // terms: the pixels of The Pixel's background tile still to its right, minus
+    // two, which is the background fetcher finishing the tile it is in and is
+    // charged once per tile; and this flat six for fetching the object's own
+    // tile, charged for every object. So the object's own fetch does not begin
+    // on the dot the pixel counter reaches the object - it begins once the wait
+    // is over, this many dots before the end of the stall - and that is the dot
+    // LCDC bit 1 is read on. See abandonObjectIfDisabled and
+    // docs/known-divergences.md, "LCDC bit 1 is read on the dot an object fetch
+    // begins, and a fetch that never begins charges only the wait".
+    static constexpr int kObjectFetchDots = 6;
+
     // Dots from the dot an object fetch reads its row out of VRAM to the dot
     // the pixel it pre-empts is drawn. Pan Docs, "Pixel FIFO", ends the object
     // fetch with "the lower address for the row of pixels of the target object
@@ -301,6 +314,23 @@ private:
     // height LCDC bit 2 gives now, and merges it into the pixels the queue is
     // about to emit. Not called at all if the fetch was cancelled.
     void fetchObjectRow(const Ppu& ppu);
+    // Pan Docs' condition on starting an object fetch, read on the dot that
+    // fetch begins rather than on the dot the object was triggered: the two are
+    // kObjectFetchDots dots apart at the end of a wait (see that constant and
+    // objectPenalty), and a bit 1 that is clear when the wait ends means the
+    // fetch never begins at all. Nothing of the object has been read by then, so
+    // there is nothing to skip; what there is instead is the rest of the stall,
+    // which is the object's own fetch and is not spent. Measured, on two bands of
+    // one reference whose waits are five dots and four - which is what tells this
+    // dot apart from any fixed offset from the trigger. See
+    // docs/known-divergences.md, "LCDC bit 1 is read on the dot an object fetch
+    // begins, and a fetch that never begins charges only the wait".
+    //
+    // An object whose wait is zero - a second object in a background tile that
+    // has already paid its term - begins its fetch on the dot it is triggered,
+    // where stepDot already reads bit 1 before triggering anything. So this is
+    // the same rule as that one, at a different dot, rather than a second rule.
+    void abandonObjectIfDisabled(const Ppu& ppu);
     // Pan Docs, "Pixel FIFO": "Object fetching may be canceled if LCDC.1 is
     // disabled while the PPU is fetching an object from OAM", and the last
     // chance for that is the dot the row's address is retrieved on. A cancelled
@@ -308,7 +338,12 @@ private:
     // lengthening mode 3 too - so only the merge is skipped. A Mealybug
     // Tearoom reference measures both halves of that: it clears bit 1 across
     // the middle of a fetch and sets it again before the pixel is drawn, so
-    // the emission-time test cannot account for what its photograph shows.
+    // the emission-time test cannot account for what its photograph shows. The
+    // same reference measures the dots from the other side, on the bands whose
+    // object is off the left edge: their fetches are cancelled on the very dot
+    // their row would have been read and their pixels still pay the whole
+    // penalty. A fetch that had not begun is abandoned instead and pays only the
+    // wait; see abandonObjectIfDisabled.
     void cancelObjectIfDisabled(const Ppu& ppu);
     // The dots line object `index` costs, given the running state of the
     // per-line penalty memo. Takes that state by reference so dotsRemaining

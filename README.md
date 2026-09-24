@@ -6,7 +6,7 @@ and measured, honestly, against the public test ROMs.
 <!-- scoreboard:start -->
 ```
 cpu instructions  ███████████████░   499 / 500
-test roms         ██████████████░░   152 / 165
+test roms         ██████████████░░   153 / 165
 ```
 <!-- scoreboard:end -->
 
@@ -42,11 +42,11 @@ that the CPU wasn't fitted to one suite), `cpu timing`, `cpu & interrupts`,
 
 What still fails is two separate things:
 
-- **`screen`, 4 of 30.** The picture is drawn, and dmg-acid2 — the best-known
-  single correctness image for a DMG — passes. The 26 that remain are 22
+- **`screen`, 18 of 30.** The picture is drawn, and dmg-acid2 — the best-known
+  single correctness image for a DMG — passes. The 12 that remain are 10
   Mealybug Tearoom tests, which change LCDC, the palettes, the scroll or WX
   part-way through a scanline and measure the result pixel by pixel, plus
-  `bully`, `strikethrough`, `ppu_scanline_bgp` and `stop_instr`. Each one's
+  `strikethrough` and `ppu_scanline_bgp`. Each one's
   pixel difference is listed, test by test, in the divergences document,
   along with the decisions behind the drawing; the group table below has one
   row per group, not per test.
@@ -79,7 +79,7 @@ The test-ROM line, group by group, with the first test each group fails:
 | timer | 13 / 13 |  |
 | mbc1 | 13 / 13 |  |
 | mbc2 / mbc5 | 15 / 15 |  |
-| screen | 17 / 30 | `mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb (DMG)`: differs from the reference in 124 pixels |
+| screen | 18 / 30 | `mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb (DMG)`: differs from the reference in 124 pixels |
 | mbc3 / rtc | 3 / 3 |  |
 
 Not counted (informational in the Shootout, no pass condition): `acid/which.gb (DMG)`, `daid/rom_and_ram.gb`.
