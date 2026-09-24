@@ -73,6 +73,7 @@ private:
     void tick();
     void tickDma();
     bool dmaBlocks(u16 address) const;
+    u8 dmaConflictValue(u16 address) const;
     u8 busRead(u16 address) const;
     u8 readIo(u16 address) const;
     void writeIo(u16 address, u8 value);
@@ -96,6 +97,7 @@ private:
     int dmaIndex_ = 0;      // next byte to copy, 0-159
     u16 dmaFrom_ = 0;
     u16 dmaCurrentSource_ = 0; // address the current M-cycle's byte came from; valid while dmaCopying_
+    u8 dmaCurrentByte_ = 0xFF; // the byte itself: what a conflicting read sees
     std::uint64_t cycles_ = 0;
     Cpu cpu_; // last: it holds a reference to this Bus
 };
