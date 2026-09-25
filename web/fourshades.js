@@ -126,14 +126,29 @@ class FourShades {
   // one. Until then the emulator runs and its samples are thrown away, which
   // is the right way round: the picture should not wait for permission.
   startAudio() {
-    if (this.audio) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
-    this.audio = new Ctx();
-    this.gain = this.audio.createGain();
-    this.gain.connect(this.audio.destination);
-    this.api.setSampleRate(this.audio.sampleRate);
-    this.playHead = this.audio.currentTime;
+    if (!this.audio) {
+      this.audio = new Ctx();
+      this.gain = this.audio.createGain();
+      this.gain.connect(this.audio.destination);
+      this.api.setSampleRate(this.audio.sampleRate);
+      this.playHead = this.audio.currentTime;
+    }
+
+    // Creating a context is not the same as starting one. Every path that
+    // opens a cartridge finishes *after* the gesture that began it -- a
+    // remembered cartridge comes back with no gesture at all, and a dropped
+    // file arrives in a FileReader callback -- so the context is born
+    // suspended and stays that way. It has to be resumed explicitly, and a
+    // resume only takes while a gesture is being handled, so every gesture
+    // tries again until one of them lands. Returning early once the context
+    // existed was the whole bug: the first, doomed attempt locked out all the
+    // later ones that would have worked.
+    if (this.audio.state !== 'running') {
+      const p = this.audio.resume();
+      if (p && p.catch) p.catch(() => { /* no gesture yet; the next one tries */ });
+    }
   }
 
   pumpAudio() {
@@ -145,8 +160,14 @@ class FourShades {
     if (count < 2) return;
 
     const frames = count >> 1;
+
+    // fs_audio_data returns a byte address, and HEAPF32 is indexed in floats,
+    // so the address has to be divided by four. Using it raw read from four
+    // times the right offset -- past the samples entirely -- which is why the
+    // browser build has been playing silence rather than sounding wrong.
     const ptr = this.api.audioData();
-    const src = this.m.HEAPF32.subarray(ptr, ptr + frames * 2);
+    const base = ptr >> 2;
+    const src = this.m.HEAPF32.subarray(base, base + frames * 2);
 
     const buffer = this.audio.createBuffer(2, frames, this.audio.sampleRate);
     const left = buffer.getChannelData(0);
@@ -182,6 +203,14 @@ class FourShades {
   // -- input --------------------------------------------------------------
 
   bindInput() {
+    // A first pass at the sound on any gesture at all. The handlers below only
+    // fire for keys the Game Boy has, and the page's own buttons live outside
+    // this class, so without this a click on the screen or on Pause would not
+    // count as the permission that Web Audio is waiting for.
+    for (const type of ['pointerdown', 'keydown', 'touchstart']) {
+      window.addEventListener(type, () => this.startAudio(), { passive: true });
+    }
+
     const set = (code, down) => {
       const bit = KEYS[code];
       if (bit === undefined) return false;
