@@ -291,12 +291,26 @@ class FourShades {
 
     let out = '';
     for (let i = 0; i < size; i++) out += String.fromCharCode(bytes[i]);
+    const encoded = btoa(out);
+
     try {
-      localStorage.setItem(this.saveKey(), btoa(out));
+      localStorage.setItem(this.saveKey(), encoded);
       this.savedSnapshot = bytes.slice();
       return true;
     } catch (e) {
-      return false;   // storage full, or blocked in a private window
+      // Out of room. The remembered cartridge is the largest thing this site
+      // keeps and the least important -- losing it costs one file-picker
+      // click, losing a save costs somebody's progress. So it goes first.
+      try {
+        localStorage.removeItem(this.cartKey());
+        localStorage.setItem(this.saveKey(), encoded);
+        this.savedSnapshot = bytes.slice();
+        this.say('save written — this browser is out of room, so the cartridge is not remembered');
+        return true;
+      } catch (e2) {
+        this.say('save could NOT be written: this browser\u2019s storage is full');
+        return false;
+      }
     }
   }
 
