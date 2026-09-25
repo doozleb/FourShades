@@ -203,8 +203,14 @@ EMSCRIPTEN_KEEPALIVE int fs_run_frame(int maxCycles) {
     const std::uint64_t deadline = gb->cycles() + static_cast<std::uint64_t>(maxCycles);
     while (gb->ppu().frameCount() == before && gb->cycles() < deadline) {
         gb->step();
+        // After each step, not once at the end of the frame. Apu::sample()
+        // answers "what is the level right now", so draining at the frame
+        // boundary emitted a whole frame of samples that all read the same
+        // instant: the output became a staircase changing 60 times a second
+        // instead of the machine's waveform. The desktop front end already
+        // says this in app/main.cpp; this side had it wrong.
+        drainAudio();
     }
-    drainAudio();
     return gb->ppu().frameCount() != before ? 1 : 0;
 }
 
