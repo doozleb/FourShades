@@ -241,6 +241,7 @@ class FourShades {
       return;
     }
     this.romName = name;
+    this.cartId = this.cartridgeId(bytes);
     this.paused = false;
     this.lastTime = null;
     this.savedSnapshot = null;
@@ -262,8 +263,28 @@ class FourShades {
     this.say(this.romName);
   }
 
+  // A save belongs to a cartridge, not to a filename. Keying on the file's
+  // name meant renaming a ROM orphaned its save, and two dumps of the same
+  // game with different names kept two unrelated saves.
+  //
+  // So the key comes out of the header, which is what a Game Boy itself reads:
+  // the title at 0x134-0x143 and the global checksum at 0x14E-0x14F. The
+  // checksum is there because the title field is 16 bytes and plenty of
+  // cartridges pad or truncate it the same way.
+  cartridgeId(bytes) {
+    if (!bytes || bytes.length < 0x150) return null;
+    let title = '';
+    for (let i = 0x134; i <= 0x143; i++) {
+      const c = bytes[i];
+      if (c === 0) break;
+      title += (c >= 32 && c < 127) ? String.fromCharCode(c) : '_';
+    }
+    const sum = ((bytes[0x14e] << 8) | bytes[0x14f]).toString(16).padStart(4, '0');
+    return (title.trim() || 'untitled') + '-' + sum;
+  }
+
   saveKey() {
-    return this.romName ? `fourshades:sav:${this.romName}` : null;
+    return this.cartId ? `fourshades:sav:${this.cartId}` : null;
   }
 
   // Battery saves live in localStorage, keyed by the ROM's name. It is the
@@ -320,6 +341,23 @@ class FourShades {
     if (!key) return false;
     let raw = null;
     try { raw = localStorage.getItem(key); } catch (e) { return false; }
+
+    // Saves used to be keyed on the ROM's filename. Anyone who played before
+    // that changed still has their save under the old key, so it moves across
+    // the first time they open the cartridge again. Without this their save
+    // would still be sitting in storage, simply never looked at.
+    if (!raw && this.romName) {
+      const legacy = `fourshades:sav:${this.romName}`;
+      if (legacy !== key) {
+        try {
+          raw = localStorage.getItem(legacy);
+          if (raw) {
+            localStorage.setItem(key, raw);
+            localStorage.removeItem(legacy);
+          }
+        } catch (e) { /* unreadable or full: fall through with what we have */ }
+      }
+    }
     if (!raw) return false;
     let s;
     try { s = atob(raw); } catch (e) { return false; }
