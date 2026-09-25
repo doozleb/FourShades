@@ -231,7 +231,7 @@ class FourShades {
 
   // -- cartridge ----------------------------------------------------------
 
-  load(bytes, name) {
+  load(bytes, name, opts) {
     const ptr = this.api.romBuffer(bytes.length);
     if (!ptr) { this.say('out of memory'); return; }
     this.m.HEAPU8.set(bytes, ptr);
@@ -243,9 +243,13 @@ class FourShades {
     this.romName = name;
     this.paused = false;
     this.lastTime = null;
-    this.restoreSave();
+    this.savedSnapshot = null;
+    const restored = this.restoreSave();
     this.startAudio();
-    this.say(name);
+    if (!opts || opts.remember !== false) this.rememberCartridge(bytes, name);
+    // Say whether a save came back. An invisible save that works and an
+    // invisible save that does not look identical from where you are sitting.
+    this.say(restored ? name + ' \u2014 save restored' : name);
   }
 
   reset() {
@@ -267,32 +271,55 @@ class FourShades {
   // rule: a save whose length does not match this cartridge is refused and
   // left alone rather than cropped, because it is somebody's only copy.
   persistSave() {
-    if (!this.api.hasBattery()) return;
+    if (!this.api.hasBattery()) return false;
     const size = this.api.ramSize();
-    if (!size) return;
+    if (!size) return false;
     const ptr = this.api.ramData();
-    if (!ptr) return;
+    if (!ptr) return false;
     const bytes = this.m.HEAPU8.subarray(ptr, ptr + size);
-    let s = '';
-    for (let i = 0; i < size; i++) s += String.fromCharCode(bytes[i]);
-    try { localStorage.setItem(this.saveKey(), btoa(s)); } catch (e) { /* full or blocked */ }
+
+    // Only write when the cartridge's RAM has actually changed. A game writes
+    // its save when you save, not continuously, so this is a write when there
+    // is something to write rather than one every few seconds regardless.
+    if (this.savedSnapshot && this.savedSnapshot.length === size) {
+      let changed = false;
+      for (let i = 0; i < size; i++) {
+        if (this.savedSnapshot[i] !== bytes[i]) { changed = true; break; }
+      }
+      if (!changed) return false;
+    }
+
+    let out = '';
+    for (let i = 0; i < size; i++) out += String.fromCharCode(bytes[i]);
+    try {
+      localStorage.setItem(this.saveKey(), btoa(out));
+      this.savedSnapshot = bytes.slice();
+      return true;
+    } catch (e) {
+      return false;   // storage full, or blocked in a private window
+    }
   }
 
   restoreSave() {
-    if (!this.api.hasBattery()) return;
+    if (!this.api.hasBattery()) return false;
     const key = this.saveKey();
-    if (!key) return;
+    if (!key) return false;
     let raw = null;
-    try { raw = localStorage.getItem(key); } catch (e) { return; }
-    if (!raw) return;
+    try { raw = localStorage.getItem(key); } catch (e) { return false; }
+    if (!raw) return false;
     let s;
-    try { s = atob(raw); } catch (e) { return; }
+    try { s = atob(raw); } catch (e) { return false; }
     const size = this.api.ramSize();
-    if (s.length !== size) return;       // not this cartridge's save
+    if (s.length !== size) return false;   // not this cartridge's save
     const buf = this.m._malloc(size);
     for (let i = 0; i < size; i++) this.m.HEAPU8[buf + i] = s.charCodeAt(i) & 0xff;
-    this.api.setRam(buf, size);
+    const ok = this.api.setRam(buf, size) === 1;
     this.m._free(buf);
+    if (ok) {
+      const p = this.api.ramData();
+      if (p) this.savedSnapshot = this.m.HEAPU8.slice(p, p + size);
+    }
+    return ok;
   }
 
   say(text) {
@@ -327,8 +354,72 @@ class FourShades {
 
   start() {
     requestAnimationFrame((t) => this.tick(t));
-    window.addEventListener('beforeunload', () => this.persistSave());
-    setInterval(() => this.persistSave(), 10000);
+
+    // beforeunload is not dependable -- browsers skip it, and on a phone it
+    // often never runs at all. pagehide and a hidden visibilitychange are the
+    // two that do fire when a tab goes away, so the save is written on all
+    // three rather than trusting the one everybody reaches for first.
+    const flush = () => this.persistSave();
+    window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
+    });
+    setInterval(flush, 5000);
+
+    this.restoreLastCartridge();
+  }
+
+  // ---- remembering the cartridge ----------------------------------------
+  //
+  // A browser cannot re-open a file you chose last time; that is the point of
+  // the file picker. Without this, a reload left you at an empty screen with a
+  // save sitting in storage that nothing could reach -- which reads exactly
+  // like the save not working.
+  //
+  // localStorage rather than IndexedDB. IndexedDB is the textbook choice for a
+  // blob this size, but a DMG cartridge is 32 KB to 2 MB and localStorage
+  // holds that; more to the point, this path can be exercised and IndexedDB
+  // cannot be in the setup these are verified in. When the cartridge does not
+  // fit, nothing is remembered and you pick the ROM yourself, exactly as
+  // before.
+
+  cartKey() {
+    return 'fourshades:rom';
+  }
+
+  rememberCartridge(bytes, name) {
+    let out = '';
+    const chunk = 0x8000;   // building one 2 MB string char by char is slow
+    for (let i = 0; i < bytes.length; i += chunk) {
+      out += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    try {
+      localStorage.setItem(this.cartKey(), JSON.stringify({ name: name, data: btoa(out) }));
+      return true;
+    } catch (e) {
+      // Quota, or a private window. Not worth telling anybody about: the page
+      // works, it just will not remember this one.
+      try { localStorage.removeItem(this.cartKey()); } catch (e2) { /* ignore */ }
+      return false;
+    }
+  }
+
+  restoreLastCartridge() {
+    let raw = null;
+    try { raw = localStorage.getItem(this.cartKey()); } catch (e) { return false; }
+    if (!raw) return false;
+    let rec;
+    try { rec = JSON.parse(raw); } catch (e) { return false; }
+    if (!rec || !rec.data) return false;
+    let bin;
+    try { bin = atob(rec.data); } catch (e) { return false; }
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
+    this.load(bytes, rec.name, { remember: false });
+    const drop = document.getElementById('drop');
+    if (drop) drop.classList.add('hidden');
+    return true;
   }
 }
 
