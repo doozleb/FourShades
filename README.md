@@ -1,6 +1,6 @@
 # FourShades
 
-A Game Boy emulator written in C++20, built in public with AI coding agents —
+A Game Boy emulator written in C++20, built in public —
 and measured, honestly, against the public test ROMs.
 
 <!-- scoreboard:start -->
@@ -128,23 +128,20 @@ spirit as the one above it.
 
 ## Why this exists
 
-On the [GSO benchmark][gso], coding agents resolve around **21% of Python
-tasks** and around **4% once C or C++ is involved**. Five times worse, on the
-same models, for the same class of problem.
+Almost any emulator can be made to boot a game and look right in a
+screenshot. Correct is a different property, and for an emulator it is the only
+interesting one.
 
-That gap is not mysterious once you have worked in it:
+Getting there is hard for three specific reasons:
 
 | | |
 |---|---|
-| **Hostile output** | A template instantiation error runs to hundreds of lines, almost all noise. Compilers were written for humans who can skim; an agent reads every token and burns its context on it. |
+| **Hostile output** | A template instantiation error runs to hundreds of lines, almost all noise, and the one line that matters is somewhere in the middle of it. |
 | **Broken loop** | Change a file in web work and see the result instantly. Here it compiles for minutes — and then still cannot press play and notice the sprite is one pixel out. |
-| **No prior art** | Vastly more public code is Python and JavaScript than cycle-accurate C++. The model has read far less of what you are asking it to write. |
+| **Nothing to copy** | Cycle-accurate behaviour is not in a tutorial. It is in hardware documentation, in test ROMs written by people who measured a real console, and in the disagreements between the two. |
 
-Almost everything written about agentic development covers React components and
-Python scripts. The place these tools measurably struggle most is the place
-almost nobody is documenting.
-
-This repository is an attempt to document it properly.
+So the only honest answer is to stop arguing about it and publish the number.
+This repository is an attempt to do that properly.
 
 ## Why a Game Boy emulator
 
@@ -173,14 +170,14 @@ Every feature follows the same loop, and the artefacts are committed:
    it failed.
 2. **A plan** — broken into tasks small enough that a reviewer can reject one
    without rejecting the rest.
-3. **A failing test, observed failing.** Not written and assumed. Agents produce
-   code that looks right and does not work, and reading it will not reliably
-   tell you which is which.
+3. **A failing test, observed failing.** Not written and assumed. Code that
+   looks right and does not work is the normal case down here, and reading it
+   will not reliably tell you which is which.
 4. **Implementation**, then the test green, then a commit.
-5. **Review** by something other than whatever wrote it, pointing at file and
-   line — with its findings treated as claims to verify, not as facts.
+5. **Review** with fresh eyes, pointing at file and line — with its findings
+   treated as claims to verify, not as facts.
 
-Specs and plans live in `docs/superpowers/` and are published rather than
+Specs and plans live in `docs/specs/` and `docs/plans/`, published rather than
 hidden. They are the receipts.
 
 ## What gets published
@@ -188,8 +185,8 @@ hidden. They are the receipts.
 Every claim ships with its artefact: the spec, the diff, the commit, the test
 output. **If the number goes down, it gets published going down.**
 
-The failures are the useful part. Anyone can write a post about an agent
-one-shotting a feature; far fewer will show you the three hours it spent
+The failures are the useful part. Anyone can write a post about the feature
+that worked first time; far fewer will show you the three hours spent
 confidently fixing the wrong file.
 
 Write-ups are at **[doozleb.com/posts](https://doozleb.com/posts/)**, and the
@@ -205,11 +202,11 @@ tools/sst/                the SingleStepTests harness and pinned-data manifest
 tools/roms/               the test-ROM harness, its pinned test list and manifest
 tools/scoreboard.py       turns a test run into the scoreboard above
 third_party/              vendored doctest, nlohmann/json and SDL3, hash-pinned
-docs/superpowers/specs/   the reasoning behind each piece
-docs/superpowers/plans/   task-by-task implementation plans
+docs/specs/               the reasoning behind each piece
+docs/plans/               task-by-task implementation plans
 docs/known-divergences.md where a test and the hardware documentation disagree
+docs/engineering-rules.md the rules this repository is held to
 scoreboard.json           the scoreboard above, as data (generated)
-CLAUDE.md                 rules for the AI agents working in this repo
 ```
 
 ## Building
@@ -284,12 +281,5 @@ needs and which two are decided rather than open.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
-
-## A note on authorship
-
-The code in this repository is written with AI coding agents, directed
-spec-first and test-first, and reviewed before it lands. Commits carry
-`Co-Authored-By` trailers where that applies. That is the subject of the project
-rather than a disclaimer at the bottom of it.
 
 [gso]: https://arxiv.org/abs/2505.23671

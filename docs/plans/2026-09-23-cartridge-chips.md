@@ -1,7 +1,5 @@
 # Piece 4: Cartridge Chips Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Support MBC2, MBC3 (with its real-time clock), MBC5 and MBC1
 multicart cartridges, so that 20 more test ROMs pass and Pokémon loads.
 
@@ -15,7 +13,7 @@ time enters only through the save file, in `app/`.
 Windows only. `cmake` and `cl` are not on PATH — every build command goes
 through `tools\dev.cmd`.
 
-**Spec:** `docs/superpowers/specs/2026-09-23-cartridge-chips-design.md`.
+**Spec:** `docs/specs/2026-09-23-cartridge-chips-design.md`.
 Read it before Task 1; it is the authority on behaviour and this plan is the
 authority on sequence.
 

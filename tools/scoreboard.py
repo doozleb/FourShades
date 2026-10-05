@@ -20,7 +20,7 @@ GROUPS_START, GROUPS_END = "<!-- groups:start -->", "<!-- groups:end -->"
 BAR = 16
 CPU_FILES = 500
 # The Shootout's 167 DMG tests, less the 2 it treats as informational (no pass
-# condition); see docs/superpowers/specs/2026-09-11-machine-test-roms-design.md
+# condition); see docs/specs/2026-09-11-machine-test-roms-design.md
 ROM_TESTS = 165
 INFORMATIONAL_TESTS = 2
 

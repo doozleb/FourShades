@@ -1,7 +1,5 @@
 # Piece 6, Plan 1: Power-on, STOP and the Boot State
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Claim the three remaining failures that are not mid-scanline
 rendering problems — `boot_hwio`, `daid/stop_instr` and `ashiepaws/bully` —
 taking the suite from 138/165 to **141/165** before anything touches the
@@ -13,8 +11,8 @@ STOP. No change to the fetcher, the FIFO or the window.
 **Tech Stack:** C++20, MSVC (Visual Studio 2026), CMake + Ninja, doctest.
 Windows only; every build command goes through `tools\dev.cmd`.
 
-**Spec:** `docs/superpowers/specs/2026-09-23-screen-design.md`.
-**Evidence:** `.superpowers/sdd/screen-investigation.md` — every fix in this
+**Spec:** `docs/specs/2026-09-23-screen-design.md`.
+**Evidence:** `docs/investigations/screen-investigation.md` — every fix in this
 plan was measured there and then reverted. Read the relevant section before
 the task that uses it.
 

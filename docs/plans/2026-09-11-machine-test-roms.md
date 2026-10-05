@@ -1,7 +1,5 @@
 # FourShades piece 2: the machine and the test-ROM scoreboard. Implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** A headless Game Boy (memory map, MBC1 cartridge, timer, interrupts,
 serial, OAM DMA, LCD timing skeleton, power-on state) plus a runner that scores
 it against the Shootout's 167 original-Game-Boy test ROMs and publishes
@@ -18,7 +16,7 @@ from each author's own signal.
 **Tech Stack:** C++20, MSVC, CMake + Ninja via `tools\dev.cmd`, doctest,
 nlohmann/json (harness only), Python 3.12 standard library.
 
-**Spec:** `docs/superpowers/specs/2026-09-11-machine-test-roms-design.md`
+**Spec:** `docs/specs/2026-09-11-machine-test-roms-design.md`
 
 ## Global Constraints
 
@@ -379,7 +377,7 @@ Expected:
 
 ```powershell
 git add src/core/Bus.h src/core/Cpu.h src/core/Cpu.cpp tools/sst/RecordingBus.h tests/test_cpu_interrupts.cpp
-git commit -m "feat(cpu): interrupt dispatch, HALT wake-up and the HALT bug" -m "Co-Authored-By: <your model> <noreply@anthropic.com>"
+git commit -m "feat(cpu): interrupt dispatch, HALT wake-up and the HALT bug"
 ```
 
 ---
@@ -723,7 +721,7 @@ Expected: doctest `test cases: 47 | 47 passed` (39 + 8), no build warnings, and 
 
 ```powershell
 git add src/core/Cartridge.h src/core/Cartridge.cpp CMakeLists.txt tests/test_cartridge.cpp
-git commit -m "feat(core): cartridge loading with plain ROM and MBC1" -m "Co-Authored-By: <your model> <noreply@anthropic.com>"
+git commit -m "feat(core): cartridge loading with plain ROM and MBC1"
 ```
 
 ---
@@ -1001,7 +999,7 @@ Expected: doctest `test cases: 55 | 55 passed` (47 + 8), no warnings, and the is
 
 ```powershell
 git add src/core/Timer.h src/core/Timer.cpp CMakeLists.txt tests/test_timer.cpp
-git commit -m "feat(core): timer with falling-edge increments and the TIMA reload delay" -m "Co-Authored-By: <your model> <noreply@anthropic.com>"
+git commit -m "feat(core): timer with falling-edge increments and the TIMA reload delay"
 ```
 
 ---
@@ -1360,7 +1358,7 @@ Expected: doctest `test cases: 61 | 61 passed` (55 + 6), no warnings, and the is
 
 ```powershell
 git add src/core/Serial.h src/core/Serial.cpp src/core/LcdTiming.h src/core/LcdTiming.cpp CMakeLists.txt tests/test_serial.cpp tests/test_lcd_timing.cpp
-git commit -m "feat(core): serial port and an LCD timing skeleton" -m "Co-Authored-By: <your model> <noreply@anthropic.com>"
+git commit -m "feat(core): serial port and an LCD timing skeleton"
 ```
 
 ---
@@ -1832,7 +1830,7 @@ If the DMA test's timing assertions fail by a cycle, adjust only `tickDma`/`dmaB
 
 ```powershell
 git add src/core/Interrupts.h src/core/GameBoy.h src/core/GameBoy.cpp CMakeLists.txt tests/test_gameboy.cpp
-git commit -m "feat(core): GameBoy memory map with interrupts, DMA and DMG power-on state" -m "Co-Authored-By: <your model> <noreply@anthropic.com>"
+git commit -m "feat(core): GameBoy memory map with interrupts, DMA and DMG power-on state"
 ```
 
 ---
@@ -2194,7 +2192,7 @@ If a download fails, rerun the same command; it resumes. If the file count isn't
 
 ```powershell
 git add tools/roms/make_test_list.py tools/roms/fetch_roms.py tools/roms/tests.json tools/roms/manifest.sha256 .gitignore .gitattributes
-git commit -m "feat(roms): pin the Shootout's 167 DMG tests and fetch them hash-checked" -m "Co-Authored-By: <your model> <noreply@anthropic.com>"
+git commit -m "feat(roms): pin the Shootout's 167 DMG tests and fetch them hash-checked"
 ```
 
 ---
@@ -2847,7 +2845,7 @@ Also check the data guard: append a byte to one downloaded ROM, confirm the runn
 
 ```powershell
 git add tools/roms/RomTests.h tools/roms/RomTests.cpp tools/roms/Detectors.h tools/roms/Detectors.cpp tools/roms/RomRun.h tools/roms/RomRun.cpp tools/roms/rom_runner.cpp tools/roms/CMakeLists.txt CMakeLists.txt tests/test_rom_harness.cpp
-git commit -m "feat(roms): headless test-ROM runner with Blargg and Mooneye detectors" -m "Co-Authored-By: <your model> <noreply@anthropic.com>"
+git commit -m "feat(roms): headless test-ROM runner with Blargg and Mooneye detectors"
 ```
 
 ---
@@ -2856,7 +2854,7 @@ git commit -m "feat(roms): headless test-ROM runner with Blargg and Mooneye dete
 
 **Files:**
 - Modify (replace whole file): `tools/scoreboard.py`, `tools/test_scoreboard.py`
-- Modify: `tools/check_core_isolation.py`, `.github/workflows/ci.yml`, `README.md`, `CLAUDE.md`
+- Modify: `tools/check_core_isolation.py`, `.github/workflows/ci.yml`, `README.md`, `docs/engineering-rules.md`
 - Modify (generated): `scoreboard.json`, the README blocks
 
 **Interfaces:**
@@ -3013,7 +3011,7 @@ START, END = "<!-- scoreboard:start -->", "<!-- scoreboard:end -->"
 GROUPS_START, GROUPS_END = "<!-- groups:start -->", "<!-- groups:end -->"
 BAR = 16
 CPU_FILES = 500
-ROM_TESTS = 167  # the Shootout's DMG tests; see docs/superpowers/specs/2026-09-11-machine-test-roms-design.md
+ROM_TESTS = 167  # the Shootout's DMG tests; see docs/specs/2026-09-11-machine-test-roms-design.md
 
 
 def load_sst(path):
@@ -3149,7 +3147,7 @@ Update the module docstring's last sentence to: `That keeps it impossible, not j
 
 Prove it can fail: temporarily add `// 0xDE, 0xB0, 0x61` to the end of `src/core/Types.h`, run the check (expect `core isolation check failed`), then remove the line (expect `passed`), and confirm `git diff --quiet -- src/core/Types.h`.
 
-- [ ] **Step 5: Put the group-table markers in the README, and update CI and CLAUDE.md**
+- [ ] **Step 5: Put the group-table markers in the README, and update CI and docs/engineering-rules.md**
 
 In `README.md`, directly after the paragraph that ends `starts moving in piece 2.` (before the **Correction** paragraph), insert:
 
@@ -3171,7 +3169,7 @@ python tools/roms/fetch_roms.py            # the test ROMs, pinned and hash-chec
 
 In the **Repository layout** block, add a line `tools/roms/                the test-ROM harness, its pinned test list and manifest` after the `tools/sst/` line.
 
-In `CLAUDE.md`:
+In `docs/engineering-rules.md`:
 - change the scoreboard command to `python tools/scoreboard.py update build/sst-results.json build/rom-results.json`;
 - add `python tools/roms/fetch_roms.py` and `.\build\release\tools\roms\rom_runner.exe` to the Building list;
 - add these two bullets under **Never**:
@@ -3229,8 +3227,8 @@ Expected:
 - [ ] **Step 7: Commit, push, and confirm CI**
 
 ```powershell
-git add tools/scoreboard.py tools/test_scoreboard.py tools/check_core_isolation.py .github/workflows/ci.yml README.md CLAUDE.md scoreboard.json
-git commit -m "feat: test-ROM scoreboard with a per-group table, checked in CI" -m "Co-Authored-By: <your model> <noreply@anthropic.com>"
+git add tools/scoreboard.py tools/test_scoreboard.py tools/check_core_isolation.py .github/workflows/ci.yml README.md docs/engineering-rules.md scoreboard.json
+git commit -m "feat: test-ROM scoreboard with a per-group table, checked in CI"
 git push origin main
 ```
 
@@ -3242,7 +3240,7 @@ Poll `https://api.github.com/repos/doozleb/FourShades/commits/<HEAD sha>/check-r
 
 These two tasks can't be written as code in advance, because the failures are
 whatever the test ROMs reveal. Each is a disciplined debugging task. It uses
-the superpowers:systematic-debugging skill: no fix without a named root cause.
+systematic debugging: no fix without a named root cause.
 
 **The rules for both tasks:**
 - **Scope:**
@@ -3300,7 +3298,7 @@ the superpowers:systematic-debugging skill: no fix without a named root cause.
 ### Task 11: Close piece 2
 
 **Files:**
-- Modify: `README.md` (status paragraph only, never the generated blocks), `docs/known-divergences.md` (if Tasks 9–10 added entries), `docs/superpowers/specs/2026-09-11-machine-test-roms-design.md` (Status line)
+- Modify: `README.md` (status paragraph only, never the generated blocks), `docs/known-divergences.md` (if Tasks 9–10 added entries), `docs/specs/2026-09-11-machine-test-roms-design.md` (Status line)
 
 - [ ] **Step 1: Check every success criterion from the spec, with actual output**
 
@@ -3329,8 +3327,8 @@ Record:
 - [ ] **Step 4: Commit, push, confirm CI green**
 
 ```powershell
-git add README.md docs/superpowers/specs/2026-09-11-machine-test-roms-design.md docs/known-divergences.md
-git commit -m "docs: piece 2 complete" -m "Co-Authored-By: <your model> <noreply@anthropic.com>"
+git add README.md docs/specs/2026-09-11-machine-test-roms-design.md docs/known-divergences.md
+git commit -m "docs: piece 2 complete"
 git push origin main
 ```
 

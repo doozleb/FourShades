@@ -1,7 +1,5 @@
 # Piece 6, Plan 3: The Residuals
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Take the suite from **149/165** as far as the evidence reaches.
 Realistically **154**, possibly **158**. The ceiling is **163**, and 165 is
 not available.
@@ -11,8 +9,8 @@ measured what each remaining failure needs; two of them need something this
 repository does not contain, and they are carried as questions rather than
 scheduled as deliverables.
 
-**Spec:** `docs/superpowers/specs/2026-09-23-screen-design.md`.
-**Evidence:** `.superpowers/sdd/task-11-report.md` — its triage is the
+**Spec:** `docs/specs/2026-09-23-screen-design.md`.
+**Evidence:** `docs/investigations/task-11-report.md` — its triage is the
 reason this plan is ordered the way it is. Read it before Task 1.
 
 ## Where this stands

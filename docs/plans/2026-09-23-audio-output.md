@@ -1,7 +1,5 @@
 # Piece 5b: Audible Output Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Play the APU's output through the speakers, and prove by
 measurement that what comes out is the pitch the registers asked for.
 
@@ -13,7 +11,7 @@ core is untouched: it already answers `Apu::sample()` and has no sample rate.
 **Tech Stack:** C++20, MSVC, CMake + Ninja, doctest, SDL3 3.4.16 (vendored,
 gitignored, fetched by `third_party/sdl/fetch_sdl.py`).
 
-**Spec:** `docs/superpowers/specs/2026-09-23-audio-output-design.md`.
+**Spec:** `docs/specs/2026-09-23-audio-output-design.md`.
 
 ## Global Constraints
 

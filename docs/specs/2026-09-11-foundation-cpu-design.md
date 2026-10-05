@@ -29,7 +29,7 @@ ROMs 0 / 1300" line stays at 0 until piece 2.
 - The SingleStepTests runner, a results file, and a script that generates the
   scoreboard.
 - doctest unit tests, and GitHub Actions CI on Windows.
-- `CLAUDE.md` rules for the agents working in the repo.
+- `docs/engineering-rules.md` rules for the implementers working in the repo.
 
 **Out (later pieces):** the real memory map, interrupt *delivery* (nothing
 raises interrupts yet), timers, serial, graphics, window, sound, cartridges,
@@ -136,7 +136,7 @@ as failing. A post explains why.
   runs the runner, then `scoreboard.py --check`. A commit whose README or
   `scoreboard.json` claims a score the code doesn't produce, higher or lower,
   fails CI.
-- **Agent rules (`CLAUDE.md`).** Never edit `tools/sst/data/`,
+- **Engineering rules (`docs/engineering-rules.md`).** Never edit `tools/sst/data/`,
   `manifest.sha256` or the scoreboard block by hand. Never make core code
   depend on test names, files or the harness. Never special-case a test. Record
   disagreements with a test in `known-divergences.md` instead.
@@ -194,6 +194,6 @@ Target: under 10 minutes.
 | Risk | Response |
 |---|---|
 | The JSMoo model of HALT, STOP or idle-cycle addresses differs from hardware | Follow Pan Docs, document the divergence, keep it visible on the scoreboard |
-| Agents fit the CPU to the tests instead of the hardware | Hash-pinned data, CI score check, structural check, Blargg cross-check in piece 2 |
+| Implementers fit the CPU to the tests instead of the hardware | Hash-pinned data, CI score check, structural check, Blargg cross-check in piece 2 |
 | MSVC environment not on PATH (no `cmake`/`cl` in a normal shell) | Presets plus a VS developer shell. The plan runs the build through `vcvars64.bat`. |
 | The 167 MB download is slow or flaky in CI | Cache by commit hash. The fetch retries, then fails clearly. |

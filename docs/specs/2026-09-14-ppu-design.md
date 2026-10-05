@@ -132,7 +132,7 @@ during mode 2. Blargg's `oam_bug` ROMs arbitrate; `3-non_causes` and
   the produced frame as a PNG under `build/frames/`, so a difference can be
   looked at rather than guessed at.
 - The comparator is exact: no tolerance, no fuzz. Loosening it is forbidden by
-  `CLAUDE.md`.
+  `docs/engineering-rules.md`.
 
 ## Testing
 

@@ -1,4 +1,4 @@
-# FourShades: rules for agents
+# FourShades: engineering rules
 
 FourShades is a Game Boy emulator built in public. Its credibility is the
 scoreboard, so these rules are not negotiable.

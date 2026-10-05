@@ -1,7 +1,5 @@
 # FourShades piece 1: foundation and SM83 CPU. Implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** A cycle-accurate SM83 CPU core that passes the SingleStepTests suite
 (500 instruction files × 1,000 tests), with a hash-pinned test harness, a
 generated scoreboard, and Windows CI that recomputes the score on every push.
@@ -18,7 +16,7 @@ differs from a fresh run.
 (presets, minimum 3.25) + Ninja, doctest 2.4.11, nlohmann/json 3.12.0,
 Python 3.12 (standard library only), GitHub Actions `windows-latest`.
 
-**Spec:** `docs/superpowers/specs/2026-09-11-foundation-cpu-design.md`
+**Spec:** `docs/specs/2026-09-11-foundation-cpu-design.md`
 
 ## Global Constraints
 
@@ -32,7 +30,7 @@ Python 3.12 (standard library only), GitHub Actions `windows-latest`.
 - Cycle comparison: read (`r-m`) and write (`-wm`) cycles must match kind, address and value. Idle (`---`) cycles match on kind only.
 - Never hand-edit `tools/sst/data/`, `tools/sst/manifest.sha256`, `scoreboard.json` or the README scoreboard block.
 - If a test disagrees with Pan Docs (https://gbdev.io/pandocs/), follow Pan Docs, leave the test failing, and record it in `docs/known-divergences.md`.
-- Commits: stage explicit paths only (never `git add -A` or `git add .`), and end every message with `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
+- Commits: stage explicit paths only (never `git add -A` or `git add .`).
 - The network on this machine drops connections intermittently. Retry a failed download before concluding anything.
 
 ## Facts about the test data (verified 2026-09-11 by scanning all 500 files)
@@ -97,7 +95,7 @@ Python 3.12 (standard library only), GitHub Actions `windows-latest`.
 | `tools/sst/sst_runner.cpp`, `tools/sst/CMakeLists.txt` | the runner executable; harness targets | 4, 5, 6 |
 | `tools/scoreboard.py`, `tools/test_scoreboard.py` | results → README + scoreboard.json, with `check` | 7 |
 | `tools/check_core_isolation.py` | structural check on `src/core` | 7 |
-| `CLAUDE.md`, `docs/known-divergences.md`, `README.md`, `scoreboard.json` | agent rules, divergences, public scoreboard | 7, 14 |
+| `docs/engineering-rules.md`, `docs/known-divergences.md`, `README.md`, `scoreboard.json` | engineering rules, divergences, public scoreboard | 7, 14 |
 | `.github/workflows/ci.yml` | Windows CI | 8 |
 | `tests/*.cpp` | doctest unit tests (all globbed into one executable) | 1-5 |
 
@@ -395,7 +393,7 @@ Expected: `100% tests passed, 0 tests failed out of 1`.
 
 ```powershell
 git add .gitignore CMakeLists.txt CMakePresets.json tools/dev.cmd third_party/README.md third_party/doctest/doctest.h third_party/nlohmann/json.hpp src/core/Types.h src/core/Registers.h tests/test_main.cpp tests/test_registers.cpp
-git commit -m "build: CMake/Ninja/MSVC skeleton, vendored headers, register file" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "build: CMake/Ninja/MSVC skeleton, vendored headers, register file"
 ```
 
 ---
@@ -587,7 +585,7 @@ Expected: `100% tests passed`.
 
 ```powershell
 git add src/core/Bus.h tools/sst/SstTypes.h tools/sst/RecordingBus.h tests/test_recording_bus.cpp
-git commit -m "feat: Bus interface and recording bus for the test harness" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat: Bus interface and recording bus for the test harness"
 ```
 
 ---
@@ -1058,7 +1056,7 @@ Expected: `100% tests passed`.
 
 ```powershell
 git add CMakeLists.txt src/core/Cpu.h src/core/Cpu.cpp src/core/CpuLoads8.cpp src/core/CpuAlu8.cpp src/core/CpuWide.cpp src/core/CpuControl.cpp src/core/CpuCb.cpp tests/test_cpu.cpp
-git commit -m "feat: CPU skeleton with cycle-stepped fetch, EI delay, HALT/STOP and illegal-opcode lock" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat: CPU skeleton with cycle-stepped fetch, EI delay, HALT/STOP and illegal-opcode lock"
 ```
 
 ---
@@ -1850,7 +1848,7 @@ If a file still fails after its six attempts, just rerun the same command: files
 
 ```powershell
 git add .gitattributes CMakeLists.txt tools/sst/CMakeLists.txt tools/sst/Sha256.h tools/sst/Sha256.cpp tools/sst/Manifest.h tools/sst/Manifest.cpp tools/sst/Selection.h tools/sst/Selection.cpp tools/sst/fetch_sst.py tools/sst/manifest.sha256 tests/test_sha256.cpp tests/test_manifest.cpp tests/test_selection.cpp
-git commit -m "feat: pin SingleStepTests by commit and SHA-256 manifest" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat: pin SingleStepTests by commit and SHA-256 manifest"
 ```
 
 ---
@@ -2431,7 +2429,7 @@ Expected: `100% tests passed`.
 
 ```powershell
 git add tools/sst/CMakeLists.txt tools/sst/SstLoader.h tools/sst/SstLoader.cpp tools/sst/SstCompare.h tools/sst/SstCompare.cpp tools/sst/SstRun.h tools/sst/SstRun.cpp tests/sst_fixtures.h tests/test_sst_loader.cpp tests/test_sst_run.cpp
-git commit -m "feat: strict test loader, comparator and single-test runner, with tests of the tester" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat: strict test loader, comparator and single-test runner, with tests of the tester"
 ```
 
 ---
@@ -2656,15 +2654,15 @@ Expected: `data check: v1/00.json: hash does not match the manifest`, then `refu
 
 ```powershell
 git add tools/sst/CMakeLists.txt tools/sst/sst_runner.cpp
-git commit -m "feat: SingleStepTests runner; first score 5/500" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat: SingleStepTests runner; first score 5/500"
 ```
 
 ---
 
-### Task 7: Scoreboard, isolation check, agent rules, README
+### Task 7: Scoreboard, isolation check, engineering rules, README
 
 **Files:**
-- Create: `tools/scoreboard.py`, `tools/test_scoreboard.py`, `tools/check_core_isolation.py`, `CLAUDE.md`, `docs/known-divergences.md`
+- Create: `tools/scoreboard.py`, `tools/test_scoreboard.py`, `tools/check_core_isolation.py`, `docs/engineering-rules.md`, `docs/known-divergences.md`
 - Create (generated): `scoreboard.json`
 - Modify: `README.md`
 
@@ -2932,12 +2930,12 @@ Expected: `OK` (6 tests), then `core isolation check passed`.
 
 Prove the isolation check can fail: temporarily add the line `// json` to the end of `src/core/Types.h`, run the check, and expect `core isolation check failed:` naming `src/core/Types.h`. Then remove the line and confirm it passes again.
 
-- [ ] **Step 5: Agent rules and the divergence log**
+- [ ] **Step 5: Engineering rules and the divergence log**
 
-`CLAUDE.md`:
+`docs/engineering-rules.md`:
 
 ```markdown
-# FourShades: rules for agents
+# FourShades: rules for implementers
 
 FourShades is a Game Boy emulator built in public. Its credibility is the
 scoreboard, so these rules are not negotiable.
@@ -3025,8 +3023,8 @@ src/core/                 the emulator core: CPU and bus (no window, no files)
 tests/                    unit tests (doctest)
 tools/sst/                the SingleStepTests harness and pinned-data manifest
 tools/scoreboard.py       turns a test run into the scoreboard above
-docs/superpowers/specs/   the reasoning behind each piece
-docs/superpowers/plans/   task-by-task implementation plans
+docs/specs/   the reasoning behind each piece
+docs/plans/   task-by-task implementation plans
 docs/known-divergences.md where a test and the hardware documentation disagree
 ```
 
@@ -3066,8 +3064,8 @@ Expected: `scoreboard updated: cpu instructions 5 / 500`, then `scoreboard match
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add tools/scoreboard.py tools/test_scoreboard.py tools/check_core_isolation.py CLAUDE.md docs/known-divergences.md README.md scoreboard.json
-git commit -m "feat: generated scoreboard with CI check, core isolation check, agent rules" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git add tools/scoreboard.py tools/test_scoreboard.py tools/check_core_isolation.py docs/engineering-rules.md docs/known-divergences.md README.md scoreboard.json
+git commit -m "feat: generated scoreboard with CI check, core isolation check, engineering rules"
 ```
 
 ---
@@ -3139,7 +3137,7 @@ jobs:
 
 ```powershell
 git add .github/workflows/ci.yml
-git commit -m "ci: build, test and recompute the scoreboard on Windows" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "ci: build, test and recompute the scoreboard on Windows"
 git push origin main
 ```
 
@@ -3275,7 +3273,7 @@ Expected: `CPU instructions: 90 / 500 passing`, `scoreboard updated: cpu instruc
 
 ```powershell
 git add src/core/CpuLoads8.cpp README.md scoreboard.json
-git commit -m "feat(cpu): 8-bit loads; CPU 90/500" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat(cpu): 8-bit loads; CPU 90/500"
 ```
 
 ---
@@ -3482,7 +3480,7 @@ Expected: `CPU instructions: 186 / 500 passing`.
 
 ```powershell
 git add src/core/CpuAlu8.cpp README.md scoreboard.json
-git commit -m "feat(cpu): 8-bit arithmetic, logic and A rotates; CPU 186/500" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat(cpu): 8-bit arithmetic, logic and A rotates; CPU 186/500"
 ```
 
 ---
@@ -3624,7 +3622,7 @@ Expected: `CPU instructions: 214 / 500 passing`.
 
 ```powershell
 git add src/core/CpuWide.cpp README.md scoreboard.json
-git commit -m "feat(cpu): 16-bit loads, stack and arithmetic; CPU 214/500" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat(cpu): 16-bit loads, stack and arithmetic; CPU 214/500"
 ```
 
 ---
@@ -3762,7 +3760,7 @@ Expected: `CPU instructions: 244 / 500 passing`. Every base opcode now passes. O
 
 ```powershell
 git add src/core/CpuControl.cpp README.md scoreboard.json
-git commit -m "feat(cpu): jumps, calls, returns and RST; CPU 244/500" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat(cpu): jumps, calls, returns and RST; CPU 244/500"
 ```
 
 ---
@@ -3890,7 +3888,7 @@ Expected: `CPU instructions: 500 / 500 passing  (0 unimplemented, …)`.
 
 ```powershell
 git add src/core/CpuCb.cpp tests/test_sst_run.cpp README.md scoreboard.json
-git commit -m "feat(cpu): CB-prefixed instructions; CPU 500/500" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat(cpu): CB-prefixed instructions; CPU 500/500"
 ```
 
 ---
@@ -3975,7 +3973,7 @@ Expected: `scoreboard does not match the test results: README.md scoreboard bloc
 ```powershell
 git add docs/known-divergences.md README.md scoreboard.json src/core/Cpu.cpp
 git status --short
-git commit -m "docs: check HALT/STOP against Pan Docs; piece 1 complete" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "docs: check HALT/STOP against Pan Docs; piece 1 complete"
 git push origin main
 ```
 

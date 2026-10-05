@@ -1,7 +1,5 @@
 # Piece 6, Plan 2: The Window, the Fetch Dot, and the Objects
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Claim the twenty-four remaining `screen` failures, taking the suite
 from **141/165** toward **164/165**.
 
@@ -13,8 +11,8 @@ window fetches, and object fetches as cancellable steps.
 **Tech Stack:** C++20, MSVC, CMake + Ninja, doctest. Windows only; every
 build command goes through `tools\dev.cmd`.
 
-**Spec:** `docs/superpowers/specs/2026-09-23-screen-design.md`.
-**Evidence:** `.superpowers/sdd/screen-investigation.md` — read the section
+**Spec:** `docs/specs/2026-09-23-screen-design.md`.
+**Evidence:** `docs/investigations/screen-investigation.md` — read the section
 for your group before starting. Its groupings and pixel counts were measured
 by running the ROMs, not inferred.
 

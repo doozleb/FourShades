@@ -16,7 +16,7 @@ This piece is the end of the scoreboard.
 
 Scouted before this spec was written, with every hypothesis measured and
 reverted rather than guessed. The investigation is at
-`.superpowers/sdd/screen-investigation.md`; its grouping, by root cause
+`docs/investigations/screen-investigation.md`; its grouping, by root cause
 rather than by filename:
 
 | group | tests | differing pixels | what it is |
